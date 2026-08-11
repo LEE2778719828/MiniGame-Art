@@ -117,47 +117,7 @@ void ANightCourseHost::BeginPlay()
 
 void ANightCourseHost::BuildPlayableStage()
 {
-	UWorld* World = GetWorld();
-	if (!World || !StageCubeMesh)
-	{
-		return;
-	}
-
-	UMaterialInterface* Mat = StageMaterial.Get();
-	using namespace NightCourseStage_Private;
-
-	const float FirstNode = Config ? Config->FirstNodeDistance : 500.f;
-	const float CourseLen = Config
-		? (Config->FirstNodeDistance + Config->NodeSpacing * FMath::Max(Config->NodeCount, 1) + 400.f)
-		: 4000.f;
-	const float MidX = CourseLen * 0.5f;
-
-	SpawnBox(World, StageCubeMesh, Mat, FVector(MidX, 0.f, -20.f), FVector(CourseLen / 100.f, 5.f, 0.35f),
-		FLinearColor(0.22f, 0.32f, 0.55f), TEXT("G1_Stage_Floor"));
-
-	SpawnBox(World, StageCubeMesh, Mat, FVector(MidX, -280.f, 40.f), FVector(CourseLen / 100.f, 0.25f, 1.0f),
-		FLinearColor(0.35f, 0.7f, 1.0f), TEXT("G1_Stage_RailL"));
-	SpawnBox(World, StageCubeMesh, Mat, FVector(MidX, 280.f, 40.f), FVector(CourseLen / 100.f, 0.25f, 1.0f),
-		FLinearColor(0.35f, 0.7f, 1.0f), TEXT("G1_Stage_RailR"));
-
-	// Gate marks the first beat ahead of the player.
-	SpawnBox(World, StageCubeMesh, Mat, FVector(FirstNode, -180.f, 120.f), FVector(0.25f, 0.25f, 2.6f),
-		FLinearColor(1.f, 0.85f, 0.25f), TEXT("G1_Stage_GateL"));
-	SpawnBox(World, StageCubeMesh, Mat, FVector(FirstNode, 180.f, 120.f), FVector(0.25f, 0.25f, 2.6f),
-		FLinearColor(1.f, 0.85f, 0.25f), TEXT("G1_Stage_GateR"));
-	SpawnBox(World, StageCubeMesh, Mat, FVector(FirstNode, 0.f, 250.f), FVector(0.25f, 3.8f, 0.25f),
-		FLinearColor(1.f, 0.9f, 0.35f), TEXT("G1_Stage_GateTop"));
-
-	SpawnBox(World, StageCubeMesh, Mat, FVector(CourseLen + 200.f, 0.f, 500.f), FVector(0.5f, 28.f, 14.f),
-		FLinearColor(0.12f, 0.1f, 0.22f), TEXT("G1_Stage_Backdrop"));
-
-	SpawnBox(World, StageCubeMesh, Mat, FVector(MidX, -900.f, 400.f), FVector(CourseLen / 100.f + 2.f, 0.4f, 12.f),
-		FLinearColor(0.08f, 0.09f, 0.16f), TEXT("G1_Stage_WallL"));
-	SpawnBox(World, StageCubeMesh, Mat, FVector(MidX, 900.f, 400.f), FVector(CourseLen / 100.f + 2.f, 0.4f, 12.f),
-		FLinearColor(0.08f, 0.09f, 0.16f), TEXT("G1_Stage_WallR"));
-
-	SpawnBox(World, StageCubeMesh, Mat, FVector(0.f, 0.f, -60.f), FVector(8.f, 12.f, 0.4f),
-		FLinearColor(0.16f, 0.2f, 0.3f), TEXT("G1_Stage_Pad"));
+	// Stone chain owns all pads (including stone 0 under the runner). No extra road.
 }
 
 void ANightCourseHost::WireFeelFromPlayer()

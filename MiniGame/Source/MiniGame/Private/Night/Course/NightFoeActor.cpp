@@ -3,8 +3,9 @@
 #pragma region K2 moonyfli
 ANightFoeActor::ANightFoeActor()
 {
-	DebugColor = FLinearColor(1.0f, 0.25f, 0.2f);
-	SetActorScale3D(FVector(0.9f, 0.9f, 1.6f));
+	DebugColor = FLinearColor(0.75f, 0.55f, 0.35f);
+	KillGapCm = 140.f;
+	JumpGapCm = 420.f;
 }
 
 void ANightFoeActor::OnResolved_Implementation(ENightJudgeOutcome Outcome)

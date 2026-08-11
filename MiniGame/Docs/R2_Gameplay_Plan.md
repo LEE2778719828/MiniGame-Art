@@ -81,19 +81,21 @@ Content 根：`/Game/Night/Course/`
 
 **完成标准：** S（或本地 Mock）能调用空夜局并立刻收到空 Result。
 
-### Phase G1 — 直线节拍关（2–3 天）✅ 已落地
+### Phase G1 — 直线节拍关（2–3 天）✅ 已落地（石头链语义）
 
 - [x] 无岔口：只跑「基础段」+ 出口缓冲  
-- [x] Generator：按间隔刷 Enemy/Hazard（`NightG1CourseConfig` / DA）  
-- [x] 与 R1 约定：`INightFeelBridge` + G1 `UNightFeelStubComponent`  
+- [x] **刃心石头链**：落脚石序列；`空`→当前石 Jump；`下一石带怪`→当前石 Attack；成功后前进到目标石，怪从目标石消失  
+- [x] 禁止「每个判定自带一对互不相关双平台」的旧白盒模型  
+- [x] 与 R1 约定：`INightFeelBridge` + G1 `UNightFeelStubComponent`（Jump↔Hazard，Attack↔Enemy）  
 - [x] 成功劈怪 → 累加掉落；失败 → Soul 惩罚  
 - [x] 出口缓冲 → `FNightResult`  
 - [x] 调试：`Night.Course.Dump|SkipToExit|Finish`；Director 多播  
-- [x] 美术：`PlaySlashVFX` / `PlayDropBurst` / `PlayClearVFX` 等  
 - [x] 引擎资产：`/Game/Night/Course/**` + `L_Night_G1`  
+- [x] 后上方第三人称；**action-driven**（不按键不推进）  
 
-**完成标准：** PIE `L_Night_G1`，Q=跳 / E=劈；结束 Log 有 Ingredients。  
-用法：`Docs/G1_Course_Usage.md`
+**完成标准：** PIE `L_Night_G1`，站石按 Q/E 前进；结束 Log 有 Ingredients。  
+用法：`Docs/G1_Course_Usage.md`  
+规则记忆：`.cursor/rules/blade-heart-stone-chain.mdc`  
 
 ### Phase G2 — 唯一岔口 + A/B 规则（3–4 天）
 

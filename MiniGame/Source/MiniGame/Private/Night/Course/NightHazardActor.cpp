@@ -3,8 +3,9 @@
 #pragma region K2 moonyfli
 ANightHazardActor::ANightHazardActor()
 {
-	DebugColor = FLinearColor(0.25f, 0.85f, 1.0f);
-	SetActorScale3D(FVector(1.8f, 0.45f, 0.45f));
+	DebugColor = FLinearColor(0.35f, 0.65f, 0.95f);
+	JumpGapCm = 420.f;
+	KillGapCm = 140.f;
 }
 
 void ANightHazardActor::OnResolved_Implementation(ENightJudgeOutcome Outcome)

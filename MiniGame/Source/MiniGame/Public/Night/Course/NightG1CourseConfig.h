@@ -9,8 +9,7 @@
 
 #pragma region K2 moonyfli
 /**
- * Tunable G1 straight-course config.
- * Action-driven: nodes stay fixed; player advances only on Jump/Attack.
+ * Builds a 刃心 stone chain: stones + beats (Jump across gap / Attack into foe stone).
  */
 UCLASS(BlueprintType)
 class MINIGAME_API UNightG1CourseConfig : public UPrimaryDataAsset
@@ -18,26 +17,24 @@ class MINIGAME_API UNightG1CourseConfig : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
+	/** Number of actions (beats). Stones = BeatCount + 1. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
-	int32 NodeCount = 8;
+	int32 BeatCount = 8;
 
-	/** Distance of first node along track (+X). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
-	float FirstNodeDistance = 500.f;
+	float FirstStoneDistance = 0.f;
 
-	/** Spacing between nodes along track. */
+	/** Gap size for Jump beats (center-to-center). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
-	float NodeSpacing = 450.f;
+	float JumpGapCm = 420.f;
 
-	/** After resolving a node, stop this far past it. */
+	/** Gap size for Attack beats (center-to-center, close pads). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
-	float AdvancePastNode = 120.f;
+	float KillGapCm = 160.f;
 
-	/** Lerp speed while dashing forward after an input (cm/s). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
 	float AdvanceSpeed = 1400.f;
 
-	/** Brief pause after last node before Result (still no auto motion of foes). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
 	float ExitBufferSeconds = 1.2f;
 
@@ -56,7 +53,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")
 	float StartingSoul = 100.f;
 
-	/** Alternate Enemy/Hazard starting with Enemy when empty. */
+	/** Override beat actions; empty = Jump, Attack, Jump, Attack... */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Pattern")
 	TArray<ENightNodeKind> PatternOverride;
 
@@ -67,15 +64,12 @@ public:
 	int32 DefaultDropCount = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Classes")
-	TSubclassOf<AActor> FoeClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Classes")
-	TSubclassOf<AActor> HazardClass;
+	TSubclassOf<AActor> StoneClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|G1")
-	void BuildNodeSpecs(TArray<FNightTrackNodeSpec>& OutSpecs) const;
+	void BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const;
 };
 #pragma endregion K2 moonyfli

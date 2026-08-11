@@ -1,8 +1,6 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightG1CourseConfig.h"
-#include "Night/Course/NightTrackNodeActor.h"
-#include "Night/Course/NightFoeActor.h"
-#include "Night/Course/NightHazardActor.h"
+#include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "DrawDebugHelpers.h"
@@ -88,51 +86,44 @@ void UNightCourseDirector::SyncPawnToProgress(bool bInstant)
 	}
 }
 
-void UNightCourseDirector::EnsureSpecs()
+void UNightCourseDirector::EnsureCourse()
 {
-	NodeSpecs.Reset();
+	StoneSpecs.Reset();
+	BeatSpecs.Reset();
 	if (Config)
 	{
-		Config->BuildNodeSpecs(NodeSpecs);
+		Config->BuildCourse(StoneSpecs, BeatSpecs);
 	}
 }
 
-void UNightCourseDirector::SpawnNodeActor(int32 Index)
+void UNightCourseDirector::SpawnStoneActor(int32 Index)
 {
 	UWorld* World = GetWorld();
-	if (!World || !NodeSpecs.IsValidIndex(Index))
+	if (!World || !StoneSpecs.IsValidIndex(Index))
 	{
 		return;
 	}
 
-	const FNightTrackNodeSpec& Spec = NodeSpecs[Index];
-	UClass* SpawnClass = nullptr;
-	if (Spec.Kind == ENightNodeKind::Enemy)
-	{
-		SpawnClass = Config && Config->FoeClass ? Config->FoeClass.Get() : ANightFoeActor::StaticClass();
-	}
-	else
-	{
-		SpawnClass = Config && Config->HazardClass ? Config->HazardClass.Get() : ANightHazardActor::StaticClass();
-	}
+	UClass* SpawnClass = (Config && Config->StoneClass)
+		? Config->StoneClass.Get()
+		: ANightCourseStoneActor::StaticClass();
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	const FRotator Facing = Config ? Config->TrackForward.Rotation() : FRotator::ZeroRotator;
-	ANightTrackNodeActor* Node = World->SpawnActor<ANightTrackNodeActor>(
+	ANightCourseStoneActor* Stone = World->SpawnActor<ANightCourseStoneActor>(
 		SpawnClass,
-		GetTrackLocation(Spec.TrackDistance),
+		GetTrackLocation(StoneSpecs[Index].TrackDistance),
 		Facing,
 		Params);
-	if (!Node)
+	if (!Stone)
 	{
 		return;
 	}
 
-	Node->SetupNode(Index, Spec);
-	// Fixed pose for the whole night — foes do not walk toward the player.
-	Node->SetTrackPose(GetTrackLocation(Spec.TrackDistance), Facing);
-	SpawnedNodes[Index] = Node;
+	Stone->SetupStone(Index, StoneSpecs[Index]);
+	Stone->SetTrackPose(GetTrackLocation(StoneSpecs[Index].TrackDistance), Facing);
+	SpawnedStones[Index] = Stone;
 }
 
 void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
@@ -141,7 +132,6 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	{
 		return;
 	}
-
 	if (!Config)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[NightCourse] StartNight failed: Config is null"));
@@ -151,29 +141,28 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	ActiveBootstrap = Bootstrap;
 	bRunning = true;
 	ElapsedSeconds = 0.f;
-	ProgressDistance = 0.f;
-	ActiveNodeIndex = INDEX_NONE;
+	CurrentStoneIndex = 0;
+	ActiveBeatIndex = INDEX_NONE;
 	bWindowOpen = false;
 	bAdvancing = false;
-	AdvanceTargetDistance = 0.f;
 	CollectedIngredients.Reset();
-	EnsureSpecs();
-	NodeConsumed.Init(0, NodeSpecs.Num());
-	SpawnedNodes.Init(nullptr, NodeSpecs.Num());
+	EnsureCourse();
+	BeatConsumed.Init(0, BeatSpecs.Num());
+	SpawnedStones.Init(nullptr, StoneSpecs.Num());
 
-	for (int32 Index = 0; Index < NodeSpecs.Num(); ++Index)
+	for (int32 Index = 0; Index < StoneSpecs.Num(); ++Index)
 	{
-		SpawnNodeActor(Index);
+		SpawnStoneActor(Index);
 	}
 
+	ProgressDistance = StoneSpecs.IsValidIndex(0) ? StoneSpecs[0].TrackDistance : 0.f;
 	SyncPawnToProgress(true);
 	SetPhase(ENightCoursePhase::BaseSegment);
 	SetComponentTickEnabled(true);
 
-	// Arm first beat; world stays frozen until the player presses Jump/Attack.
-	if (NodeSpecs.Num() > 0)
+	if (BeatSpecs.Num() > 0)
 	{
-		TryOpenWindow(0);
+		TryOpenBeat(0);
 	}
 	else
 	{
@@ -183,34 +172,38 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 
 	if (GetDebug().bLogEvents)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[NightCourse] StartNight Level=%d Nodes=%d Seed=%d (action-driven)"),
-			static_cast<int32>(Bootstrap.LevelId), NodeSpecs.Num(), Bootstrap.Seed);
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] StartNight stones=%d beats=%d (stone-chain)"),
+			StoneSpecs.Num(), BeatSpecs.Num());
 	}
 }
 
-void UNightCourseDirector::TryOpenWindow(int32 Index)
+void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 {
-	if (!NodeSpecs.IsValidIndex(Index) || NodeConsumed[Index])
+	if (!BeatSpecs.IsValidIndex(BeatIndex) || BeatConsumed[BeatIndex])
 	{
 		return;
 	}
 
-	ActiveNodeIndex = Index;
+	ActiveBeatIndex = BeatIndex;
 	bWindowOpen = true;
+	CurrentStoneIndex = BeatSpecs[BeatIndex].FromStoneIndex;
 
+	if (SpawnedStones.IsValidIndex(CurrentStoneIndex) && SpawnedStones[CurrentStoneIndex])
+	{
+		SpawnedStones[CurrentStoneIndex]->SetHighlight(true);
+	}
+
+	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
 	FNightJudgeRequest Request;
-	Request.NodeIndex = Index;
-	Request.Kind = NodeSpecs[Index].Kind;
-	Request.FoeId = NodeSpecs[Index].FoeId;
-	Request.NodeActor = SpawnedNodes[Index];
-	// No time-based close: window stays open until the player acts.
+	Request.NodeIndex = BeatIndex;
+	Request.Kind = Beat.Action;
 	Request.WindowOpenTime = ElapsedSeconds;
 	Request.WindowCloseTime = ElapsedSeconds + 3600.f;
-
-	if (ANightTrackNodeActor* Node = SpawnedNodes[Index])
+	if (StoneSpecs.IsValidIndex(Beat.ToStoneIndex) && StoneSpecs[Beat.ToStoneIndex].bHasFoe)
 	{
-		Node->OnJudgeWindowOpened();
+		Request.FoeId = StoneSpecs[Beat.ToStoneIndex].FoeId;
 	}
+	Request.NodeActor = SpawnedStones.IsValidIndex(Beat.ToStoneIndex) ? SpawnedStones[Beat.ToStoneIndex] : nullptr;
 
 	if (INightFeelBridge* Feel = GetFeel())
 	{
@@ -219,23 +212,108 @@ void UNightCourseDirector::TryOpenWindow(int32 Index)
 
 	if (GetDebug().bAutoSucceedWindows)
 	{
-		NotifyFeelResolved(Index, ENightJudgeOutcome::Success);
+		NotifyFeelResolved(BeatIndex, ENightJudgeOutcome::Success);
 	}
 
 	if (GetDebug().bLogEvents)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[NightCourse] OpenWindow idx=%d kind=%d (await input)"), Index, static_cast<int32>(Request.Kind));
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] OpenBeat idx=%d action=%d from=%d to=%d"),
+			BeatIndex, static_cast<int32>(Beat.Action), Beat.FromStoneIndex, Beat.ToStoneIndex);
 	}
 }
 
-void UNightCourseDirector::BeginAdvanceTo(float TargetDistance)
+void UNightCourseDirector::NotifyFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome)
 {
-	bAdvancing = true;
-	bWindowOpen = false;
-	AdvanceTargetDistance = TargetDistance;
-	if (RunnerPawn && Config)
+	if (!bRunning || !bWindowOpen || bAdvancing || ActiveBeatIndex != NodeIndex)
 	{
-		RunnerPawn->BeginTrackAdvance(GetTrackLocation(TargetDistance), Config->TrackForward.Rotation(), Config->AdvanceSpeed);
+		return;
+	}
+	if (Outcome == ENightJudgeOutcome::None)
+	{
+		return;
+	}
+	ResolveBeat(NodeIndex, Outcome);
+}
+
+void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome)
+{
+	if (!BeatSpecs.IsValidIndex(BeatIndex) || BeatConsumed[BeatIndex] || !Config)
+	{
+		return;
+	}
+
+	BeatConsumed[BeatIndex] = 1;
+	bWindowOpen = false;
+	ActiveBeatIndex = INDEX_NONE;
+
+	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
+	if (SpawnedStones.IsValidIndex(Beat.FromStoneIndex) && SpawnedStones[Beat.FromStoneIndex])
+	{
+		SpawnedStones[Beat.FromStoneIndex]->SetHighlight(false);
+	}
+
+	if (INightFeelBridge* Feel = GetFeel())
+	{
+		INightFeelBridge::Execute_ClearJudgeRequest(FeelBridgeObject, BeatIndex);
+		if (Outcome == ENightJudgeOutcome::Success)
+		{
+			INightFeelBridge::Execute_PlaySuccessFeedback(FeelBridgeObject, Beat.Action);
+		}
+		else
+		{
+			const float Penalty = (Outcome == ENightJudgeOutcome::Miss) ? Config->MissPenalty : Config->WrongPenalty;
+			INightFeelBridge::Execute_ApplySoulPenalty(FeelBridgeObject, Penalty, Outcome);
+			INightFeelBridge::Execute_PlayFailFeedback(FeelBridgeObject, Outcome, Beat.Action);
+		}
+	}
+
+	const bool bAttackBeat = (Beat.Action == ENightNodeKind::Enemy);
+	if (Outcome == ENightJudgeOutcome::Success && bAttackBeat && StoneSpecs.IsValidIndex(Beat.ToStoneIndex))
+	{
+		AddDrop(StoneSpecs[Beat.ToStoneIndex].DropId, StoneSpecs[Beat.ToStoneIndex].DropCount);
+		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
+		{
+			SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
+			SpawnedStones[Beat.ToStoneIndex]->PlayDropBurst(
+				StoneSpecs[Beat.ToStoneIndex].DropId,
+				StoneSpecs[Beat.ToStoneIndex].DropCount);
+		}
+	}
+	else if (Outcome != ENightJudgeOutcome::Success && bAttackBeat
+		&& SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
+	{
+		// Wrong/Miss still advances onto the stone but foe can stay or clear — clear to keep chain readable.
+		SpawnedStones[Beat.ToStoneIndex]->ClearFoe(false);
+	}
+
+	OnNodeResolved.Broadcast(BeatIndex, Beat.Action, Outcome);
+
+	if (GetDebug().bLogEvents)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] ResolveBeat idx=%d outcome=%d -> stone %d"),
+			BeatIndex, static_cast<int32>(Outcome), Beat.ToStoneIndex);
+	}
+
+	BeginAdvanceToStone(Beat.ToStoneIndex);
+}
+
+void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
+{
+	if (!StoneSpecs.IsValidIndex(StoneIndex) || !Config)
+	{
+		OpenNextBeatOrExit();
+		return;
+	}
+
+	bAdvancing = true;
+	CurrentStoneIndex = StoneIndex;
+	AdvanceTargetDistance = StoneSpecs[StoneIndex].TrackDistance;
+	if (RunnerPawn)
+	{
+		RunnerPawn->BeginTrackAdvance(
+			GetTrackLocation(AdvanceTargetDistance),
+			Config->TrackForward.Rotation(),
+			Config->AdvanceSpeed);
 	}
 }
 
@@ -244,84 +322,22 @@ void UNightCourseDirector::OnAdvanceArrived()
 	bAdvancing = false;
 	ProgressDistance = AdvanceTargetDistance;
 	SyncPawnToProgress(true);
-	OpenNextPendingWindowOrExit();
+	OpenNextBeatOrExit();
 }
 
-void UNightCourseDirector::OpenNextPendingWindowOrExit()
+void UNightCourseDirector::OpenNextBeatOrExit()
 {
-	for (int32 Index = 0; Index < NodeSpecs.Num(); ++Index)
+	for (int32 Index = 0; Index < BeatSpecs.Num(); ++Index)
 	{
-		if (!NodeConsumed[Index])
+		if (!BeatConsumed[Index])
 		{
-			TryOpenWindow(Index);
+			TryOpenBeat(Index);
 			return;
 		}
 	}
 
 	ExitBufferEndTime = ElapsedSeconds + (Config ? Config->ExitBufferSeconds : 1.f);
 	SetPhase(ENightCoursePhase::ExitBuffer);
-}
-
-void UNightCourseDirector::NotifyFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome)
-{
-	if (!bRunning || !bWindowOpen || bAdvancing || ActiveNodeIndex != NodeIndex)
-	{
-		return;
-	}
-	if (Outcome == ENightJudgeOutcome::None)
-	{
-		return;
-	}
-	ResolveNode(NodeIndex, Outcome);
-}
-
-void UNightCourseDirector::ResolveNode(int32 Index, ENightJudgeOutcome Outcome)
-{
-	if (!NodeSpecs.IsValidIndex(Index) || NodeConsumed[Index] || !Config)
-	{
-		return;
-	}
-
-	NodeConsumed[Index] = 1;
-	ActiveNodeIndex = INDEX_NONE;
-
-	if (INightFeelBridge* Feel = GetFeel())
-	{
-		INightFeelBridge::Execute_ClearJudgeRequest(FeelBridgeObject, Index);
-		if (Outcome == ENightJudgeOutcome::Success)
-		{
-			INightFeelBridge::Execute_PlaySuccessFeedback(FeelBridgeObject, NodeSpecs[Index].Kind);
-		}
-		else
-		{
-			const float Penalty = (Outcome == ENightJudgeOutcome::Miss) ? Config->MissPenalty : Config->WrongPenalty;
-			INightFeelBridge::Execute_ApplySoulPenalty(FeelBridgeObject, Penalty, Outcome);
-			INightFeelBridge::Execute_PlayFailFeedback(FeelBridgeObject, Outcome, NodeSpecs[Index].Kind);
-		}
-	}
-
-	if (Outcome == ENightJudgeOutcome::Success && NodeSpecs[Index].Kind == ENightNodeKind::Enemy)
-	{
-		AddDrop(NodeSpecs[Index].DropId, NodeSpecs[Index].DropCount);
-	}
-
-	if (ANightTrackNodeActor* Node = SpawnedNodes[Index])
-	{
-		Node->OnResolved(Outcome);
-		Node->OnDespawnRequested();
-		SpawnedNodes[Index] = nullptr;
-	}
-
-	OnNodeResolved.Broadcast(Index, NodeSpecs[Index].Kind, Outcome);
-
-	if (GetDebug().bLogEvents)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[NightCourse] Resolve idx=%d outcome=%d -> advance"), Index, static_cast<int32>(Outcome));
-	}
-
-	// Every resolve (success or wrong) moves the runner forward past that beat.
-	const float Target = NodeSpecs[Index].TrackDistance + Config->AdvancePastNode;
-	BeginAdvanceTo(FMath::Max(ProgressDistance, Target));
 }
 
 void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -337,10 +353,10 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 	if (GetDebug().bDrawDebug)
 	{
-		DrawDebugLine(GetWorld(), GetTrackLocation(0.f), GetTrackLocation(Config->FirstNodeDistance + Config->NodeSpacing * Config->NodeCount), FColor::Yellow, false, -1.f, 0, 2.f);
-		if (ActiveNodeIndex != INDEX_NONE && NodeSpecs.IsValidIndex(ActiveNodeIndex))
+		for (const FNightStoneSpec& Stone : StoneSpecs)
 		{
-			DrawDebugSphere(GetWorld(), GetTrackLocation(NodeSpecs[ActiveNodeIndex].TrackDistance), 35.f, 12, FColor::Green, false, -1.f, 0, 1.5f);
+			DrawDebugSphere(GetWorld(), GetTrackLocation(Stone.TrackDistance), 25.f, 8,
+				Stone.bHasFoe ? FColor::Red : FColor::Cyan, false, -1.f, 0, 1.f);
 		}
 	}
 
@@ -353,26 +369,22 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 		return;
 	}
 
-	// Idle: no auto motion of nodes, no auto Miss, no camera chase beyond pawn snap.
-	if (Phase == ENightCoursePhase::ExitBuffer)
+	if (Phase == ENightCoursePhase::ExitBuffer && ElapsedSeconds >= ExitBufferEndTime)
 	{
-		if (ElapsedSeconds >= ExitBufferEndTime)
+		FNightResult Result;
+		Result.bSuccess = true;
+		Result.bFailedMidway = false;
+		Result.RouteTaken = ENightRouteId::None;
+		Result.Ingredients = CollectedIngredients;
+		if (INightFeelBridge* Feel = GetFeel())
 		{
-			FNightResult Result;
-			Result.bSuccess = true;
-			Result.bFailedMidway = false;
-			Result.RouteTaken = ENightRouteId::None;
-			Result.Ingredients = CollectedIngredients;
-			if (INightFeelBridge* Feel = GetFeel())
-			{
-				Result.SoulLeft = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
-			}
-			else
-			{
-				Result.SoulLeft = Config->StartingSoul;
-			}
-			FinishNight(Result);
+			Result.SoulLeft = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
 		}
+		else
+		{
+			Result.SoulLeft = Config->StartingSoul;
+		}
+		FinishNight(Result);
 	}
 }
 
@@ -382,7 +394,6 @@ void UNightCourseDirector::AddDrop(EIngredientId Id, int32 Count)
 	{
 		return;
 	}
-
 	for (FIngredientStack& Stack : CollectedIngredients)
 	{
 		if (Stack.Id == Id)
@@ -391,7 +402,6 @@ void UNightCourseDirector::AddDrop(EIngredientId Id, int32 Count)
 			return;
 		}
 	}
-
 	FIngredientStack NewStack;
 	NewStack.Id = Id;
 	NewStack.Count = Count;
@@ -406,7 +416,6 @@ void UNightCourseDirector::FinishNight(const FNightResult& Result)
 	bWindowOpen = false;
 	SetPhase(ENightCoursePhase::Finished);
 	OnFinished.Broadcast(Result);
-
 	if (GetDebug().bLogEvents)
 	{
 		UE_LOG(LogTemp, Log, TEXT("[NightCourse] Finished success=%d ingredients=%d soul=%.1f"),
@@ -429,18 +438,13 @@ void UNightCourseDirector::DebugForceFinish(bool bSuccess)
 
 void UNightCourseDirector::DebugSkipToExit()
 {
-	for (int32 Index = 0; Index < NodeConsumed.Num(); ++Index)
+	for (int32 Index = 0; Index < BeatConsumed.Num(); ++Index)
 	{
-		NodeConsumed[Index] = 1;
-		if (SpawnedNodes.IsValidIndex(Index) && SpawnedNodes[Index])
-		{
-			SpawnedNodes[Index]->Destroy();
-			SpawnedNodes[Index] = nullptr;
-		}
+		BeatConsumed[Index] = 1;
 	}
 	bWindowOpen = false;
 	bAdvancing = false;
-	ActiveNodeIndex = INDEX_NONE;
+	ActiveBeatIndex = INDEX_NONE;
 	ExitBufferEndTime = ElapsedSeconds + (Config ? Config->ExitBufferSeconds : 1.f);
 	SetPhase(ENightCoursePhase::ExitBuffer);
 }

@@ -11,8 +11,10 @@ UENUM(BlueprintType)
 enum class ENightNodeKind : uint8
 {
 	None UMETA(DisplayName = "None"),
-	Enemy UMETA(DisplayName = "Enemy"),
-	Hazard UMETA(DisplayName = "Hazard")
+	/** Attack beat (next stone has foe). */
+	Enemy UMETA(DisplayName = "Attack"),
+	/** Jump beat (gap to next stone). */
+	Hazard UMETA(DisplayName = "Jump")
 };
 
 UENUM(BlueprintType)
@@ -33,6 +35,48 @@ enum class ENightCoursePhase : uint8
 	Finished UMETA(DisplayName = "Finished")
 };
 
+/** One stepping stone on the track. */
+USTRUCT(BlueprintType)
+struct FNightStoneSpec
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	float TrackDistance = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	bool bHasFoe = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	EFoeId FoeId = EFoeId::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	EIngredientId DropId = EIngredientId::F01_LingGu;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	int32 DropCount = 1;
+};
+
+/**
+ * Action while standing on FromStone to reach ToStone.
+ * Jump if gap; Attack if ToStone has foe.
+ */
+USTRUCT(BlueprintType)
+struct FNightBeatSpec
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	int32 FromStoneIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	int32 ToStoneIndex = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	ENightNodeKind Action = ENightNodeKind::Hazard;
+};
+
+/** @deprecated Prefer FNightStoneSpec / FNightBeatSpec. Kept for transitional Feel payloads. */
 USTRUCT(BlueprintType)
 struct FNightTrackNodeSpec
 {
@@ -104,7 +148,6 @@ struct FNightG1DebugSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	bool bAlwaysConsumeNode = true;
 
-	/** G1 soak test: auto Success when a window opens (no input needed). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	bool bAutoSucceedWindows = false;
 };

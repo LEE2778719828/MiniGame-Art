@@ -1,32 +1,48 @@
 #include "Night/Course/NightG1CourseConfig.h"
 
 #pragma region K2 moonyfli
-void UNightG1CourseConfig::BuildNodeSpecs(TArray<FNightTrackNodeSpec>& OutSpecs) const
+void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const
 {
-	OutSpecs.Reset();
-	OutSpecs.Reserve(NodeCount);
+	OutStones.Reset();
+	OutBeats.Reset();
 
-	for (int32 Index = 0; Index < NodeCount; ++Index)
+	FNightStoneSpec Start;
+	Start.TrackDistance = FirstStoneDistance;
+	Start.bHasFoe = false;
+	OutStones.Add(Start);
+
+	float Cursor = FirstStoneDistance;
+	for (int32 Beat = 0; Beat < BeatCount; ++Beat)
 	{
-		FNightTrackNodeSpec Spec;
-		if (PatternOverride.IsValidIndex(Index))
+		ENightNodeKind Action = ENightNodeKind::Hazard;
+		if (PatternOverride.IsValidIndex(Beat))
 		{
-			Spec.Kind = PatternOverride[Index];
+			Action = PatternOverride[Beat];
 		}
 		else
 		{
-			Spec.Kind = (Index % 2 == 0) ? ENightNodeKind::Enemy : ENightNodeKind::Hazard;
+			Action = (Beat % 2 == 0) ? ENightNodeKind::Hazard : ENightNodeKind::Enemy;
 		}
 
-		Spec.TrackDistance = FirstNodeDistance + NodeSpacing * static_cast<float>(Index);
-		Spec.JudgeTime = static_cast<float>(Index); // retained for debug labels only
-		Spec.FoeId = static_cast<EFoeId>(1 + (Index % 5));
-		Spec.DropId = DefaultDropId;
-		Spec.DropCount = DefaultDropCount;
-		Spec.ArtTag = (Spec.Kind == ENightNodeKind::Enemy)
-			? FName(*FString::Printf(TEXT("Foe_%d"), Index))
-			: FName(*FString::Printf(TEXT("Hazard_%d"), Index));
-		OutSpecs.Add(Spec);
+		const bool bAttack = (Action == ENightNodeKind::Enemy);
+		Cursor += bAttack ? KillGapCm : JumpGapCm;
+
+		FNightStoneSpec Stone;
+		Stone.TrackDistance = Cursor;
+		Stone.bHasFoe = bAttack;
+		if (bAttack)
+		{
+			Stone.FoeId = static_cast<EFoeId>(1 + (Beat % 5));
+			Stone.DropId = DefaultDropId;
+			Stone.DropCount = DefaultDropCount;
+		}
+		OutStones.Add(Stone);
+
+		FNightBeatSpec BeatSpec;
+		BeatSpec.FromStoneIndex = Beat;
+		BeatSpec.ToStoneIndex = Beat + 1;
+		BeatSpec.Action = Action;
+		OutBeats.Add(BeatSpec);
 	}
 }
 #pragma endregion K2 moonyfli

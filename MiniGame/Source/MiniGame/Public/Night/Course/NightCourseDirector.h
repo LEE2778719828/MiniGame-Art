@@ -7,7 +7,7 @@
 #include "NightCourseDirector.generated.h"
 
 class UNightG1CourseConfig;
-class ANightTrackNodeActor;
+class ANightCourseStoneActor;
 class ANightCoursePawn;
 class INightFeelBridge;
 
@@ -18,9 +18,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseDebugTick, float, Elap
 
 #pragma region K2 moonyfli
 /**
- * Action-driven G1 course: nodes stay fixed on the track.
- * Player advances only when Jump/Attack resolves a beat (刃心-style).
- * Idle = frozen world + frozen camera follow target.
+ * 刃心 stone-chain director: stand on stone, Jump/Attack to next stone.
+ * Idle = frozen; action advances runner to ToStone.
  */
 UCLASS(ClassGroup = (Night), meta = (BlueprintSpawnableComponent))
 class MINIGAME_API UNightCourseDirector : public UActorComponent
@@ -85,7 +84,10 @@ public:
 	float GetProgressDistance() const { return ProgressDistance; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	int32 GetActiveNodeIndex() const { return ActiveNodeIndex; }
+	int32 GetActiveNodeIndex() const { return ActiveBeatIndex; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course")
+	int32 GetCurrentStoneIndex() const { return CurrentStoneIndex; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
@@ -109,13 +111,19 @@ protected:
 	float ProgressDistance = 0.f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	int32 ActiveNodeIndex = INDEX_NONE;
+	int32 CurrentStoneIndex = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	TArray<FNightTrackNodeSpec> NodeSpecs;
+	int32 ActiveBeatIndex = INDEX_NONE;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	TArray<TObjectPtr<ANightTrackNodeActor>> SpawnedNodes;
+	TArray<FNightStoneSpec> StoneSpecs;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<FNightBeatSpec> BeatSpecs;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<TObjectPtr<ANightCourseStoneActor>> SpawnedStones;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
@@ -126,7 +134,7 @@ protected:
 	UPROPERTY()
 	TObjectPtr<ANightCoursePawn> RunnerPawn;
 
-	TArray<uint8> NodeConsumed;
+	TArray<uint8> BeatConsumed;
 	float ExitBufferEndTime = 0.f;
 	float AdvanceTargetDistance = 0.f;
 	bool bWindowOpen = false;
@@ -136,13 +144,13 @@ protected:
 	FNightG1DebugSettings GetDebug() const;
 	void SetPhase(ENightCoursePhase NewPhase);
 	void FinishNight(const FNightResult& Result);
-	void EnsureSpecs();
-	void SpawnNodeActor(int32 Index);
-	void TryOpenWindow(int32 Index);
-	void ResolveNode(int32 Index, ENightJudgeOutcome Outcome);
-	void BeginAdvanceTo(float TargetDistance);
+	void EnsureCourse();
+	void SpawnStoneActor(int32 Index);
+	void TryOpenBeat(int32 BeatIndex);
+	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
+	void BeginAdvanceToStone(int32 StoneIndex);
 	void OnAdvanceArrived();
-	void OpenNextPendingWindowOrExit();
+	void OpenNextBeatOrExit();
 	void SyncPawnToProgress(bool bInstant);
 	void AddDrop(EIngredientId Id, int32 Count);
 	FVector GetTrackLocation(float Distance) const;
