@@ -4,9 +4,11 @@
 #include "Blueprint/DragDropOperation.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
+#include "Engine/DataTable.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/SaveGame.h"
 #include "SStandaloneSandbox.generated.h"
 
 class UTextBlock;
@@ -22,7 +24,57 @@ enum class ESGamePhase : uint8
 	NightSettlement,
 	DayOpening,
 	DayRunning,
-	GiftSelect
+	GiftSelect,
+	Ending
+};
+
+/** DT_GameStages 行：T0–L3 表驱动，不在多个 Widget 写死数值。 */
+USTRUCT(BlueprintType)
+struct FSGameStageRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName LevelId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float NightDuration = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName ForkPair = TEXT("AB");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 ReviewSeed = 1001;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float DayDuration = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 RevenueTarget = 90;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 CustomerConcurrentMax = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float CustomerSpawnInterval = 7.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float CustomerPatience = 32.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName CustomerConfigId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName GuaranteedNpcRules = TEXT("ALing_SangPo");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName NextLevelId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bEndingAfterDay = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
 };
 
 USTRUCT(BlueprintType)
@@ -77,6 +129,12 @@ struct FSDishPiece
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 CellIndex = INDEX_NONE;
+
+#pragma region K2 moonyfli
+	/** Inventory units actually spent for this piece; debug-spawned pieces stay 0 so refunds cannot mint food. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 PaidUnits = 0;
+#pragma endregion K2 moonyfli
 
 	bool IsValid() const
 	{
@@ -165,6 +223,91 @@ struct FSGiftBuffState
 		if (bGluttonBox) Parts.Add(TEXT("GluttonBox"));
 		return Parts.IsEmpty() ? TEXT("None") : FString::Join(Parts, TEXT(", "));
 	}
+};
+
+/** S → R2 唯一开局包。 */
+USTRUCT(BlueprintType)
+struct FSNightBootstrap
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName LevelId = TEXT("T0");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName ForkPair = TEXT("AB");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FSGiftBuffState GiftBuffState;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float FoeWeightOverride = -1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 Seed = 1001;
+
+	FString ToDebugString() const
+	{
+		return FString::Printf(
+			TEXT("LevelId=%s Fork=%s Seed=%d FoeW=%.1f Gifts=%s"),
+			*LevelId.ToString(),
+			*ForkPair.ToString(),
+			Seed,
+			FoeWeightOverride,
+			*GiftBuffState.ToDebugString());
+	}
+};
+
+/** 最小存档 SG_ChefProfile：强退后可恢复库存/缺口/谢礼/关卡与 Result 去重。 */
+UCLASS()
+class MINIGAME_API USChefSaveGame : public USaveGame
+{
+	GENERATED_BODY()
+
+public:
+	static constexpr int32 CurrentSaveVersion = 1;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 SaveVersion = CurrentSaveVersion;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FName CurrentStageId = TEXT("T0");
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TMap<FName, int32> Inventory;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TMap<FName, int32> TemporaryBasket;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 RevenueProgress = 0;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TArray<FName> SelectedGiftIds;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FSNightBootstrap PendingNightBootstrap;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FString LastConsumedNightResultId = TEXT("None");
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TArray<FName> CompletedDayFlags;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 ReviewSeedState = 1001;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TArray<FString> ConsumedResultIds;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	ESGamePhase Phase = ESGamePhase::PrepareNight;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	bool bAwaitingNightRetry = false;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FSGiftBuffState GiftBuffState;
 };
 
 USTRUCT(BlueprintType)
@@ -261,6 +404,42 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Gifts")
 	static FString GetGiftDisplayName(FName GiftId);
 
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool ApplyStage(FName InStageId);
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool JumpToStageForDebug(FName InStageId);
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	FSNightBootstrap BuildNightBootstrap();
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	FSNightBootstrap GetPendingNightBootstrap() const { return PendingNightBootstrap; }
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	FSGameStageRow GetActiveStageRow() const { return ActiveStageRow; }
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	FString FormatBootstrapDebug() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Revenue")
+	int32 GetRevenueGap() const;
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool CloseDayKeepGapForDebug();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	bool SaveChefProfile();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	bool LoadChefProfile();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	bool DeleteChefProfile();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	bool SimulateCorruptSaveForDebug();
+
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	void ResetSandbox();
 
@@ -278,6 +457,24 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 ReviewSeed = 1001;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	FName ForkPair = TEXT("AB");
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float DayDurationSeconds = 60.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float NightDurationSeconds = 120.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float CustomerSpawnIntervalSeconds = 7.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float CustomerPatienceSeconds = 32.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	int32 CustomerConcurrentMax = 2;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 Revenue = 0;
@@ -300,13 +497,35 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "S Gifts")
 	FSGiftBuffState GiftBuffState;
 
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	FSNightBootstrap PendingNightBootstrap;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	FSGameStageRow ActiveStageRow;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Flow")
+	TSoftObjectPtr<UDataTable> StageTable;
+
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	FString LastConsumedNightResultId = TEXT("None");
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	FString LastBoardFeedback = TEXT("等待操作。");
 
+	/** 夜失败后等待补跑；重跑成功前关卡不前进、白天不开门。 */
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	bool bAwaitingNightRetry = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	TArray<FName> CompletedDayFlags;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Save")
+	FString LastSaveFeedback = TEXT("尚未存档。");
+
 private:
+	static const TCHAR* SaveSlotName;
+	static const int32 SaveUserIndex;
+
 	UPROPERTY()
 	TMap<FName, int32> Inventory;
 
@@ -321,6 +540,15 @@ private:
 	void NotifyStateChanged();
 	void RebuildGiftBuffState();
 	void BeginNewDayGiftPool();
+	bool TryGetStageRow(FName InStageId, FSGameStageRow& OutRow) const;
+	static FSGameStageRow MakeBuiltInStageRow(FName InStageId);
+	bool AdvanceAfterGiftConfirm();
+	void MergeTemporaryBasketIntoInventory();
+	int32 ReclaimBoardPiecesOnClose();
+	static FString FormatReclaimSuffix(int32 ReclaimedUnits);
+	void CaptureProfileToSave(USChefSaveGame& SaveObject) const;
+	bool ApplyProfileFromSave(const USChefSaveGame& SaveObject);
+	bool AutoSaveChefProfile(const FString& Reason);
 };
 
 UCLASS()
@@ -434,6 +662,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	static ASMergeBoard* FindBoard(const UObject* WorldContextObject);
 
+#pragma region K2 moonyfli
+	/** 统计盘上棋子折算回库存的食材数（不改状态），闭店/存档前用。 */
+	UFUNCTION(BlueprintCallable, Category = "S Merge")
+	int32 GetPendingReclaimUnits(TMap<FName, int32>& OutUnits) const;
+
+	/** 闭店等清盘场景：先把棋子按付费单位退回库存，再清空棋盘。返回退回总数。 */
+	UFUNCTION(BlueprintCallable, Category = "S Merge")
+	int32 ReclaimPiecesToInventory();
+#pragma endregion K2 moonyfli
+
 private:
 	UPROPERTY(EditAnywhere, Category = "S Merge")
 	int32 GridWidth = 4;
@@ -452,7 +690,7 @@ private:
 	void SetFeedback(const FString& Message);
 	bool IsValidCellIndex(int32 CellIndex) const;
 	void ClearCell(int32 CellIndex);
-	void PlacePiece(int32 CellIndex, FName IngredientId, int32 Level);
+	void PlacePiece(int32 CellIndex, FName IngredientId, int32 Level, int32 PaidUnits);
 	bool CanMergePieces(const FSDishPiece& A, const FSDishPiece& B, FString& OutReason) const;
 	int32 FindPairForMerge(FName IngredientId, int32 Level, int32 PreferKeepIndex) const;
 };
@@ -623,6 +861,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S NPC")
 	void DebugForceCloseShop();
 
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void DebugJumpToStage(FName InStageId);
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void DebugPrintBootstrap();
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void DebugCloseDayKeepGap();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	void DebugSaveProfile();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	void DebugLoadProfile();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	void DebugCorruptSave();
+
+	UFUNCTION(BlueprintCallable, Category = "S Save")
+	void DebugDeleteSave();
+
 private:
 	UPROPERTY()
 	FSNightResult LastGeneratedResult;
@@ -649,6 +908,9 @@ protected:
 	virtual void NativeDestruct() override;
 
 private:
+	UPROPERTY()
+	TObjectPtr<UTextBlock> StageSummaryText;
+
 	UPROPERTY()
 	TObjectPtr<UTextBlock> StateText;
 
@@ -749,6 +1011,36 @@ private:
 	void HandleConfirmGifts();
 
 	UFUNCTION()
+	void HandleJumpT0();
+
+	UFUNCTION()
+	void HandleJumpL1();
+
+	UFUNCTION()
+	void HandleJumpL2();
+
+	UFUNCTION()
+	void HandleJumpL3();
+
+	UFUNCTION()
+	void HandlePrintBootstrap();
+
+	UFUNCTION()
+	void HandleCloseDayKeepGap();
+
+	UFUNCTION()
+	void HandleSaveProfile();
+
+	UFUNCTION()
+	void HandleLoadProfile();
+
+	UFUNCTION()
+	void HandleCorruptSave();
+
+	UFUNCTION()
+	void HandleDeleteSave();
+
+	UFUNCTION()
 	void Refresh();
 
 	ASFakeNightGateway* GetGateway() const;
@@ -764,6 +1056,7 @@ private:
 	void RefreshGiftVisual();
 	void DeliverToNpc(FName NpcId);
 	void ToggleGift(FName GiftId);
+	void JumpStage(FName InStageId);
 };
 
 UCLASS()

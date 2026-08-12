@@ -18,6 +18,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSSandbox, Log, All);
 
+const TCHAR* USChefGameInstance::SaveSlotName = TEXT("SG_ChefProfile");
+const int32 USChefGameInstance::SaveUserIndex = 0;
+
 namespace
 {
 	const FName LingGuId(TEXT("LingGu"));
@@ -35,7 +38,8 @@ namespace
 	const FName NpcSangPoId(TEXT("SangPo"));
 
 	constexpr int32 MaxDishLevel = 4;
-	constexpr int32 RequiredGiftSelections = 2;
+	// Gifts are optional: 0–2 may be carried into the night.
+	constexpr int32 MaxGiftSelections = 2;
 
 	const TArray<FName>& GetKnownIds()
 	{
@@ -70,7 +74,21 @@ namespace
 void USChefGameInstance::Init()
 {
 	Super::Init();
-	ResetSandbox();
+	if (StageTable.IsNull())
+	{
+		StageTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Game/Day/Data/DT_GameStages.DT_GameStages")));
+	}
+
+#pragma region K2 moonyfli
+	// Prefer restored profile; fall back to the fixed review starter on miss/corrupt.
+	if (!LoadChefProfile())
+	{
+		ResetSandbox();
+		LastSaveFeedback = TEXT("无可用存档，已创建固定评审初始档。");
+		NotifyStateChanged();
+	}
+#pragma endregion K2 moonyfli
 }
 
 void USChefGameInstance::InitializeIngredientMaps()
@@ -237,29 +255,62 @@ bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
 	LastConsumedNightResultId = Result.ResultId;
 	Phase = ESGamePhase::NightSettlement;
 
-	for (const FSIngredientStack& Stack : Result.Ingredients)
-	{
-		TMap<FName, int32>& Destination = Result.bSuccess ? Inventory : TemporaryBasket;
-		const int32 QuantityToAdd = Result.bSuccess ? Stack.Quantity : FMath::FloorToInt(Stack.Quantity * 0.5f);
-		Destination.FindOrAdd(Stack.IngredientId) += QuantityToAdd;
-	}
-
-	Phase = Result.bSuccess ? ESGamePhase::DayRunning : ESGamePhase::PrepareNight;
+#pragma region K2 moonyfli
 	if (Result.bSuccess)
 	{
+		// Provisional merge rule until design freeze: retry success folds temp basket into inventory.
+		if (bAwaitingNightRetry)
+		{
+			MergeTemporaryBasketIntoInventory();
+			bAwaitingNightRetry = false;
+		}
+
+		for (const FSIngredientStack& Stack : Result.Ingredients)
+		{
+			Inventory.FindOrAdd(Stack.IngredientId) += Stack.Quantity;
+		}
+
+		// Keep SelectedGiftIds / GiftBuffState / Revenue gap across night success and retries.
 		BeginNewDayGiftPool();
+		BuildNightBootstrap();
+		Phase = ESGamePhase::DayRunning;
+		LastBoardFeedback = FString::Printf(
+			TEXT("夜结果入库成功。营业额缺口 %d/%d。服务阿翎/桑婆拿谢礼，或接普通顾客。"),
+			Revenue,
+			RevenueTarget);
 	}
-	LastBoardFeedback = Result.bSuccess
-		? TEXT("夜结果入库成功。服务阿翎/桑婆拿谢礼，或接普通顾客冲营业额。")
-		: TEXT("夜结果失败，食材进入临时食篮，当日不开店。");
+	else
+	{
+		for (const FSIngredientStack& Stack : Result.Ingredients)
+		{
+			const int32 QuantityToAdd = FMath::FloorToInt(Stack.Quantity * 0.5f);
+			TemporaryBasket.FindOrAdd(Stack.IngredientId) += QuantityToAdd;
+		}
+
+		// Failure: no day shop, no stage advance, keep inventory/revenue/selected gifts.
+		bAwaitingNightRetry = true;
+		Phase = ESGamePhase::PrepareNight;
+		BuildNightBootstrap();
+		LastBoardFeedback = FString::Printf(
+			TEXT("夜失败：50%% 入临时食篮，当日不开店。关卡=%s 保留营业额 %d/%d，谢礼继续有效。请补跑当前夜。"),
+			*StageId.ToString(),
+			Revenue,
+			RevenueTarget);
+	}
+#pragma endregion K2 moonyfli
+
 	UE_LOG(
 		LogSSandbox,
 		Display,
-		TEXT("已消费 NightResult %s：Success=%s，Phase=%s"),
+		TEXT("已消费 NightResult %s：Success=%s，Phase=%s，Retry=%s，Revenue=%d/%d"),
 		*Result.ResultId,
 		Result.bSuccess ? TEXT("true") : TEXT("false"),
-		*GetPhaseDisplayName());
+		*GetPhaseDisplayName(),
+		bAwaitingNightRetry ? TEXT("true") : TEXT("false"),
+		Revenue,
+		RevenueTarget);
 	NotifyStateChanged();
+	AutoSaveChefProfile(Result.bSuccess ? TEXT("成功消费 NightResult") : TEXT("失败保留与补跑状态"));
 
 	if (Result.bSuccess)
 	{
@@ -329,6 +380,11 @@ void USChefGameInstance::AddRevenue(const int32 Amount)
 	}
 }
 
+int32 USChefGameInstance::GetRevenueGap() const
+{
+	return FMath::Max(0, RevenueTarget - Revenue);
+}
+
 FString USChefGameInstance::GetGiftDisplayName(const FName GiftId)
 {
 	if (GiftId == GiftGuideKiteId) return TEXT("引路纸鸢");
@@ -389,16 +445,6 @@ bool USChefGameInstance::TryEnterGiftSelect(const FString& Reason)
 		NotifyStateChanged();
 		return false;
 	}
-	if (ObtainedGiftIds.Num() < RequiredGiftSelections)
-	{
-		LastBoardFeedback = FString::Printf(
-			TEXT("谢礼卡不足 %d 张（现有 %d），请先服务保底 NPC。"),
-			RequiredGiftSelections,
-			ObtainedGiftIds.Num());
-		NotifyStateChanged();
-		return false;
-	}
-
 	Phase = ESGamePhase::GiftSelect;
 	PendingGiftIds.Empty();
 	if (ASMergeBoard* Board = ASMergeBoard::FindBoard(this))
@@ -410,9 +456,10 @@ bool USChefGameInstance::TryEnterGiftSelect(const FString& Reason)
 		Director->ResetDirector();
 	}
 	LastBoardFeedback = Reason.IsEmpty()
-		? TEXT("闭店：勾选两件谢礼后确认。")
+		? FString::Printf(TEXT("闭店：谢礼卡 %d 张，最多勾选 %d 件（可不选）后确认进入夜晚。"), ObtainedGiftIds.Num(), MaxGiftSelections)
 		: Reason;
 	NotifyStateChanged();
+	AutoSaveChefProfile(TEXT("闭店选礼"));
 	return true;
 }
 
@@ -424,16 +471,10 @@ bool USChefGameInstance::ForceCloseShopForDebug()
 		NotifyStateChanged();
 		return false;
 	}
-	if (ObtainedGiftIds.Num() < RequiredGiftSelections)
-	{
-		LastBoardFeedback = FString::Printf(
-			TEXT("强制闭店失败：谢礼卡 %d/%d，请先服务阿翎与桑婆。"),
-			ObtainedGiftIds.Num(),
-			RequiredGiftSelections);
-		NotifyStateChanged();
-		return false;
-	}
-	return TryEnterGiftSelect(TEXT("调试强制闭店，进入选礼。"));
+	return TryEnterGiftSelect(FString::Printf(
+		TEXT("调试强制闭店，进入选礼。谢礼卡 %d 张，可选 0–%d 件。"),
+		ObtainedGiftIds.Num(),
+		MaxGiftSelections));
 }
 
 bool USChefGameInstance::TogglePendingGiftSelection(const FName GiftId)
@@ -459,7 +500,7 @@ bool USChefGameInstance::TogglePendingGiftSelection(const FName GiftId)
 		return true;
 	}
 
-	if (PendingGiftIds.Num() >= RequiredGiftSelections)
+	if (PendingGiftIds.Num() >= MaxGiftSelections)
 	{
 		LastBoardFeedback = TEXT("最多勾选两件谢礼；请先取消一件再选。");
 		NotifyStateChanged();
@@ -471,7 +512,7 @@ bool USChefGameInstance::TogglePendingGiftSelection(const FName GiftId)
 		TEXT("已勾选 %s（%d/%d）。"),
 		*GetGiftDisplayName(GiftId),
 		PendingGiftIds.Num(),
-		RequiredGiftSelections);
+		MaxGiftSelections);
 	NotifyStateChanged();
 	return true;
 }
@@ -484,11 +525,11 @@ bool USChefGameInstance::ConfirmGiftSelection()
 		NotifyStateChanged();
 		return false;
 	}
-	if (PendingGiftIds.Num() != RequiredGiftSelections)
+	if (PendingGiftIds.Num() > MaxGiftSelections)
 	{
 		LastBoardFeedback = FString::Printf(
-			TEXT("请恰好选择 %d 件谢礼（当前 %d）。"),
-			RequiredGiftSelections,
+			TEXT("最多带 %d 件谢礼入夜（当前 %d）。"),
+			MaxGiftSelections,
 			PendingGiftIds.Num());
 		NotifyStateChanged();
 		return false;
@@ -507,13 +548,559 @@ bool USChefGameInstance::ConfirmGiftSelection()
 	SelectedGiftIds = PendingGiftIds;
 	PendingGiftIds.Empty();
 	RebuildGiftBuffState();
+	return AdvanceAfterGiftConfirm();
+}
+
+FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
+{
+	FSGameStageRow Row;
+	Row.LevelId = InStageId;
+	Row.GuaranteedNpcRules = TEXT("ALing_SangPo");
+
+	if (InStageId == TEXT("T0"))
+	{
+		Row.DisplayName = TEXT("教程日");
+		Row.NightDuration = 90.0f;
+		Row.ForkPair = TEXT("AB");
+		Row.ReviewSeed = 1001;
+		Row.DayDuration = 60.0f;
+		Row.RevenueTarget = 90;
+		Row.CustomerConcurrentMax = 2;
+		Row.CustomerSpawnInterval = 7.0f;
+		Row.CustomerPatience = 32.0f;
+		Row.CustomerConfigId = TEXT("Wave_T0");
+		Row.NextLevelId = TEXT("L1");
+	}
+	else if (InStageId == TEXT("L1"))
+	{
+		Row.DisplayName = TEXT("第一夜");
+		Row.NightDuration = 110.0f;
+		Row.ForkPair = TEXT("AB");
+		Row.ReviewSeed = 2101;
+		Row.DayDuration = 90.0f;
+		Row.RevenueTarget = 220;
+		Row.CustomerConcurrentMax = 3;
+		Row.CustomerSpawnInterval = 5.8f;
+		Row.CustomerPatience = 28.0f;
+		Row.CustomerConfigId = TEXT("Wave_L1");
+		Row.NextLevelId = TEXT("L2");
+	}
+	else if (InStageId == TEXT("L2"))
+	{
+		Row.DisplayName = TEXT("第二夜");
+		Row.NightDuration = 130.0f;
+		Row.ForkPair = TEXT("AC");
+		Row.ReviewSeed = 3201;
+		Row.DayDuration = 120.0f;
+		Row.RevenueTarget = 360;
+		Row.CustomerConcurrentMax = 4;
+		Row.CustomerSpawnInterval = 5.0f;
+		Row.CustomerPatience = 25.0f;
+		Row.CustomerConfigId = TEXT("Wave_L2");
+		Row.NextLevelId = TEXT("L3");
+	}
+	else if (InStageId == TEXT("L3"))
+	{
+		Row.DisplayName = TEXT("第三夜");
+		Row.NightDuration = 150.0f;
+		Row.ForkPair = TEXT("BC");
+		Row.ReviewSeed = 4301;
+		Row.DayDuration = 120.0f;
+		Row.RevenueTarget = 520;
+		Row.CustomerConcurrentMax = 5;
+		Row.CustomerSpawnInterval = 4.5f;
+		Row.CustomerPatience = 22.0f;
+		Row.CustomerConfigId = TEXT("Wave_L3");
+		Row.NextLevelId = NAME_None;
+		Row.bEndingAfterDay = true;
+	}
+	else
+	{
+		Row.LevelId = TEXT("T0");
+		return MakeBuiltInStageRow(TEXT("T0"));
+	}
+	return Row;
+}
+
+bool USChefGameInstance::TryGetStageRow(const FName InStageId, FSGameStageRow& OutRow) const
+{
+	if (InStageId.IsNone())
+	{
+		return false;
+	}
+
+	if (UDataTable* Table = StageTable.LoadSynchronous())
+	{
+		const FString Context = TEXT("USChefGameInstance::TryGetStageRow");
+		if (const FSGameStageRow* Found = Table->FindRow<FSGameStageRow>(InStageId, Context, false))
+		{
+			OutRow = *Found;
+			if (OutRow.LevelId.IsNone())
+			{
+				OutRow.LevelId = InStageId;
+			}
+			return true;
+		}
+	}
+
+	OutRow = MakeBuiltInStageRow(InStageId);
+	return OutRow.LevelId == InStageId || InStageId == TEXT("T0");
+}
+
+bool USChefGameInstance::ApplyStage(const FName InStageId)
+{
+	FSGameStageRow Row;
+	if (!TryGetStageRow(InStageId, Row))
+	{
+		LastBoardFeedback = FString::Printf(TEXT("未知关卡 %s，保持当前 Stage。"), *InStageId.ToString());
+		NotifyStateChanged();
+		return false;
+	}
+
+	StageId = Row.LevelId;
+	ActiveStageRow = Row;
+	ReviewSeed = Row.ReviewSeed;
+	ForkPair = Row.ForkPair;
+	DayDurationSeconds = Row.DayDuration;
+	NightDurationSeconds = Row.NightDuration;
+	RevenueTarget = Row.RevenueTarget;
+	CustomerSpawnIntervalSeconds = Row.CustomerSpawnInterval;
+	CustomerPatienceSeconds = Row.CustomerPatience;
+	CustomerConcurrentMax = Row.CustomerConcurrentMax;
+	BuildNightBootstrap();
+	return true;
+}
+
+FSNightBootstrap USChefGameInstance::BuildNightBootstrap()
+{
+	PendingNightBootstrap = FSNightBootstrap();
+	PendingNightBootstrap.LevelId = StageId;
+	PendingNightBootstrap.ForkPair = ForkPair;
+	PendingNightBootstrap.GiftBuffState = GiftBuffState;
+	PendingNightBootstrap.Seed = ReviewSeed;
+	PendingNightBootstrap.FoeWeightOverride = GiftBuffState.bGluttonBox ? 1.25f : -1.0f;
+	return PendingNightBootstrap;
+}
+
+FString USChefGameInstance::FormatBootstrapDebug() const
+{
+	return PendingNightBootstrap.ToDebugString();
+}
+
+bool USChefGameInstance::JumpToStageForDebug(const FName InStageId)
+{
+	if (!ApplyStage(InStageId))
+	{
+		return false;
+	}
+
+	ObtainedGiftIds.Empty();
+	PendingGiftIds.Empty();
+	Revenue = 0;
 	Phase = ESGamePhase::PrepareNight;
+	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose(); //add by K2
+	if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+	{
+		Director->ResetDirector();
+	}
+	if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+	{
+		NpcDirector->ResetDirector();
+	}
+
 	LastBoardFeedback = FString::Printf(
-		TEXT("已确认两件谢礼 → GiftBuffState: %s。可进入下一夜。"),
-		*GiftBuffState.ToDebugString());
+		TEXT("调试跳关 → %s（目标%d / Seed%d / Fork%s）。%sBootstrap: %s"),
+		*StageId.ToString(),
+		RevenueTarget,
+		ReviewSeed,
+		*ForkPair.ToString(),
+		*FormatReclaimSuffix(ReclaimedUnits),
+		*FormatBootstrapDebug());
 	NotifyStateChanged();
 	return true;
 }
+
+bool USChefGameInstance::AdvanceAfterGiftConfirm()
+{
+	const FName FinishedStage = StageId;
+	const bool bEnding = ActiveStageRow.bEndingAfterDay || ActiveStageRow.NextLevelId.IsNone();
+
+#pragma region K2 moonyfli
+	CompletedDayFlags.AddUnique(FinishedStage);
+	bAwaitingNightRetry = false;
+	for (const FName Id : GetKnownIds())
+	{
+		TemporaryBasket.FindOrAdd(Id) = 0;
+	}
+#pragma endregion K2 moonyfli
+
+	if (bEnding)
+	{
+		Phase = ESGamePhase::Ending;
+		BuildNightBootstrap();
+		LastBoardFeedback = FString::Printf(
+			TEXT("L3 日结完成，进入尾声。已选谢礼=%s。不再开启下一夜。"),
+			*GiftBuffState.ToDebugString());
+		NotifyStateChanged();
+		AutoSaveChefProfile(TEXT("L3 尾声选礼确认"));
+		return true;
+	}
+
+	const FName NextId = ActiveStageRow.NextLevelId;
+	Revenue = 0;
+	ObtainedGiftIds.Empty();
+	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose(); //add by K2
+	if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+	{
+		Director->ResetDirector();
+	}
+	if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+	{
+		NpcDirector->ResetDirector();
+	}
+
+	if (!ApplyStage(NextId))
+	{
+		Phase = ESGamePhase::PrepareNight;
+		LastBoardFeedback = FString::Printf(TEXT("选礼成功，但推进到 %s 失败。"), *NextId.ToString());
+		NotifyStateChanged();
+		return false;
+	}
+
+	Phase = ESGamePhase::PrepareNight;
+	LastBoardFeedback = FString::Printf(
+		TEXT("已确认谢礼 %d 件。%s 日结 → 下一夜 %s。%sBootstrap: %s"),
+		SelectedGiftIds.Num(),
+		*FinishedStage.ToString(),
+		*StageId.ToString(),
+		*FormatReclaimSuffix(ReclaimedUnits),
+		*FormatBootstrapDebug());
+	NotifyStateChanged();
+	AutoSaveChefProfile(TEXT("选礼确认并进入下一夜"));
+	return true;
+}
+
+#pragma region K2 moonyfli
+void USChefGameInstance::MergeTemporaryBasketIntoInventory()
+{
+	for (const FName Id : GetKnownIds())
+	{
+		const int32 TempQty = TemporaryBasket.FindRef(Id);
+		if (TempQty > 0)
+		{
+			Inventory.FindOrAdd(Id) += TempQty;
+		}
+		TemporaryBasket.FindOrAdd(Id) = 0;
+	}
+}
+
+int32 USChefGameInstance::ReclaimBoardPiecesOnClose()
+{
+	ASMergeBoard* Board = ASMergeBoard::FindBoard(this);
+	if (!Board)
+	{
+		return 0;
+	}
+	Board->ClearActiveDrag();
+	return Board->ReclaimPiecesToInventory();
+}
+
+FString USChefGameInstance::FormatReclaimSuffix(const int32 ReclaimedUnits)
+{
+	if (ReclaimedUnits <= 0)
+	{
+		return FString();
+	}
+	return FString::Printf(TEXT("合成格未用食材 %d 份已退回库存。"), ReclaimedUnits);
+}
+
+bool USChefGameInstance::CloseDayKeepGapForDebug()
+{
+	if (Phase != ESGamePhase::DayRunning)
+	{
+		LastBoardFeedback = TEXT("仅白天营业中可「保留缺口闭店」。");
+		NotifyStateChanged();
+		return false;
+	}
+	if (Revenue >= RevenueTarget)
+	{
+		LastBoardFeedback = TEXT("已达标请走正常闭店选礼；保留缺口仅用于未达标补跑。");
+		NotifyStateChanged();
+		return false;
+	}
+
+	Phase = ESGamePhase::PrepareNight;
+	PendingGiftIds.Empty();
+	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose();
+	if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+	{
+		Director->ResetDirector();
+	}
+	if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+	{
+		NpcDirector->ResetDirector();
+	}
+
+	BuildNightBootstrap();
+	LastBoardFeedback = FString::Printf(
+		TEXT("未达标闭店：保留库存与营业额缺口 %d（进度 %d/%d）。%s关卡=%s 不前进，下次成功夜继续补缺口。"),
+		GetRevenueGap(),
+		Revenue,
+		RevenueTarget,
+		*FormatReclaimSuffix(ReclaimedUnits),
+		*StageId.ToString());
+	NotifyStateChanged();
+	AutoSaveChefProfile(TEXT("未达标保留缺口"));
+	return true;
+}
+
+void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
+{
+	SaveObject.SaveVersion = USChefSaveGame::CurrentSaveVersion;
+	SaveObject.CurrentStageId = StageId;
+	SaveObject.Inventory = Inventory;
+
+	// The board is not persisted, so fold unspent board pieces back into the saved inventory.
+	if (const ASMergeBoard* Board = ASMergeBoard::FindBoard(this))
+	{
+		TMap<FName, int32> BoardUnits;
+		if (Board->GetPendingReclaimUnits(BoardUnits) > 0)
+		{
+			for (const TPair<FName, int32>& Pair : BoardUnits)
+			{
+				SaveObject.Inventory.FindOrAdd(Pair.Key) += Pair.Value;
+			}
+		}
+	}
+
+	SaveObject.TemporaryBasket = TemporaryBasket;
+	SaveObject.RevenueProgress = Revenue;
+	SaveObject.SelectedGiftIds = SelectedGiftIds;
+	SaveObject.PendingNightBootstrap = PendingNightBootstrap;
+	SaveObject.LastConsumedNightResultId = LastConsumedNightResultId;
+	SaveObject.CompletedDayFlags = CompletedDayFlags;
+	SaveObject.ReviewSeedState = ReviewSeed;
+	SaveObject.ConsumedResultIds = ConsumedResultIds.Array();
+	SaveObject.Phase = Phase;
+	SaveObject.bAwaitingNightRetry = bAwaitingNightRetry;
+	SaveObject.GiftBuffState = GiftBuffState;
+}
+
+bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
+{
+	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion)
+	{
+		UE_LOG(
+			LogSSandbox,
+			Warning,
+			TEXT("存档版本不兼容：file=%d current=%d，回退默认档。"),
+			SaveObject.SaveVersion,
+			USChefSaveGame::CurrentSaveVersion);
+		return false;
+	}
+
+	InitializeIngredientMaps();
+	for (const TPair<FName, int32>& Pair : SaveObject.Inventory)
+	{
+		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
+		{
+			Inventory.FindOrAdd(Pair.Key) = Pair.Value;
+		}
+	}
+	for (const TPair<FName, int32>& Pair : SaveObject.TemporaryBasket)
+	{
+		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
+		{
+			TemporaryBasket.FindOrAdd(Pair.Key) = Pair.Value;
+		}
+	}
+
+	if (!ApplyStage(SaveObject.CurrentStageId.IsNone() ? FName(TEXT("T0")) : SaveObject.CurrentStageId))
+	{
+		return false;
+	}
+
+	Revenue = FMath::Max(0, SaveObject.RevenueProgress);
+	SelectedGiftIds = SaveObject.SelectedGiftIds;
+	RebuildGiftBuffState();
+	if (SaveObject.GiftBuffState.bGuideKite || SaveObject.GiftBuffState.bLifeLamp
+		|| SaveObject.GiftBuffState.bBeatCoin || SaveObject.GiftBuffState.bGluttonBox)
+	{
+		GiftBuffState = SaveObject.GiftBuffState;
+	}
+	PendingNightBootstrap = SaveObject.PendingNightBootstrap;
+	LastConsumedNightResultId = SaveObject.LastConsumedNightResultId.IsEmpty()
+		? TEXT("None")
+		: SaveObject.LastConsumedNightResultId;
+	CompletedDayFlags = SaveObject.CompletedDayFlags;
+	ReviewSeed = SaveObject.ReviewSeedState;
+	ConsumedResultIds.Empty();
+	for (const FString& Id : SaveObject.ConsumedResultIds)
+	{
+		if (!Id.IsEmpty())
+		{
+			ConsumedResultIds.Add(Id);
+		}
+	}
+	bAwaitingNightRetry = SaveObject.bAwaitingNightRetry;
+	ObtainedGiftIds.Empty();
+	PendingGiftIds.Empty();
+
+	// Mid-day exit policy for this sandbox: reopen day start, keep inventory/revenue.
+	if (SaveObject.Phase == ESGamePhase::DayRunning
+		|| SaveObject.Phase == ESGamePhase::GiftSelect
+		|| SaveObject.Phase == ESGamePhase::DayOpening
+		|| SaveObject.Phase == ESGamePhase::NightSettlement)
+	{
+		Phase = bAwaitingNightRetry ? ESGamePhase::PrepareNight : ESGamePhase::DayRunning;
+	}
+	else if (SaveObject.Phase == ESGamePhase::Ending)
+	{
+		Phase = ESGamePhase::Ending;
+	}
+	else
+	{
+		Phase = ESGamePhase::PrepareNight;
+	}
+
+	BuildNightBootstrap();
+
+	if (ASMergeBoard* Board = ASMergeBoard::FindBoard(this))
+	{
+		Board->ClearActiveDrag();
+		Board->ClearBoard();
+	}
+	if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+	{
+		Director->ResetDirector();
+		if (Phase == ESGamePhase::DayRunning)
+		{
+			Director->NotifyDayStarted();
+		}
+	}
+	if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+	{
+		NpcDirector->ResetDirector();
+		if (Phase == ESGamePhase::DayRunning)
+		{
+			NpcDirector->NotifyDayStarted();
+		}
+	}
+
+	return true;
+}
+
+bool USChefGameInstance::SaveChefProfile()
+{
+	USChefSaveGame* SaveObject = Cast<USChefSaveGame>(
+		UGameplayStatics::CreateSaveGameObject(USChefSaveGame::StaticClass()));
+	if (!SaveObject)
+	{
+		LastSaveFeedback = TEXT("创建存档对象失败。");
+		NotifyStateChanged();
+		return false;
+	}
+
+	CaptureProfileToSave(*SaveObject);
+	const bool bOk = UGameplayStatics::SaveGameToSlot(SaveObject, SaveSlotName, SaveUserIndex);
+	LastSaveFeedback = bOk
+		? FString::Printf(
+			TEXT("已保存 %s：Stage=%s Revenue=%d/%d Result=%s Retry=%s"),
+			SaveSlotName,
+			*StageId.ToString(),
+			Revenue,
+			RevenueTarget,
+			*LastConsumedNightResultId,
+			bAwaitingNightRetry ? TEXT("true") : TEXT("false"))
+		: TEXT("SaveGameToSlot 失败。");
+	UE_LOG(LogSSandbox, Display, TEXT("%s"), *LastSaveFeedback);
+	NotifyStateChanged();
+	return bOk;
+}
+
+bool USChefGameInstance::AutoSaveChefProfile(const FString& Reason)
+{
+	const bool bOk = SaveChefProfile();
+	if (bOk)
+	{
+		LastSaveFeedback = FString::Printf(TEXT("%s｜自动存档成功。"), *Reason);
+		NotifyStateChanged();
+	}
+	return bOk;
+}
+
+bool USChefGameInstance::LoadChefProfile()
+{
+	if (!UGameplayStatics::DoesSaveGameExist(SaveSlotName, SaveUserIndex))
+	{
+		LastSaveFeedback = TEXT("存档槽为空。");
+		return false;
+	}
+
+	USaveGame* Loaded = UGameplayStatics::LoadGameFromSlot(SaveSlotName, SaveUserIndex);
+	USChefSaveGame* SaveObject = Cast<USChefSaveGame>(Loaded);
+	if (!SaveObject)
+	{
+		UE_LOG(LogSSandbox, Warning, TEXT("坏档：无法反序列化为 USChefSaveGame，回退默认档。"));
+		LastSaveFeedback = TEXT("坏档或类型不匹配，已回退默认档。");
+		ResetSandbox();
+		return true;
+	}
+
+	if (!ApplyProfileFromSave(*SaveObject))
+	{
+		UE_LOG(LogSSandbox, Warning, TEXT("坏档：ApplyProfileFromSave 失败，回退默认档。"));
+		ResetSandbox();
+		LastSaveFeedback = TEXT("坏档/版本不兼容，已回退默认档。");
+		LastBoardFeedback = LastSaveFeedback;
+		NotifyStateChanged();
+		return true;
+	}
+
+	LastBoardFeedback = FString::Printf(
+		TEXT("已读档：Stage=%s Phase=%s Revenue=%d/%d Result=%s"),
+		*StageId.ToString(),
+		*GetPhaseDisplayName(),
+		Revenue,
+		RevenueTarget,
+		*LastConsumedNightResultId);
+	LastSaveFeedback = LastBoardFeedback;
+	UE_LOG(LogSSandbox, Display, TEXT("%s"), *LastSaveFeedback);
+	NotifyStateChanged();
+	return true;
+}
+
+bool USChefGameInstance::DeleteChefProfile()
+{
+	const bool bOk = !UGameplayStatics::DoesSaveGameExist(SaveSlotName, SaveUserIndex)
+		|| UGameplayStatics::DeleteGameInSlot(SaveSlotName, SaveUserIndex);
+	LastSaveFeedback = bOk ? TEXT("存档槽已清空。") : TEXT("删除存档失败。");
+	NotifyStateChanged();
+	return bOk;
+}
+
+bool USChefGameInstance::SimulateCorruptSaveForDebug()
+{
+	USChefSaveGame* SaveObject = Cast<USChefSaveGame>(
+		UGameplayStatics::CreateSaveGameObject(USChefSaveGame::StaticClass()));
+	if (!SaveObject)
+	{
+		LastSaveFeedback = TEXT("无法创建坏档对象。");
+		NotifyStateChanged();
+		return false;
+	}
+
+	CaptureProfileToSave(*SaveObject);
+	SaveObject->SaveVersion = -999;
+	SaveObject->CurrentStageId = NAME_None;
+	const bool bOk = UGameplayStatics::SaveGameToSlot(SaveObject, SaveSlotName, SaveUserIndex);
+	LastSaveFeedback = bOk
+		? TEXT("已写入坏档（SaveVersion=-999）。下次读档应回退默认档。")
+		: TEXT("写入坏档失败。");
+	NotifyStateChanged();
+	return bOk;
+}
+#pragma endregion K2 moonyfli
 
 void USChefGameInstance::ResetSandbox()
 {
@@ -524,8 +1111,12 @@ void USChefGameInstance::ResetSandbox()
 	SelectedGiftIds.Empty();
 	GiftBuffState = FSGiftBuffState();
 	Revenue = 0;
+	bAwaitingNightRetry = false;
+	CompletedDayFlags.Empty();
 	LastConsumedNightResultId = TEXT("None");
-	LastBoardFeedback = TEXT("沙盒已重置。");
+	LastSaveFeedback = TEXT("沙盒内存已重置（未自动删档）。");
+	ApplyStage(TEXT("T0"));
+	LastBoardFeedback = TEXT("沙盒已重置到 T0。");
 	Phase = ESGamePhase::PrepareNight;
 	if (ASMergeBoard* Board = ASMergeBoard::FindBoard(this))
 	{
@@ -739,7 +1330,7 @@ void ASMergeBoard::ClearCell(const int32 CellIndex)
 	Cells[CellIndex].Piece = FSDishPiece();
 }
 
-void ASMergeBoard::PlacePiece(const int32 CellIndex, const FName IngredientId, const int32 Level)
+void ASMergeBoard::PlacePiece(const int32 CellIndex, const FName IngredientId, const int32 Level, const int32 PaidUnits)
 {
 	FSMergeCell& Cell = Cells[CellIndex];
 	Cell.bOccupied = true;
@@ -747,7 +1338,57 @@ void ASMergeBoard::PlacePiece(const int32 CellIndex, const FName IngredientId, c
 	Cell.Piece.Level = Level;
 	Cell.Piece.RecipeId = MakeRecipeId(IngredientId, Level);
 	Cell.Piece.CellIndex = CellIndex;
+	Cell.Piece.PaidUnits = FMath::Max(0, PaidUnits); //add by K2
 }
+
+#pragma region K2 moonyfli
+int32 ASMergeBoard::GetPendingReclaimUnits(TMap<FName, int32>& OutUnits) const
+{
+	OutUnits.Empty();
+	int32 Total = 0;
+	for (const FSMergeCell& Cell : Cells)
+	{
+		if (!Cell.bOccupied || Cell.Piece.PaidUnits <= 0 || Cell.Piece.IngredientId.IsNone())
+		{
+			continue;
+		}
+		OutUnits.FindOrAdd(Cell.Piece.IngredientId) += Cell.Piece.PaidUnits;
+		Total += Cell.Piece.PaidUnits;
+	}
+	return Total;
+}
+
+int32 ASMergeBoard::ReclaimPiecesToInventory()
+{
+	TMap<FName, int32> Refunds;
+	const int32 Total = GetPendingReclaimUnits(Refunds);
+
+	USChefGameInstance* GameInstance = GetChefGameInstance();
+	if (!GameInstance)
+	{
+		// No inventory owner: keep pieces so nothing is silently destroyed.
+		return 0;
+	}
+
+	TArray<FString> Report;
+	for (const TPair<FName, int32>& Pair : Refunds)
+	{
+		if (GameInstance->AddIngredient(Pair.Key, Pair.Value))
+		{
+			Report.Add(FString::Printf(TEXT("%s+%d"), *IngredientDisplayName(Pair.Key), Pair.Value));
+		}
+	}
+
+	ClearActiveDrag();
+	ClearBoard();
+
+	if (Total > 0)
+	{
+		UE_LOG(LogSSandbox, Display, TEXT("闭店回收合成格：退回 %d 份（%s）"), Total, *FString::Join(Report, TEXT("、")));
+	}
+	return Total;
+}
+#pragma endregion K2 moonyfli
 
 bool ASMergeBoard::CanMergePieces(const FSDishPiece& A, const FSDishPiece& B, FString& OutReason) const
 {
@@ -801,7 +1442,7 @@ bool ASMergeBoard::TrySpawnFromMotherPiece(const FName IngredientId)
 		return false;
 	}
 
-	PlacePiece(EmptyIndex, IngredientId, 0);
+	PlacePiece(EmptyIndex, IngredientId, 0, 1); //add by K2
 	const int32 QuantityAfter = GameInstance->GetQuantity(IngredientId);
 	SetFeedback(FString::Printf(
 		TEXT("母棋子 %s：空格 #%d 生成 Lv0，库存 %d→%d，占用 %d/%d。"),
@@ -896,7 +1537,7 @@ bool ASMergeBoard::TryDropPiece(const int32 FromCellIndex, const int32 ToCellInd
 	if (!ToCell.bOccupied)
 	{
 		ClearCell(FromCellIndex);
-		PlacePiece(ToCellIndex, FromPiece.IngredientId, FromPiece.Level);
+		PlacePiece(ToCellIndex, FromPiece.IngredientId, FromPiece.Level, FromPiece.PaidUnits);
 		SetFeedback(FString::Printf(
 			TEXT("移动：%s #%d → #%d。"),
 			*PieceShortLabel(FromPiece),
@@ -915,7 +1556,8 @@ bool ASMergeBoard::TryDropPiece(const int32 FromCellIndex, const int32 ToCellInd
 
 	const int32 NextLevel = ToPiece.Level + 1;
 	ClearCell(FromCellIndex);
-	PlacePiece(ToCellIndex, ToPiece.IngredientId, NextLevel);
+	// Merged piece carries the summed cost of both inputs so a later close refunds the full amount.
+	PlacePiece(ToCellIndex, ToPiece.IngredientId, NextLevel, FromPiece.PaidUnits + ToPiece.PaidUnits);
 	SetFeedback(FString::Printf(
 		TEXT("合成成功：%s + %s → %s%d（格 #%d）。Pointer锁定已释放。"),
 		*PieceShortLabel(FromPiece),
@@ -943,7 +1585,8 @@ void ASMergeBoard::ForceFillBoardForDebug()
 		{
 			continue;
 		}
-		PlacePiece(Index, LingGuId, 0);
+		// Debug fill does not touch inventory, so PaidUnits stays 0 and cannot be refunded later.
+		PlacePiece(Index, LingGuId, 0, 0);
 		++Filled;
 	}
 
@@ -997,8 +1640,7 @@ bool ASMergeBoard::DebugPromoteChainToLv4(const FName IngredientId)
 		GameInstance->Phase = ESGamePhase::DayRunning;
 	}
 
-	CancelPieceDrag();
-	ClearBoard();
+	ReclaimPiecesToInventory(); //add by K2
 
 	// Lv4 需要 16 个 Lv0。
 	constexpr int32 NeedLv0 = 16;
@@ -1099,10 +1741,10 @@ bool ASMergeBoard::DebugPromoteAllChainsToLv4()
 		const bool bOk = DebugPromoteChainToLv4(Id);
 		bAllOk &= bOk;
 		Report.Add(FString::Printf(TEXT("%s:Lv%d"), *IngredientDisplayName(Id).Left(1), GetHighestLevel(Id)));
-		// 保留该链 Lv4 棋子会占格；下一条链前清空，只验证“能合到”，结果写反馈。
+		// 保留该链 Lv4 棋子会占格；下一条链前清空（食材退回库存），只验证“能合到”，结果写反馈。
 		if (Id != GetKnownIds().Last())
 		{
-			ClearBoard();
+			ReclaimPiecesToInventory();
 		}
 	}
 
@@ -1151,6 +1793,11 @@ void ASCustomerDirector::NotifyDayStarted()
 {
 	bDayServiceActive = true;
 	SpawnCooldownRemaining = 0.0f;
+	if (const USChefGameInstance* GameInstance = GetChefGameInstance())
+	{
+		FixedPatienceSeconds = GameInstance->CustomerPatienceSeconds;
+		SpawnIntervalSeconds = GameInstance->CustomerSpawnIntervalSeconds;
+	}
 	SpawnFixedCustomer();
 }
 
@@ -1646,6 +2293,39 @@ void ASFakeNightGateway::BeginPlay()
 {
 	Super::BeginPlay();
 
+#pragma region K2 moonyfli
+	// The sandbox level can use a non-sandbox GameMode, so the placed gateway
+	// must guarantee that the gameplay actors exist before creating the panel.
+	if (!ASMergeBoard::FindBoard(this))
+	{
+		GetWorld()->SpawnActor<ASMergeBoard>();
+	}
+	if (!ASCustomerDirector::FindDirector(this))
+	{
+		GetWorld()->SpawnActor<ASCustomerDirector>();
+	}
+	if (!ASSpecialNpcDirector::FindDirector(this))
+	{
+		GetWorld()->SpawnActor<ASSpecialNpcDirector>();
+	}
+
+	// GameInstance::Init may restore DayRunning before actors exist; re-open shop now.
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		if (GameInstance->Phase == ESGamePhase::DayRunning)
+		{
+			if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+			{
+				Director->NotifyDayStarted();
+			}
+			if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+			{
+				NpcDirector->NotifyDayStarted();
+			}
+		}
+	}
+#pragma endregion K2 moonyfli
+
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
 	{
 		UClass* PanelClass = USDebugPanel::StaticClass();
@@ -1775,6 +2455,71 @@ void ASFakeNightGateway::DebugForceCloseShop()
 	}
 }
 
+void ASFakeNightGateway::DebugJumpToStage(const FName InStageId)
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->JumpToStageForDebug(InStageId);
+	}
+}
+
+void ASFakeNightGateway::DebugPrintBootstrap()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->BuildNightBootstrap();
+		GameInstance->LastBoardFeedback = FString::Printf(
+			TEXT("PendingNightBootstrap: %s"),
+			*GameInstance->FormatBootstrapDebug());
+		GameInstance->OnSandboxStateChanged.Broadcast();
+		UE_LOG(LogSSandbox, Display, TEXT("%s"), *GameInstance->LastBoardFeedback);
+	}
+}
+
+void ASFakeNightGateway::DebugCloseDayKeepGap()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->CloseDayKeepGapForDebug();
+	}
+}
+
+void ASFakeNightGateway::DebugSaveProfile()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->SaveChefProfile();
+	}
+}
+
+void ASFakeNightGateway::DebugLoadProfile()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		if (!GameInstance->LoadChefProfile())
+		{
+			GameInstance->LastBoardFeedback = TEXT("读档失败：无存档或无法恢复。");
+			GameInstance->OnSandboxStateChanged.Broadcast();
+		}
+	}
+}
+
+void ASFakeNightGateway::DebugCorruptSave()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->SimulateCorruptSaveForDebug();
+	}
+}
+
+void ASFakeNightGateway::DebugDeleteSave()
+{
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		GameInstance->DeleteChefProfile();
+	}
+}
+
 TSharedRef<SWidget> USDebugPanel::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -1835,22 +2580,24 @@ void USDebugPanel::BuildWidgetTree()
 	};
 
 	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Title"));
-	Title->SetText(FText::FromString(TEXT("S 独立沙盒｜第五步：特殊 NPC 与谢礼")));
+	Title->SetText(FText::FromString(TEXT("S 独立沙盒｜第七步：失败、补跑与存档")));
 	Title->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.72f, 0.12f)));
-	SetFontSize(Title, 20);
-	Layout->AddChildToVerticalBox(Title)->SetPadding(FMargin(24.0f, 16.0f, 24.0f, 8.0f));
+	SetFontSize(Title, 18);
+	Layout->AddChildToVerticalBox(Title)->SetPadding(FMargin(24.0f, 10.0f, 24.0f, 4.0f));
 
-	StateText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StateText"));
-	StateText->SetAutoWrapText(true);
-	SetFontSize(StateText, 14);
-	Layout->AddChildToVerticalBox(StateText)->SetPadding(FMargin(24.0f, 4.0f));
+	// 单行摘要放顶部；完整状态文本挪到棋盘下方，避免文本变长时把交互区顶出屏幕。
+	StageSummaryText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StageSummary"));
+	StageSummaryText->SetAutoWrapText(true);
+	StageSummaryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.95f, 0.75f)));
+	SetFontSize(StageSummaryText, 14);
+	Layout->AddChildToVerticalBox(StageSummaryText)->SetPadding(FMargin(24.0f, 2.0f));
 
 	// WrapBox：按钮多于一行宽度时自动换行，不再互相压缩。
 	auto AddButtonRow = [this, Layout](const TCHAR* RowName) -> UWrapBox*
 	{
 		UWrapBox* Row = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), RowName);
-		Row->SetInnerSlotPadding(FVector2D(6.0f, 6.0f));
-		Layout->AddChildToVerticalBox(Row)->SetPadding(FMargin(20.0f, 4.0f));
+		Row->SetInnerSlotPadding(FVector2D(6.0f, 4.0f));
+		Layout->AddChildToVerticalBox(Row)->SetPadding(FMargin(20.0f, 2.0f));
 		return Row;
 	};
 
@@ -1916,20 +2663,34 @@ void USDebugPanel::BuildWidgetTree()
 	GiftGuideKiteButton->OnClicked.AddDynamic(this, &USDebugPanel::HandleToggleGiftGuideKite);
 	GiftLifeLampButton = AddButton(GiftRow, TEXT("GiftLifeLampButton"), TEXT("选·纸灯"));
 	GiftLifeLampButton->OnClicked.AddDynamic(this, &USDebugPanel::HandleToggleGiftLifeLamp);
-	ConfirmGiftsButton = AddButton(GiftRow, TEXT("ConfirmGiftsButton"), TEXT("确认两件谢礼"));
+	ConfirmGiftsButton = AddButton(GiftRow, TEXT("ConfirmGiftsButton"), TEXT("确认入夜(可不选礼)"));
 	ConfirmGiftsButton->OnClicked.AddDynamic(this, &USDebugPanel::HandleConfirmGifts);
+
+	UWrapBox* StageRow = AddButtonRow(TEXT("StageRow"));
+	AddButton(StageRow, TEXT("JumpT0Button"), TEXT("跳T0"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleJumpT0);
+	AddButton(StageRow, TEXT("JumpL1Button"), TEXT("跳L1"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleJumpL1);
+	AddButton(StageRow, TEXT("JumpL2Button"), TEXT("跳L2"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleJumpL2);
+	AddButton(StageRow, TEXT("JumpL3Button"), TEXT("跳L3"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleJumpL3);
+	AddButton(StageRow, TEXT("PrintBootstrapButton"), TEXT("打印Bootstrap"))->OnClicked.AddDynamic(this, &USDebugPanel::HandlePrintBootstrap);
+	AddButton(StageRow, TEXT("KeepGapButton"), TEXT("保留缺口闭店"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleCloseDayKeepGap);
+
+	UWrapBox* SaveRow = AddButtonRow(TEXT("SaveRow"));
+	AddButton(SaveRow, TEXT("SaveProfileButton"), TEXT("存档"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleSaveProfile);
+	AddButton(SaveRow, TEXT("LoadProfileButton"), TEXT("读档"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleLoadProfile);
+	AddButton(SaveRow, TEXT("CorruptSaveButton"), TEXT("写坏档"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleCorruptSave);
+	AddButton(SaveRow, TEXT("DeleteSaveButton"), TEXT("删档"))->OnClicked.AddDynamic(this, &USDebugPanel::HandleDeleteSave);
 
 	// 固定棋盘尺寸并给每格最小边长，避免 4x4 被压扁或裁掉。
 	USizeBox* BoardBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("BoardSizeBox"));
-	BoardBox->SetWidthOverride(360.0f);
-	BoardBox->SetHeightOverride(360.0f);
+	BoardBox->SetWidthOverride(300.0f);
+	BoardBox->SetHeightOverride(300.0f);
 	UVerticalBoxSlot* BoardSlot = Layout->AddChildToVerticalBox(BoardBox);
-	BoardSlot->SetPadding(FMargin(24.0f, 8.0f));
+	BoardSlot->SetPadding(FMargin(24.0f, 6.0f));
 	BoardSlot->SetHorizontalAlignment(HAlign_Left);
 
 	BoardGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("BoardGrid"));
-	BoardGrid->SetMinDesiredSlotWidth(80.0f);
-	BoardGrid->SetMinDesiredSlotHeight(80.0f);
+	BoardGrid->SetMinDesiredSlotWidth(66.0f);
+	BoardGrid->SetMinDesiredSlotHeight(66.0f);
 	BoardGrid->SetSlotPadding(FMargin(3.0f));
 	BoardBox->AddChild(BoardGrid);
 
@@ -1953,7 +2714,12 @@ void USDebugPanel::BuildWidgetTree()
 	FeedbackText->SetAutoWrapText(true);
 	FeedbackText->SetColorAndOpacity(FSlateColor(FLinearColor(0.35f, 0.9f, 1.0f)));
 	SetFontSize(FeedbackText, 14);
-	Layout->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(24.0f, 8.0f, 24.0f, 24.0f));
+	Layout->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(24.0f, 6.0f, 24.0f, 4.0f));
+
+	StateText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StateText"));
+	StateText->SetAutoWrapText(true);
+	SetFontSize(StateText, 13);
+	Layout->AddChildToVerticalBox(StateText)->SetPadding(FMargin(24.0f, 4.0f, 24.0f, 24.0f));
 }
 
 ASFakeNightGateway* USDebugPanel::GetGateway() const
@@ -1987,7 +2753,7 @@ void USDebugPanel::HandleSuccessClicked()
 	if (ASFakeNightGateway* Gateway = GetGateway())
 	{
 		Gateway->SubmitNewSuccessResult();
-		SetFeedback(TEXT("已提交：灵谷×8、阴山菌×4。取材后选中棋子，再点顾客交付。"));
+		SetFeedback(TEXT("已提交：灵谷×8、阴山菌×4。取材后服务 NPC / 顾客。"));
 	}
 }
 
@@ -2158,6 +2924,74 @@ void USDebugPanel::HandleConfirmGifts()
 	}
 }
 
+void USDebugPanel::JumpStage(const FName InStageId)
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugJumpToStage(InStageId);
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleJumpT0() { JumpStage(TEXT("T0")); }
+void USDebugPanel::HandleJumpL1() { JumpStage(TEXT("L1")); }
+void USDebugPanel::HandleJumpL2() { JumpStage(TEXT("L2")); }
+void USDebugPanel::HandleJumpL3() { JumpStage(TEXT("L3")); }
+
+void USDebugPanel::HandlePrintBootstrap()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugPrintBootstrap();
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleCloseDayKeepGap()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugCloseDayKeepGap();
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleSaveProfile()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugSaveProfile();
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleLoadProfile()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugLoadProfile();
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleCorruptSave()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugCorruptSave();
+		Refresh();
+	}
+}
+
+void USDebugPanel::HandleDeleteSave()
+{
+	if (ASFakeNightGateway* Gateway = GetGateway())
+	{
+		Gateway->DebugDeleteSave();
+		Refresh();
+	}
+}
+
 void USDebugPanel::RefreshBoardVisual()
 {
 	ASMergeBoard* Board = GetBoard();
@@ -2284,7 +3118,7 @@ void USDebugPanel::RefreshGiftVisual()
 		!bHasLamp ? TEXT("纸灯(未获得)") : (bPendLamp ? TEXT("纸灯✓") : (bSelecting ? TEXT("选·纸灯") : TEXT("纸灯已得"))));
 	SetGiftButtonText(
 		ConfirmGiftsButton,
-		bSelecting ? TEXT("确认两件谢礼") : TEXT("闭店后确认"));
+		bSelecting ? TEXT("确认入夜(可不选礼)") : TEXT("闭店后确认"));
 }
 
 void USDebugPanel::Refresh()
@@ -2300,6 +3134,8 @@ void USDebugPanel::Refresh()
 	const int32 Occupied = Board ? Board->GetOccupiedCellCount() : 0;
 	const int32 Empty = Board ? Board->GetEmptyCellCount() : 0;
 	const int32 DragCell = Board ? Board->GetActiveDragCellIndex() : INDEX_NONE;
+	TMap<FName, int32> PendingReclaimUnits;
+	const int32 PendingReclaim = Board ? Board->GetPendingReclaimUnits(PendingReclaimUnits) : 0; //add by K2
 
 	const FString SelectedGifts = GameInstance->SelectedGiftIds.IsEmpty()
 		? TEXT("None")
@@ -2335,21 +3171,30 @@ void USDebugPanel::Refresh()
 	const int32 NpcServed = NpcDirector ? NpcDirector->CountServed() : 0;
 	const int32 NpcTotal = NpcDirector ? NpcDirector->GetNpcs().Num() : 0;
 
+	if (StageSummaryText)
+	{
+		StageSummaryText->SetText(FText::FromString(FString::Printf(
+			TEXT("%s ｜ %s(%s) ｜ 营业额 %d/%d 缺口%d ｜ Retry=%s ｜ %s ｜ NPC %d/%d"),
+			*GameInstance->GetPhaseDisplayName(),
+			*GameInstance->StageId.ToString(),
+			*GameInstance->ActiveStageRow.DisplayName,
+			GameInstance->Revenue,
+			GameInstance->RevenueTarget,
+			GameInstance->GetRevenueGap(),
+			GameInstance->bAwaitingNightRetry ? TEXT("Y") : TEXT("N"),
+			*CustomerLine,
+			NpcServed,
+			NpcTotal)));
+	}
+
 	StateText->SetText(FText::FromString(FString::Printf(
-		TEXT("Phase: %s\nStageId: %s    Seed: %d\n")
-		TEXT("永久库存  灵谷: %d  阴山菌: %d  赤焰椒: %d  月鳞鱼: %d  玄羽禽: %d\n")
-		TEXT("临时食篮  灵谷: %d  阴山菌: %d\n")
-		TEXT("棋盘  启用:%d  占用:%d  空格:%d  拖拽格:%s\n")
-		TEXT("最高等级  灵:%d 阴:%d 赤:%d 月:%d 玄:%d\n")
-		TEXT("%s\n")
-		TEXT("特殊NPC: 已服务 %d/%d\n")
-		TEXT("营业额: %d / %d\n")
-		TEXT("本局谢礼卡: %s\n勾选中: %s\n已选带入夜: %s\n")
-		TEXT("GiftBuffState: %s\n")
-		TEXT("LastConsumedNightResultId: %s"),
-		*GameInstance->GetPhaseDisplayName(),
-		*GameInstance->StageId.ToString(),
-		GameInstance->ReviewSeed,
+		TEXT("永久库存  灵谷:%d 阴山菌:%d 赤焰椒:%d 月鳞鱼:%d 玄羽禽:%d ｜ 临时食篮  灵谷:%d 阴山菌:%d 赤:%d 月:%d 玄:%d\n")
+		TEXT("棋盘  启用:%d 占用:%d 空格:%d 拖拽格:%s 待退回:%d ｜ 最高等级 灵:%d 阴:%d 赤:%d 月:%d 玄:%d\n")
+		TEXT("谢礼卡: %s ｜ 勾选中: %s ｜ 带入夜: %s\n")
+		TEXT("GiftBuff: %s ｜ CompletedDays: %s\n")
+		TEXT("Stage  Seed:%d Fork:%s 昼:%.0fs 夜:%.0fs Next:%s%s\n")
+		TEXT("Bootstrap: %s ｜ LastResult: %s\n")
+		TEXT("Save: %s"),
 		GameInstance->GetInventoryQuantity(LingGuId),
 		GameInstance->GetInventoryQuantity(YinShanJunId),
 		GameInstance->GetInventoryQuantity(ChiYanJiaoId),
@@ -2357,25 +3202,35 @@ void USDebugPanel::Refresh()
 		GameInstance->GetInventoryQuantity(XuanYuQinId),
 		GameInstance->GetTemporaryQuantity(LingGuId),
 		GameInstance->GetTemporaryQuantity(YinShanJunId),
+		GameInstance->GetTemporaryQuantity(ChiYanJiaoId),
+		GameInstance->GetTemporaryQuantity(YueLinYuId),
+		GameInstance->GetTemporaryQuantity(XuanYuQinId),
 		Enabled,
 		Occupied,
 		Empty,
 		DragCell == INDEX_NONE ? TEXT("-") : *FString::FromInt(DragCell),
+		PendingReclaim,
 		Board ? Board->GetHighestLevel(LingGuId) : -1,
 		Board ? Board->GetHighestLevel(YinShanJunId) : -1,
 		Board ? Board->GetHighestLevel(ChiYanJiaoId) : -1,
 		Board ? Board->GetHighestLevel(YueLinYuId) : -1,
 		Board ? Board->GetHighestLevel(XuanYuQinId) : -1,
-		*CustomerLine,
-		NpcServed,
-		NpcTotal,
-		GameInstance->Revenue,
-		GameInstance->RevenueTarget,
 		*ObtainedGifts,
 		*PendingGifts,
 		*SelectedGifts,
 		*GameInstance->GiftBuffState.ToDebugString(),
-		*GameInstance->LastConsumedNightResultId)));
+		GameInstance->CompletedDayFlags.IsEmpty()
+			? TEXT("None")
+			: *FString::JoinBy(GameInstance->CompletedDayFlags, TEXT(","), [](const FName Id) { return Id.ToString(); }),
+		GameInstance->ReviewSeed,
+		*GameInstance->ForkPair.ToString(),
+		GameInstance->DayDurationSeconds,
+		GameInstance->NightDurationSeconds,
+		GameInstance->ActiveStageRow.NextLevelId.IsNone() ? TEXT("None") : *GameInstance->ActiveStageRow.NextLevelId.ToString(),
+		GameInstance->ActiveStageRow.bEndingAfterDay ? TEXT("(Ending)") : TEXT(""),
+		*GameInstance->FormatBootstrapDebug(),
+		*GameInstance->LastConsumedNightResultId,
+		*GameInstance->LastSaveFeedback)));
 
 	if (FeedbackText && !GameInstance->LastBoardFeedback.IsEmpty())
 	{
