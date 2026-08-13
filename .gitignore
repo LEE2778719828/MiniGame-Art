@@ -1,0 +1,59 @@
+# Unreal Engine — ignore generated / local files
+# Keep: Content/, Config/, Source/, Plugins/, *.uproject
+
+# Binaries & build
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+FileOpenOrder/
+.vs/
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.sln
+*.xcodeproj
+*.xcworkspace
+
+# Compiled / packaged
+*.pdb
+*.dll
+*.exe
+*.lib
+*.exp
+*.obj
+*.o
+*.a
+*.ipa
+*.apk
+*.aab
+*.appx*
+*.exe
+*.target
+*.modules
+
+# Local / OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.log
+*.tmp
+*.bak
+
+# Rider / VS / CLion extras
+.idea/
+*.DotSettings.user
+cmake-build-*/
+
+# Encrypted / local credentials (never commit)
+*.p12
+*.pem
+*.key
+
+# Keep empty Content/Config until UE creates real files
+!Content/
+!Config/

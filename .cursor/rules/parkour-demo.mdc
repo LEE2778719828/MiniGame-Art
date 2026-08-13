@@ -1,0 +1,32 @@
+---
+description: MiniGame R1/R2/S split and coding constraints (R2 Gameplay focus)
+alwaysApply: true
+---
+
+# MiniGame Constraints
+
+## Team split
+
+- **R1 ≈ 3C**: character, camera, control, jump/slash judge windows, soul lamp feel, input swap.
+- **R2 ≈ Gameplay** (this repo primary owner): track generation, fork A/B/C, foes/hazards/drops, fog visibility, night buff apply, `FNightResult`.
+- **S ≈ Shop/meta**: day merge, customers, gifts UI, inventory, flow, `FNightBootstrap` assembly.
+
+## Gameplay rules
+
+- Portrait, Jump + Attack only (no stick locomotion).
+- Day/night handoff: only `FNightBootstrap` / `FNightResult` (no mid-platform Meta layer).
+- **刃心石头链**：落脚石序列；空档→跳；下一石带怪→砍；成功后前进到目标石（见 `blade-heart-stone-chain.mdc` / `Docs/G1_Course_Usage.md`）。
+- **G2 岔口**：基础段后唯一 Fork；Q=左路 E=右路；超时默认左；A/B 规则见 `Docs/G2_Course_Usage.md`。
+- Action-driven：不按键则角色/镜头/石头不推进（岔口进分支的 1.2s 自动跳除外）；相机为后上方第三人称。
+
+## Code
+
+- Prefer C++ under `Source/MiniGame/`; R2 new code → `Night/Course/`.
+- New/edited C++ blocks: `#pragma region K2 moonyfli` / `#pragma endregion K2 moonyfli`.
+- Single added lines: `//add by K2`.
+- Code comments: English only. Docs: Chinese OK.
+
+## Docs
+
+- Split: `Docs/FullFeature_ThreeDev_Split.md`
+- R2 plan: `Docs/R2_Gameplay_Plan.md`
