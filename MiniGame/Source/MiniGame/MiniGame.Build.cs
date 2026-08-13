@@ -22,6 +22,18 @@ public class MiniGame : ModuleRules
 			"Slate",
 			"SlateCore"
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"AssetRegistry",
+				"AssetTools",
+				"KismetCompiler",
+				"UnrealEd",
+				"UMGEditor"
+			});
+		}
 #pragma endregion K2 moonyfli
 	}
 }

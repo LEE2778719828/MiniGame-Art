@@ -183,6 +183,11 @@ struct FSCustomerState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString CustomerId;
 
+#pragma region K2 moonyfli
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FSOrderRequest Order;
 
@@ -276,8 +281,11 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	TMap<FName, int32> Inventory;
 
+#pragma region K2 moonyfli
+	/** Legacy v1 field: folded into Inventory on load; no longer written. */
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	TMap<FName, int32> TemporaryBasket;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 RevenueProgress = 0;
@@ -361,9 +369,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "S Sandbox")
 	int32 GetInventoryQuantity(FName IngredientId) const;
-
-	UFUNCTION(BlueprintPure, Category = "S Sandbox")
-	int32 GetTemporaryQuantity(FName IngredientId) const;
 
 	UFUNCTION(BlueprintPure, Category = "S Sandbox")
 	FString GetPhaseDisplayName() const;
@@ -530,9 +535,6 @@ private:
 	TMap<FName, int32> Inventory;
 
 	UPROPERTY()
-	TMap<FName, int32> TemporaryBasket;
-
-	UPROPERTY()
 	TSet<FString> ConsumedResultIds;
 
 	bool IsKnownIngredient(FName IngredientId) const;
@@ -543,7 +545,6 @@ private:
 	bool TryGetStageRow(FName InStageId, FSGameStageRow& OutRow) const;
 	static FSGameStageRow MakeBuiltInStageRow(FName InStageId);
 	bool AdvanceAfterGiftConfirm();
-	void MergeTemporaryBasketIntoInventory();
 	int32 ReclaimBoardPiecesOnClose();
 	static FString FormatReclaimSuffix(int32 ReclaimedUnits);
 	void CaptureProfileToSave(USChefSaveGame& SaveObject) const;
@@ -595,6 +596,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	int32 FindFirstEmptyCell() const;
 
+#pragma region K2 moonyfli
+	/** Picks uniformly among enabled empty cells; INDEX_NONE when the board is full. */
+	UFUNCTION(BlueprintPure, Category = "S Merge")
+	int32 FindRandomEmptyCell() const;
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	bool IsFull() const;
 
@@ -616,7 +623,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	int32 GetHighestLevel(FName IngredientId) const;
 
-	/** 先找空格，再扣永久库存，再生成 Lv0；任一步失败都不改库存与棋盘。 */
+	/** 在空格中随机落点，再扣永久库存，再生成 Lv0；任一步失败都不改库存与棋盘。 */
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	bool TrySpawnFromMotherPiece(FName IngredientId);
 
@@ -834,6 +841,12 @@ public:
 	ASFakeNightGateway();
 	virtual void BeginPlay() override;
 
+#pragma region K2 moonyfli
+	/** Keep the old diagnostic panel available without covering the playable day presentation by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Presentation")
+	bool bShowDebugPanel = false;
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	void SubmitNewSuccessResult();
 
@@ -882,6 +895,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Save")
 	void DebugDeleteSave();
 
+#pragma region K2 moonyfli
+	/** Also reachable in PIE via the S.Day.RunSmoke console command. */
+	UFUNCTION(BlueprintCallable, Category = "S Debug")
+	void RunDayWhiteboxSmokeTest();
+#pragma endregion K2 moonyfli
+
 private:
 	UPROPERTY()
 	FSNightResult LastGeneratedResult;
@@ -889,9 +908,25 @@ private:
 	UPROPERTY()
 	TObjectPtr<class USDebugPanel> DebugPanel;
 
+#pragma region K2 moonyfli
+	UPROPERTY()
+	TObjectPtr<class USDayHUD> DayHUD;
+
+	UPROPERTY()
+	TObjectPtr<class ASDayBoardPresenter> DayBoardPresenter;
+#pragma endregion K2 moonyfli
+
 	int32 NextResultNumber = 1;
 	FSNightResult MakeResult(bool bSuccess);
 	void Submit(const FSNightResult& Result);
+
+#pragma region K2 moonyfli
+	void FinishDayWhiteboxSmokeTest();
+	void CleanupNightPresentation();
+	bool bDayWhiteboxSmokePassed = false;
+	int32 NightCleanupPassesRemaining = 0;
+	FTimerHandle NightCleanupTimerHandle;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -1070,3 +1105,18 @@ public:
 protected:
 	virtual void BeginPlay() override;
 };
+
+#pragma region K2 moonyfli
+/**
+ * Day whitebox entry: same actors as the debug sandbox plus the 3D board presenter.
+ * Set as a level's GameMode override so the legacy debug sandbox level stays untouched.
+ */
+UCLASS()
+class MINIGAME_API ASDayWhiteboxGameMode : public ASChefGameMode
+{
+	GENERATED_BODY()
+
+protected:
+	virtual void BeginPlay() override;
+};
+#pragma endregion K2 moonyfli

@@ -1,0 +1,13 @@
+Name,CellIndex,Transform,VisualRadius
+Cell_01,1,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-185,Y=450,Z=35),Scale3D=(X=1,Y=1,Z=1))",92
+Cell_02,2,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=150,Y=445,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_04,4,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-285,Y=300,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_05,5,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-65,Y=290,Z=35),Scale3D=(X=1,Y=1,Z=1))",92
+Cell_06,6,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=175,Y=300,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_07,7,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=330,Y=230,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_08,8,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-305,Y=105,Z=35),Scale3D=(X=1,Y=1,Z=1))",92
+Cell_09,9,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-75,Y=105,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_10,10,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=165,Y=100,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_11,11,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=320,Y=-25,Z=35),Scale3D=(X=1,Y=1,Z=1))",92
+Cell_13,13,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=-165,Y=-125,Z=35),Scale3D=(X=1,Y=1,Z=1))",78
+Cell_14,14,"(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=125,Y=-150,Z=35),Scale3D=(X=1,Y=1,Z=1))",78

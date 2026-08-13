@@ -1,11 +1,16 @@
 #include "SStandaloneSandbox.h"
 
+#include "Day/Presentation/SDayBoardPresentation.h"
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Camera/CameraComponent.h"
 #include "Components/Button.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SafeZone.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/TextRenderComponent.h"
 #include "Components/UniformGridPanel.h"
 #include "Components/UniformGridSlot.h"
 #include "Components/VerticalBox.h"
@@ -13,8 +18,21 @@
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"
 #include "EngineUtils.h"
+#include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/HUD.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
+#include "HighResScreenshot.h"
+#include "ImageUtils.h"
+#include "TimerManager.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSSandbox, Log, All);
 
@@ -69,6 +87,22 @@ namespace
 	{
 		return FString::Printf(TEXT("%s%d"), *IngredientDisplayName(Piece.IngredientId).Left(1), Piece.Level);
 	}
+
+#pragma region K2 moonyfli
+	const TArray<FString>& GetCustomerNames()
+	{
+		static const TArray<FString> Names =
+		{
+			TEXT("小满"),
+			TEXT("阿桃"),
+			TEXT("青禾"),
+			TEXT("石榴"),
+			TEXT("团团"),
+			TEXT("霜叶")
+		};
+		return Names;
+	}
+#pragma endregion K2 moonyfli
 }
 
 void USChefGameInstance::Init()
@@ -94,11 +128,9 @@ void USChefGameInstance::Init()
 void USChefGameInstance::InitializeIngredientMaps()
 {
 	Inventory.Empty();
-	TemporaryBasket.Empty();
 	for (const FName Id : GetKnownIds())
 	{
 		Inventory.Add(Id, 0);
-		TemporaryBasket.Add(Id, 0);
 	}
 }
 
@@ -258,12 +290,7 @@ bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
 #pragma region K2 moonyfli
 	if (Result.bSuccess)
 	{
-		// Provisional merge rule until design freeze: retry success folds temp basket into inventory.
-		if (bAwaitingNightRetry)
-		{
-			MergeTemporaryBasketIntoInventory();
-			bAwaitingNightRetry = false;
-		}
+		bAwaitingNightRetry = false;
 
 		for (const FSIngredientStack& Stack : Result.Ingredients)
 		{
@@ -281,18 +308,19 @@ bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
 	}
 	else
 	{
+		// Failure keeps 50% of night drops; go straight into permanent inventory (no temp basket).
 		for (const FSIngredientStack& Stack : Result.Ingredients)
 		{
 			const int32 QuantityToAdd = FMath::FloorToInt(Stack.Quantity * 0.5f);
-			TemporaryBasket.FindOrAdd(Stack.IngredientId) += QuantityToAdd;
+			Inventory.FindOrAdd(Stack.IngredientId) += QuantityToAdd;
 		}
 
-		// Failure: no day shop, no stage advance, keep inventory/revenue/selected gifts.
+		// Failure: no day shop, no stage advance, keep revenue/selected gifts.
 		bAwaitingNightRetry = true;
 		Phase = ESGamePhase::PrepareNight;
 		BuildNightBootstrap();
 		LastBoardFeedback = FString::Printf(
-			TEXT("夜失败：50%% 入临时食篮，当日不开店。关卡=%s 保留营业额 %d/%d，谢礼继续有效。请补跑当前夜。"),
+			TEXT("夜失败：50%% 所得已入库保存。当日不开店。关卡=%s 保留营业额 %d/%d，谢礼继续有效。请补跑当前夜。"),
 			*StageId.ToString(),
 			Revenue,
 			RevenueTarget);
@@ -329,11 +357,6 @@ bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
 int32 USChefGameInstance::GetInventoryQuantity(const FName IngredientId) const
 {
 	return GetQuantity(IngredientId);
-}
-
-int32 USChefGameInstance::GetTemporaryQuantity(const FName IngredientId) const
-{
-	return TemporaryBasket.FindRef(IngredientId);
 }
 
 FString USChefGameInstance::GetPhaseDisplayName() const
@@ -728,10 +751,6 @@ bool USChefGameInstance::AdvanceAfterGiftConfirm()
 #pragma region K2 moonyfli
 	CompletedDayFlags.AddUnique(FinishedStage);
 	bAwaitingNightRetry = false;
-	for (const FName Id : GetKnownIds())
-	{
-		TemporaryBasket.FindOrAdd(Id) = 0;
-	}
 #pragma endregion K2 moonyfli
 
 	if (bEnding)
@@ -781,19 +800,6 @@ bool USChefGameInstance::AdvanceAfterGiftConfirm()
 }
 
 #pragma region K2 moonyfli
-void USChefGameInstance::MergeTemporaryBasketIntoInventory()
-{
-	for (const FName Id : GetKnownIds())
-	{
-		const int32 TempQty = TemporaryBasket.FindRef(Id);
-		if (TempQty > 0)
-		{
-			Inventory.FindOrAdd(Id) += TempQty;
-		}
-		TemporaryBasket.FindOrAdd(Id) = 0;
-	}
-}
-
 int32 USChefGameInstance::ReclaimBoardPiecesOnClose()
 {
 	ASMergeBoard* Board = ASMergeBoard::FindBoard(this);
@@ -873,7 +879,7 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 		}
 	}
 
-	SaveObject.TemporaryBasket = TemporaryBasket;
+	SaveObject.TemporaryBasket.Empty(); //add by K2
 	SaveObject.RevenueProgress = Revenue;
 	SaveObject.SelectedGiftIds = SelectedGiftIds;
 	SaveObject.PendingNightBootstrap = PendingNightBootstrap;
@@ -907,11 +913,12 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 			Inventory.FindOrAdd(Pair.Key) = Pair.Value;
 		}
 	}
+	// Migrate legacy temp-basket saves into permanent inventory once.
 	for (const TPair<FName, int32>& Pair : SaveObject.TemporaryBasket)
 	{
-		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
+		if (IsKnownIngredient(Pair.Key) && Pair.Value > 0)
 		{
-			TemporaryBasket.FindOrAdd(Pair.Key) = Pair.Value;
+			Inventory.FindOrAdd(Pair.Key) += Pair.Value;
 		}
 	}
 
@@ -1240,6 +1247,27 @@ int32 ASMergeBoard::FindFirstEmptyCell() const
 	return INDEX_NONE;
 }
 
+#pragma region K2 moonyfli
+int32 ASMergeBoard::FindRandomEmptyCell() const
+{
+	TArray<int32> EmptyIndices;
+	EmptyIndices.Reserve(Cells.Num());
+	for (int32 Index = 0; Index < Cells.Num(); ++Index)
+	{
+		const FSMergeCell& Cell = Cells[Index];
+		if (Cell.bEnabled && !Cell.bOccupied)
+		{
+			EmptyIndices.Add(Index);
+		}
+	}
+	if (EmptyIndices.Num() == 0)
+	{
+		return INDEX_NONE;
+	}
+	return EmptyIndices[FMath::RandRange(0, EmptyIndices.Num() - 1)];
+}
+#pragma endregion K2 moonyfli
+
 bool ASMergeBoard::IsFull() const
 {
 	return FindFirstEmptyCell() == INDEX_NONE;
@@ -1429,7 +1457,9 @@ bool ASMergeBoard::TrySpawnFromMotherPiece(const FName IngredientId)
 		BuildDefaultIrregularBoard();
 	}
 
-	const int32 EmptyIndex = FindFirstEmptyCell();
+#pragma region K2 moonyfli
+	const int32 EmptyIndex = FindRandomEmptyCell();
+#pragma endregion K2 moonyfli
 	if (EmptyIndex == INDEX_NONE)
 	{
 		SetFeedback(TEXT("棋盘已满，拒绝生成，库存未扣除。"));
@@ -1445,7 +1475,7 @@ bool ASMergeBoard::TrySpawnFromMotherPiece(const FName IngredientId)
 	PlacePiece(EmptyIndex, IngredientId, 0, 1); //add by K2
 	const int32 QuantityAfter = GameInstance->GetQuantity(IngredientId);
 	SetFeedback(FString::Printf(
-		TEXT("母棋子 %s：空格 #%d 生成 Lv0，库存 %d→%d，占用 %d/%d。"),
+		TEXT("母棋子 %s：随机空格 #%d 生成 Lv0，库存 %d→%d，占用 %d/%d。"),
 		*IngredientDisplayName(IngredientId),
 		EmptyIndex,
 		QuantityBefore,
@@ -1836,14 +1866,20 @@ bool ASCustomerDirector::SpawnFixedCustomer()
 
 	ActiveCustomer = FSCustomerState();
 	ActiveCustomer.bActive = true;
-	ActiveCustomer.CustomerId = FString::Printf(TEXT("Guest-%02d"), NextCustomerNumber++);
+#pragma region K2 moonyfli
+	const int32 CustomerNumber = NextCustomerNumber++;
+	const TArray<FString>& CustomerNames = GetCustomerNames();
+	ActiveCustomer.CustomerId = FString::Printf(TEXT("Guest-%02d"), CustomerNumber);
+	ActiveCustomer.DisplayName = CustomerNames[(CustomerNumber - 1) % CustomerNames.Num()];
+#pragma endregion K2 moonyfli
 	ActiveCustomer.Order = MakeFixedOrder();
 	ActiveCustomer.PatienceMax = FixedPatienceSeconds;
 	ActiveCustomer.PatienceRemaining = FixedPatienceSeconds;
 	SpawnCooldownRemaining = 0.0f;
 
 	SetFeedback(FString::Printf(
-		TEXT("顾客 %s 入座，固定订单 %s（售价 %d），耐心 %.0fs。选中对应棋子后点顾客交付。"),
+		TEXT("顾客 %s（%s）入座，固定订单 %s（售价 %d），耐心 %.0fs。选中对应棋子后点顾客交付。"),
+		*ActiveCustomer.DisplayName,
 		*ActiveCustomer.CustomerId,
 		*ActiveCustomer.Order.RecipeId.ToString(),
 		ActiveCustomer.Order.SellValue,
@@ -1876,7 +1912,8 @@ void ASCustomerDirector::Tick(const float DeltaSeconds)
 		if (ActiveCustomer.PatienceRemaining <= 0.0f)
 		{
 			ClearActiveCustomer(FString::Printf(
-				TEXT("顾客 %s 耐心耗尽离场，未扣棋子。下一位约 %.0fs 后出现。"),
+				TEXT("顾客 %s（%s）耐心耗尽离场，未扣棋子。下一位约 %.0fs 后出现。"),
+				*ActiveCustomer.DisplayName,
 				*ActiveCustomer.CustomerId,
 				SpawnIntervalSeconds));
 			return;
@@ -1966,8 +2003,10 @@ bool ASCustomerDirector::TryDeliverFromCell(const int32 CellIndex)
 
 	GameInstance->AddRevenue(SellValue);
 	const FString ServedId = ActiveCustomer.CustomerId;
+	const FString ServedName = ActiveCustomer.DisplayName;
 	ClearActiveCustomer(FString::Printf(
-		TEXT("交付成功：%s 收到 %s，营业额 %d→%d。下一位约 %.0fs 后出现。"),
+		TEXT("交付成功：%s（%s）收到 %s，营业额 %d→%d。下一位约 %.0fs 后出现。"),
+		*ServedName,
 		*ServedId,
 		*Piece.RecipeId.ToString(),
 		RevenueBefore,
@@ -2309,6 +2348,27 @@ void ASFakeNightGateway::BeginPlay()
 		GetWorld()->SpawnActor<ASSpecialNpcDirector>();
 	}
 
+	// The 3D day whitebox is opt-in per level: only a level that places a
+	// BP_SDayBoardPresenter switches to it, so the legacy debug sandbox stays untouched.
+	DayBoardPresenter = nullptr;
+	for (TActorIterator<ASDayBoardPresenter> It(GetWorld()); It; ++It)
+	{
+		DayBoardPresenter = *It;
+		break;
+	}
+
+	if (DayBoardPresenter)
+	{
+		NightCleanupPassesRemaining = 12;
+		CleanupNightPresentation();
+		GetWorldTimerManager().SetTimer(
+			NightCleanupTimerHandle,
+			this,
+			&ASFakeNightGateway::CleanupNightPresentation,
+			0.25f,
+			true);
+	}
+
 	// GameInstance::Init may restore DayRunning before actors exist; re-open shop now.
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
@@ -2328,24 +2388,446 @@ void ASFakeNightGateway::BeginPlay()
 
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
 	{
-		UClass* PanelClass = USDebugPanel::StaticClass();
-		DebugPanel = CreateWidget<USDebugPanel>(PlayerController, PanelClass);
-		if (DebugPanel)
+#pragma region K2 moonyfli
+		if (DayBoardPresenter)
 		{
-			DebugPanel->AddToViewport(100);
-			UE_LOG(LogSSandbox, Display, TEXT("调试面板已加入视口：%s"), *PanelClass->GetName());
+			// The whitebox level may still inherit the Night test GameMode. Remove its
+			// HUD/UMG before installing the Day presentation so the two never overlap.
+			if (AHUD* ExistingHud = PlayerController->GetHUD())
+			{
+				ExistingHud->bShowHUD = false;
+			}
+			TArray<UUserWidget*> ExistingWidgets;
+			UWidgetBlueprintLibrary::GetAllWidgetsOfClass(
+				this,
+				ExistingWidgets,
+				UUserWidget::StaticClass(),
+				false);
+			for (UUserWidget* ExistingWidget : ExistingWidgets)
+			{
+				if (ExistingWidget)
+				{
+					ExistingWidget->RemoveFromParent();
+				}
+			}
+
+			UClass* DayHUDClass = LoadClass<USDayHUD>(
+				nullptr,
+				TEXT("/Game/Game/Day/UI/WBP_SDayHUD.WBP_SDayHUD_C"));
+			if (!DayHUDClass)
+			{
+				DayHUDClass = USDayHUD::StaticClass();
+			}
+			DayHUD = CreateWidget<USDayHUD>(PlayerController, DayHUDClass);
+			if (DayHUD)
+			{
+				DayHUD->AddToViewport(80);
+				UE_LOG(LogSSandbox, Display, TEXT("白天正式 HUD 已加入视口：%s"), *DayHUDClass->GetName());
+			}
 		}
-		else
+#pragma endregion K2 moonyfli
+
+		if (bShowDebugPanel || !DayBoardPresenter)
 		{
-			UE_LOG(LogSSandbox, Warning, TEXT("创建调试面板失败。"));
+			UClass* PanelClass = LoadClass<USDebugPanel>(
+				nullptr,
+				TEXT("/Game/Game/Day/UI/WBP_SDebugPanel.WBP_SDebugPanel_C"));
+			if (!PanelClass)
+			{
+				PanelClass = USDebugPanel::StaticClass();
+			}
+			DebugPanel = CreateWidget<USDebugPanel>(PlayerController, PanelClass);
+			if (DebugPanel)
+			{
+				DebugPanel->AddToViewport(100);
+				UE_LOG(LogSSandbox, Display, TEXT("调试面板已加入视口：%s"), *PanelClass->GetName());
+			}
 		}
 
 		PlayerController->bShowMouseCursor = true;
-		FInputModeUIOnly InputMode;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PlayerController->SetInputMode(InputMode);
 	}
+
+#pragma region K2 moonyfli
+	if (FParse::Param(FCommandLine::Get(), TEXT("SDaySmokeTest")))
+	{
+		GetWorldTimerManager().SetTimerForNextTick(this, &ASFakeNightGateway::RunDayWhiteboxSmokeTest);
+	}
+#pragma endregion K2 moonyfli
 }
+
+#pragma region K2 moonyfli
+void ASFakeNightGateway::CleanupNightPresentation()
+{
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor || Actor == this)
+		{
+			continue;
+		}
+		const FString ClassName = Actor->GetClass()->GetName();
+		if (!ClassName.Contains(TEXT("NightCourse")))
+		{
+			continue;
+		}
+
+		if (ClassName.Contains(TEXT("Host")) || ClassName.Contains(TEXT("Stone")))
+		{
+			Actor->Destroy();
+			continue;
+		}
+
+		Actor->SetActorHiddenInGame(true);
+		Actor->SetActorEnableCollision(false);
+		Actor->SetActorTickEnabled(false);
+		TInlineComponentArray<UActorComponent*> Components;
+		Actor->GetComponents(Components);
+		for (UActorComponent* Component : Components)
+		{
+			if (Component)
+			{
+				Component->SetComponentTickEnabled(false);
+			}
+			if (UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component))
+			{
+				Primitive->SetVisibility(false, true);
+			}
+		}
+	}
+
+	--NightCleanupPassesRemaining;
+	if (NightCleanupPassesRemaining <= 0)
+	{
+		GetWorldTimerManager().ClearTimer(NightCleanupTimerHandle);
+	}
+}
+
+void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
+{
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	ASMergeBoard* Board = ASMergeBoard::FindBoard(this);
+	ASCustomerDirector* CustomerDirector = ASCustomerDirector::FindDirector(this);
+	ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this);
+	bool bPassed = true;
+	auto Check = [&bPassed](const bool bCondition, const TCHAR* Label)
+	{
+		UE_LOG(
+			LogSSandbox,
+			Display,
+			TEXT("[SDaySmoke] %s: %s"),
+			Label,
+			bCondition ? TEXT("PASS") : TEXT("FAIL"));
+		bPassed &= bCondition;
+	};
+	auto SubmitDay = [GameInstance](const FString& Id)
+	{
+		FSNightResult Result;
+		Result.ResultId = Id;
+		Result.bSuccess = true;
+		Result.Ingredients =
+		{
+			{LingGuId, 12},
+			{YinShanJunId, 12},
+			{ChiYanJiaoId, 12},
+			{YueLinYuId, 12},
+			{XuanYuQinId, 12}
+		};
+		return GameInstance->ConsumeNightResult(Result);
+	};
+	auto FindPiece = [Board](const FName IngredientId, const int32 Level) -> int32
+	{
+		for (int32 Index = 0; Index < Board->GetCells().Num(); ++Index)
+		{
+			FSDishPiece Piece;
+			if (Board->TryGetPiece(Index, Piece)
+				&& Piece.IngredientId == IngredientId
+				&& Piece.Level == Level)
+			{
+				return Index;
+			}
+		}
+		return INDEX_NONE;
+	};
+
+	Check(GameInstance && Board && CustomerDirector && NpcDirector, TEXT("core actors"));
+	Check(DayBoardPresenter && DayBoardPresenter->GetLogicBoard() == Board, TEXT("presenter bound to logic"));
+	Check(DayHUD && DayHUD->IsInViewport(), TEXT("formal HUD visible"));
+	Check(DayBoardPresenter && DayBoardPresenter->Camera
+		&& DayBoardPresenter->Camera->ProjectionMode == ECameraProjectionMode::Orthographic,
+		TEXT("portrait orthographic camera"));
+
+	if (GameInstance && Board && CustomerDirector && NpcDirector)
+	{
+		GameInstance->ResetSandbox();
+		Check(SubmitDay(TEXT("SDAY-SMOKE-DAY-1")), TEXT("success result opens day"));
+
+		const int32 BeforeMerge = GameInstance->GetQuantity(LingGuId);
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn first mother piece"));
+		const int32 FirstLingGu = FindPiece(LingGuId, 0);
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn second mother piece"));
+		int32 SecondLingGu = INDEX_NONE;
+		for (int32 Index = 0; Index < Board->GetCells().Num(); ++Index)
+		{
+			if (Index == FirstLingGu)
+			{
+				continue;
+			}
+			FSDishPiece Piece;
+			if (Board->TryGetPiece(Index, Piece) && Piece.IngredientId == LingGuId && Piece.Level == 0)
+			{
+				SecondLingGu = Index;
+				break;
+			}
+		}
+		Check(
+			FirstLingGu != INDEX_NONE
+			&& SecondLingGu != INDEX_NONE
+			&& Board->TryDropPiece(FirstLingGu, SecondLingGu)
+			&& Board->GetHighestLevel(LingGuId) == 1
+			&& GameInstance->GetQuantity(LingGuId) == BeforeMerge - 2,
+			TEXT("same-chain merge"));
+
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn customer dish"));
+		const int32 CustomerCell = FindPiece(LingGuId, 0);
+		CustomerDirector->NotifyDayStarted();
+		const bool bCustomerReady =
+			CustomerDirector->HasActiveCustomer() || CustomerDirector->SpawnFixedCustomer();
+		if (DayBoardPresenter)
+		{
+			DayBoardPresenter->RefreshFromLogic();
+		}
+		const ASDayCharacterStandIn* CustomerSeat = DayBoardPresenter
+			? DayBoardPresenter->GetSeat(NAME_None)
+			: nullptr;
+		Check(
+			bCustomerReady
+			&& CustomerSeat
+			&& !CustomerDirector->GetActiveCustomer().DisplayName.IsEmpty()
+			&& CustomerSeat->Label->Text.ToString().Contains(
+				CustomerDirector->GetActiveCustomer().DisplayName),
+			TEXT("customer seat shows guest name"));
+		Check(
+			bCustomerReady && CustomerDirector->TryDeliverFromCell(CustomerCell),
+			TEXT("customer delivery"));
+
+		NpcDirector->NotifyDayStarted();
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn ALing dish"));
+		const int32 ALingCell = FindPiece(LingGuId, 0);
+
+		// Pointer path: click the cell to select, then click the seat circle to deliver.
+		auto ProjectActor = [this](const AActor* Actor, FVector2D& OutScreen)
+		{
+			APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+			return Actor
+				&& PlayerController
+				&& UGameplayStatics::ProjectWorldToScreen(PlayerController, Actor->GetActorLocation(), OutScreen);
+		};
+		ASDayCellVisual* ALingCellVisual = DayBoardPresenter
+			? DayBoardPresenter->GetCellVisual(ALingCell)
+			: nullptr;
+		ASDayCharacterStandIn* ALingSeat = DayBoardPresenter
+			? DayBoardPresenter->GetSeat(NpcALingId)
+			: nullptr;
+		FVector2D CellScreen = FVector2D::ZeroVector;
+		FVector2D SeatScreen = FVector2D::ZeroVector;
+		const bool bProjected =
+			ProjectActor(ALingCellVisual, CellScreen) && ProjectActor(ALingSeat, SeatScreen);
+		Check(bProjected, TEXT("project board and seat to screen"));
+		if (bProjected)
+		{
+			DayBoardPresenter->SimulatePointerEvent(CellScreen, true);
+			Check(
+				Board->IsDragging() && Board->GetActiveDragCellIndex() == ALingCell,
+				TEXT("pointer press selects piece"));
+			Check(
+				ALingCellVisual->PieceMesh->GetRelativeLocation().Z > 50.0f,
+				TEXT("selected piece is highlighted"));
+			DayBoardPresenter->SimulatePointerEvent(CellScreen, false);
+			DayBoardPresenter->SimulatePointerEvent(SeatScreen, true);
+		}
+		FSSpecialNpcState ALingState;
+		Check(
+			bProjected
+			&& NpcDirector->TryGetNpc(NpcALingId, ALingState)
+			&& ALingState.bServed,
+			TEXT("ALing NPC delivery via seat circle"));
+		Check(
+			ALingSeat && ALingSeat->Label->Text.ToString().Contains(TEXT("阿翎")),
+			TEXT("seat shows NPC name and order"));
+		Check(Board->TrySpawnFromMotherPiece(YinShanJunId), TEXT("spawn SangPo dish"));
+		const int32 SangPoCell = FindPiece(YinShanJunId, 0);
+		Check(
+			Board->BeginPieceDrag(SangPoCell, 8)
+			&& NpcDirector->TryDeliverToNpc(NpcSangPoId),
+			TEXT("SangPo NPC delivery"));
+
+		const int32 BeforeReclaim = GameInstance->GetQuantity(ChiYanJiaoId);
+		Check(Board->TrySpawnFromMotherPiece(ChiYanJiaoId), TEXT("spawn reclaim dish"));
+		Check(
+			Board->ReclaimPiecesToInventory() >= 1
+			&& GameInstance->GetQuantity(ChiYanJiaoId) == BeforeReclaim,
+			TEXT("close/reclaim returns paid inventory"));
+
+		Check(GameInstance->ForceCloseShopForDebug(), TEXT("enter optional gift select"));
+		Check(GameInstance->TogglePendingGiftSelection(GiftGuideKiteId), TEXT("select first gift"));
+		Check(GameInstance->ConfirmGiftSelection(), TEXT("confirm one gift"));
+
+		GameInstance->ResetSandbox();
+		Check(SubmitDay(TEXT("SDAY-SMOKE-DAY-0")), TEXT("open day for zero gifts"));
+		Check(GameInstance->ForceCloseShopForDebug(), TEXT("close without NPC quest"));
+		Check(GameInstance->ConfirmGiftSelection(), TEXT("confirm zero gifts"));
+
+		GameInstance->ResetSandbox();
+		Check(SubmitDay(TEXT("SDAY-SMOKE-DAY-2")), TEXT("open day for two gifts"));
+		NpcDirector->NotifyDayStarted();
+		Board->TrySpawnFromMotherPiece(LingGuId);
+		Board->BeginPieceDrag(FindPiece(LingGuId, 0), 9);
+		Check(NpcDirector->TryDeliverToNpc(NpcALingId), TEXT("obtain first gift"));
+		Board->TrySpawnFromMotherPiece(YinShanJunId);
+		Board->BeginPieceDrag(FindPiece(YinShanJunId, 0), 10);
+		Check(NpcDirector->TryDeliverToNpc(NpcSangPoId), TEXT("obtain second gift"));
+		Check(GameInstance->ForceCloseShopForDebug(), TEXT("close for two gifts"));
+		Check(
+			GameInstance->TogglePendingGiftSelection(GiftGuideKiteId)
+			&& GameInstance->TogglePendingGiftSelection(GiftLifeLampId)
+			&& GameInstance->ConfirmGiftSelection(),
+			TEXT("confirm two gifts"));
+
+		GameInstance->ResetSandbox();
+		const int32 BeforeFailure = GameInstance->GetQuantity(LingGuId);
+		FSNightResult Failure;
+		Failure.ResultId = TEXT("SDAY-SMOKE-FAILURE");
+		Failure.bSuccess = false;
+		Failure.bFailedMidway = true;
+		Failure.Ingredients = {{LingGuId, 9}};
+		Check(
+			GameInstance->ConsumeNightResult(Failure)
+			&& GameInstance->GetQuantity(LingGuId) == BeforeFailure + 4
+			&& GameInstance->Phase == ESGamePhase::PrepareNight,
+			TEXT("failed night 50 percent direct inventory"));
+
+		GameInstance->ResetSandbox();
+		const int32 SavedQuantity = GameInstance->GetQuantity(YueLinYuId);
+		Check(GameInstance->SaveChefProfile(), TEXT("save profile"));
+		GameInstance->AddIngredient(YueLinYuId, 3);
+		Check(
+			GameInstance->LoadChefProfile()
+			&& GameInstance->GetQuantity(YueLinYuId) == SavedQuantity,
+			TEXT("load profile restores inventory"));
+		GameInstance->DeleteChefProfile();
+	}
+
+	bDayWhiteboxSmokePassed = bPassed;
+	const FString ScreenshotPath = FPaths::Combine(
+		FPaths::ProjectDir(),
+		TEXT("Saved"),
+		TEXT("Automation"),
+		TEXT("DayBoardWhitebox.png"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(ScreenshotPath), true);
+	FTimerHandle ExitTimerHandle;
+	GetWorldTimerManager().SetTimer(
+		ExitTimerHandle,
+		this,
+		&ASFakeNightGateway::FinishDayWhiteboxSmokeTest,
+		2.0f,
+		false);
+}
+
+void ASFakeNightGateway::FinishDayWhiteboxSmokeTest()
+{
+	const FString ScreenshotPath = FPaths::Combine(
+		FPaths::ProjectDir(),
+		TEXT("Saved"),
+		TEXT("Automation"),
+		TEXT("DayBoardWhitebox.png"));
+	if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
+	{
+		TArray<FColor> Pixels;
+		const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+		if (GetViewportScreenShot(GEngine->GameViewport->Viewport, Pixels))
+		{
+			TArray64<uint8> PngData;
+			FImageUtils::PNGCompressImageArray(
+				Size.X,
+				Size.Y,
+				TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()),
+				PngData);
+			const bool bSaved = FFileHelper::SaveArrayToFile(PngData, *ScreenshotPath);
+			UE_LOG(
+				LogSSandbox,
+				Display,
+				TEXT("[SDaySmoke] screenshot=%s path=%s"),
+				bSaved ? TEXT("PASS") : TEXT("FAIL"),
+				*ScreenshotPath);
+		}
+	}
+	UE_LOG(
+		LogSSandbox,
+		Display,
+		TEXT("[SDaySmoke] RESULT=%s"),
+		bDayWhiteboxSmokePassed ? TEXT("PASS") : TEXT("FAIL"));
+	// Only the headless -SDaySmokeTest launch owns the process; a console run stays in PIE.
+	if (FParse::Param(FCommandLine::Get(), TEXT("SDaySmokeTest")))
+	{
+		FGenericPlatformMisc::RequestExit(false);
+	}
+}
+
+static FAutoConsoleCommandWithWorld GSDayOpenDayCmd(
+	TEXT("S.Day.OpenDay"),
+	TEXT("Submit a success night result so the shop opens (manual testing)"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		if (ASFakeNightGateway* Gateway = Cast<ASFakeNightGateway>(
+			UGameplayStatics::GetActorOfClass(World, ASFakeNightGateway::StaticClass())))
+		{
+			Gateway->SubmitNewSuccessResult();
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GSDaySelectCellCmd(
+	TEXT("S.Day.Select"),
+	TEXT("S.Day.Select <cellIndex> selects a board piece as if clicked"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || Args.Num() < 1)
+		{
+			return;
+		}
+		if (ASMergeBoard* Board = ASMergeBoard::FindBoard(World))
+		{
+			Board->BeginPieceDrag(FCString::Atoi(*Args[0]), 0);
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GSDayRunSmokeCmd(
+	TEXT("S.Day.RunSmoke"),
+	TEXT("Run the day whitebox smoke test in the current game/PIE world"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		if (ASFakeNightGateway* Gateway = Cast<ASFakeNightGateway>(
+			UGameplayStatics::GetActorOfClass(World, ASFakeNightGateway::StaticClass())))
+		{
+			Gateway->RunDayWhiteboxSmokeTest();
+		}
+		else
+		{
+			UE_LOG(LogSSandbox, Warning, TEXT("[SDaySmoke] no gateway in world"));
+		}
+	}));
+#pragma endregion K2 moonyfli
 
 FSNightResult ASFakeNightGateway::MakeResult(const bool bSuccess)
 {
@@ -2762,7 +3244,7 @@ void USDebugPanel::HandleFailureClicked()
 	if (ASFakeNightGateway* Gateway = GetGateway())
 	{
 		Gateway->SubmitNewFailureResult();
-		SetFeedback(TEXT("已提交失败结果：50% 进入临时食篮，阶段保持 PrepareNight。"));
+		SetFeedback(TEXT("已提交失败结果：50% 所得已入库，阶段保持 PrepareNight。"));
 	}
 }
 
@@ -2771,7 +3253,7 @@ void USDebugPanel::HandleRepeatClicked()
 	if (ASFakeNightGateway* Gateway = GetGateway())
 	{
 		Gateway->RepeatLastResult();
-		SetFeedback(TEXT("已重复提交当前 ResultId；库存与临时食篮应保持不变。"));
+		SetFeedback(TEXT("已重复提交当前 ResultId；库存应保持不变。"));
 	}
 }
 
@@ -3017,14 +3499,17 @@ void USDebugPanel::RefreshCustomerVisual()
 	if (Director && Director->HasActiveCustomer())
 	{
 		const FSCustomerState Customer = Director->GetActiveCustomer();
-		ButtonText = FString::Printf(TEXT("交付→%s"), *Customer.Order.RecipeId.ToString());
+#pragma region K2 moonyfli
+		ButtonText = FString::Printf(TEXT("%s←%s"), *Customer.DisplayName, *Customer.Order.RecipeId.ToString());
 		Detail = FString::Printf(
-			TEXT("%s 要 %s｜耐心 %.0f/%.0fs｜售价 %d"),
+			TEXT("%s（%s）要 %s｜耐心 %.0f/%.0fs｜售价 %d"),
+			*Customer.DisplayName,
 			*Customer.CustomerId,
 			*Customer.Order.RecipeId.ToString(),
 			Customer.PatienceRemaining,
 			Customer.PatienceMax,
 			Customer.Order.SellValue);
+#pragma endregion K2 moonyfli
 	}
 	else if (Director)
 	{
@@ -3156,7 +3641,8 @@ void USDebugPanel::Refresh()
 	{
 		const FSCustomerState Customer = Director->GetActiveCustomer();
 		CustomerLine = FString::Printf(
-			TEXT("顾客: %s 订单=%s 耐心=%.0f/%.0f"),
+			TEXT("顾客: %s(%s) 订单=%s 耐心=%.0f/%.0f"),
+			*Customer.DisplayName,
 			*Customer.CustomerId,
 			*Customer.Order.RecipeId.ToString(),
 			Customer.PatienceRemaining,
@@ -3188,7 +3674,7 @@ void USDebugPanel::Refresh()
 	}
 
 	StateText->SetText(FText::FromString(FString::Printf(
-		TEXT("永久库存  灵谷:%d 阴山菌:%d 赤焰椒:%d 月鳞鱼:%d 玄羽禽:%d ｜ 临时食篮  灵谷:%d 阴山菌:%d 赤:%d 月:%d 玄:%d\n")
+		TEXT("永久库存  灵谷:%d 阴山菌:%d 赤焰椒:%d 月鳞鱼:%d 玄羽禽:%d\n")
 		TEXT("棋盘  启用:%d 占用:%d 空格:%d 拖拽格:%s 待退回:%d ｜ 最高等级 灵:%d 阴:%d 赤:%d 月:%d 玄:%d\n")
 		TEXT("谢礼卡: %s ｜ 勾选中: %s ｜ 带入夜: %s\n")
 		TEXT("GiftBuff: %s ｜ CompletedDays: %s\n")
@@ -3200,11 +3686,6 @@ void USDebugPanel::Refresh()
 		GameInstance->GetInventoryQuantity(ChiYanJiaoId),
 		GameInstance->GetInventoryQuantity(YueLinYuId),
 		GameInstance->GetInventoryQuantity(XuanYuQinId),
-		GameInstance->GetTemporaryQuantity(LingGuId),
-		GameInstance->GetTemporaryQuantity(YinShanJunId),
-		GameInstance->GetTemporaryQuantity(ChiYanJiaoId),
-		GameInstance->GetTemporaryQuantity(YueLinYuId),
-		GameInstance->GetTemporaryQuantity(XuanYuQinId),
 		Enabled,
 		Occupied,
 		Empty,
@@ -3289,3 +3770,31 @@ void ASChefGameMode::BeginPlay()
 	}
 	GetWorld()->SpawnActor<ASFakeNightGateway>(GatewayClass);
 }
+
+#pragma region K2 moonyfli
+void ASDayWhiteboxGameMode::BeginPlay()
+{
+	// Create the 3D presentation before Super spawns the gateway, so the gateway
+	// detects it and installs the day HUD instead of the legacy debug panel.
+	bool bHasPresenter = false;
+	for (TActorIterator<ASDayBoardPresenter> It(GetWorld()); It; ++It)
+	{
+		bHasPresenter = true;
+		break;
+	}
+
+	if (!bHasPresenter)
+	{
+		UClass* PresenterClass = LoadClass<ASDayBoardPresenter>(
+			nullptr,
+			TEXT("/Game/Game/Day/Board/BP_SDayBoardPresenter.BP_SDayBoardPresenter_C"));
+		if (!PresenterClass)
+		{
+			PresenterClass = ASDayBoardPresenter::StaticClass();
+		}
+		GetWorld()->SpawnActor<ASDayBoardPresenter>(PresenterClass);
+	}
+
+	Super::BeginPlay();
+}
+#pragma endregion K2 moonyfli
