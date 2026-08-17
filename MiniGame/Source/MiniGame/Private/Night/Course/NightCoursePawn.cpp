@@ -234,16 +234,41 @@ void ANightCoursePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 }
 
-void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
+// add by K2 (R1): 加速未走完的这一段石间移动，供负反应缓存命中时追赶时间轴
+void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds)
 {
-	(void)Value;
-	if (bTrackAdvancing)
+	if (!bTrackAdvancing || RateMultiplier <= 1.f || AdvanceSpeed <= KINDA_SMALL_NUMBER)
 	{
 		return;
 	}
+
+	const float Remaining = FVector::Dist(GetActorLocation(), AdvanceTargetLocation);
+	if (Remaining <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float BaseTime = Remaining / AdvanceSpeed;
+	float TargetTime = BaseTime / RateMultiplier;
+	if (MaxCompressSeconds > 0.f)
+	{
+		TargetTime = FMath::Max(TargetTime, BaseTime - MaxCompressSeconds);
+	}
+	if (TargetTime <= KINDA_SMALL_NUMBER || TargetTime >= BaseTime)
+	{
+		return;
+	}
+
+	// 只影响剩余这一段；下次 BeginTrackAdvance 会用配置速度重置
+	AdvanceSpeed = Remaining / TargetTime;
+}
+
+void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
+{
+	(void)Value;
 	if (FeelStub)
 	{
-		//add by K2
+		// add by K2 (R1): 移动中的输入不再丢弃，由 Feel 决定缓存 / 忽略 / 判定
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Jump);
 	}
 }
@@ -251,13 +276,8 @@ void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	if (bTrackAdvancing)
-	{
-		return;
-	}
 	if (FeelStub)
 	{
-		//add by K2
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Attack);
 	}
 }
