@@ -33,8 +33,8 @@ namespace
 	const FName XuanYuQinId(TEXT("XuanYuQin"));
 	const FName NpcALingId(TEXT("ALing"));
 	const FName NpcSangPoId(TEXT("SangPo"));
-	const FName GiftGuideKiteId(TEXT("GuideKite"));
-	const FName GiftLifeLampId(TEXT("LifeLamp"));
+	/** Seat owner key for the walk-in guest; NPC seats use their own id. */
+	const FName GuestSeatKey(TEXT("__WalkInGuest")); //add by K2
 
 	UStaticMesh* LoadBasicShape(const TCHAR* Path)
 	{
@@ -417,8 +417,7 @@ void ASDayBoardPresenter::Tick(const float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	// Patience and spawn countdowns move without any board event, so poll instead of
-	// waiting for the next pointer interaction to redraw seats and cells.
+	// Spawn and shop countdowns move without board events, so keep the presentation fresh.
 	SeatRefreshCountdown -= DeltaSeconds;
 	if (SeatRefreshCountdown <= 0.0f)
 	{
@@ -666,16 +665,21 @@ void ASDayBoardPresenter::BuildCharacters()
 	{
 		CharacterClass = Config->CharacterStandInClass;
 	}
-	const TArray<FString> Labels = {TEXT("顾客"), TEXT("阿翎"), TEXT("桑婆"), TEXT("厨师")};
+#pragma region K2 moonyfli
+	// Four shared seats along the top plus the chef; occupants are assigned at refresh time.
+	const TArray<FString> Labels = {TEXT("空座"), TEXT("空座"), TEXT("空座"), TEXT("空座"), TEXT("厨师")};
 	const TArray<FVector> Locations =
 	{
-		{-280, 815, 105}, {-80, 815, 105}, {130, 815, 105}, {405, -365, 105}
+		{-315, 815, 105}, {-105, 815, 105}, {105, 815, 105}, {315, 815, 105}, {405, -365, 105}
 	};
 	const TArray<FLinearColor> Colors =
 	{
-		FLinearColor(0.95f, 0.75f, 0.65f), FLinearColor(0.15f, 0.80f, 0.65f),
-		FLinearColor(0.95f, 0.35f, 0.45f), FLinearColor(0.92f, 0.92f, 0.88f)
+		FLinearColor(0.95f, 0.75f, 0.65f), FLinearColor(0.95f, 0.75f, 0.65f),
+		FLinearColor(0.95f, 0.75f, 0.65f), FLinearColor(0.95f, 0.75f, 0.65f),
+		FLinearColor(0.92f, 0.92f, 0.88f)
 	};
+	const int32 ChefIndex = SeatCount;
+#pragma endregion K2 moonyfli
 
 	for (int32 Index = 0; Index < Labels.Num(); ++Index)
 	{
@@ -692,9 +696,9 @@ void ASDayBoardPresenter::BuildCharacters()
 		Character->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
 		if (Config)
 		{
-			UStaticMesh* Mesh = Index == 3
+			UStaticMesh* Mesh = Index == ChefIndex
 				? Config->ChefMesh.LoadSynchronous()
-				: (Index == 0 ? Config->CustomerMesh.LoadSynchronous() : Config->NpcMesh.LoadSynchronous());
+				: Config->CustomerMesh.LoadSynchronous();
 			if (Mesh)
 			{
 				Character->CharacterMesh->SetStaticMesh(Mesh);
@@ -704,15 +708,15 @@ void ASDayBoardPresenter::BuildCharacters()
 				Character->CharacterMesh->SetMaterial(0, Material);
 			}
 		}
-		// Seats 0-2 are the three circles at the top of the portrait view and accept deliveries;
-		// seat 3 is the chef and stays inert.
-		Character->NpcId = Index == 1 ? NpcALingId : (Index == 2 ? NpcSangPoId : NAME_None);
-		Character->bDeliveryTarget = Index != 3;
+		Character->NpcId = NAME_None;
+		Character->bOccupied = false;
+		Character->bDeliveryTarget = Index != ChefIndex;
 		Character->SetLabelFont(ResolveLabelFont());
 		Character->Configure(Labels[Index], Colors[Index]);
 		CharacterStandIns.Add(Character);
 	}
 
+	SeatOccupants.Init(NAME_None, SeatCount); //add by K2
 	RefreshCharacters();
 }
 
@@ -734,61 +738,108 @@ void ASDayBoardPresenter::RefreshCharacters()
 	const ASCustomerDirector* CustomerDirector = ASCustomerDirector::FindDirector(this);
 	const ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this);
 
+	TArray<ASDayCharacterStandIn*> Seats;
 	for (ASDayCharacterStandIn* Character : CharacterStandIns)
 	{
-		if (!Character || !Character->bDeliveryTarget)
+		if (Character && Character->bDeliveryTarget)
+		{
+			Seats.Add(Character);
+		}
+	}
+	if (Seats.IsEmpty())
+	{
+		return;
+	}
+	if (SeatOccupants.Num() != Seats.Num())
+	{
+		SeatOccupants.Init(NAME_None, Seats.Num());
+	}
+
+	// Everyone waiting in the shop right now: the walk-in guest plus revealed NPCs that
+	// have not been served. Served characters leave at once and hand the seat back.
+	TArray<FName> Waiting;
+	if (CustomerDirector && CustomerDirector->HasActiveCustomer())
+	{
+		Waiting.Add(GuestSeatKey);
+	}
+	if (NpcDirector)
+	{
+		for (const FSSpecialNpcState& Npc : NpcDirector->GetNpcs())
+		{
+			if (Npc.bPresent && !Npc.bServed)
+			{
+				Waiting.Add(Npc.NpcId);
+			}
+		}
+	}
+
+	// Keep whoever is already seated in place so labels do not jump when a neighbour leaves.
+	for (FName& Occupant : SeatOccupants)
+	{
+		if (!Occupant.IsNone() && !Waiting.Contains(Occupant))
+		{
+			Occupant = NAME_None;
+		}
+	}
+	for (const FName& Key : Waiting)
+	{
+		if (SeatOccupants.Contains(Key))
 		{
 			continue;
 		}
-
-		// Seats sit ~200 units apart, so every line stays short enough not to collide
-		// with the neighbouring plate; the full wording lives on the HUD order bar.
-		if (Character->NpcId.IsNone())
+		const int32 FreeSeat = SeatOccupants.IndexOfByPredicate([](const FName Id) { return Id.IsNone(); });
+		if (FreeSeat != INDEX_NONE)
 		{
-			FString Headline = TEXT("空座\n等待顾客");
-			FLinearColor Color(0.62f, 0.58f, 0.54f);
-			if (CustomerDirector)
-			{
-				if (CustomerDirector->HasActiveCustomer())
-				{
-					const FSCustomerState Customer = CustomerDirector->GetActiveCustomer();
-					Headline = FString::Printf(
-						TEXT("%s\n%sLv%d\n%.0fs"),
-						Customer.DisplayName.IsEmpty() ? *Customer.CustomerId : *Customer.DisplayName,
-						*IngredientShortName(Customer.Order.IngredientId),
-						Customer.Order.Level,
-						Customer.PatienceRemaining);
-					Color = FLinearColor(0.98f, 0.86f, 0.42f);
-				}
-				else
-				{
-					Headline = FString::Printf(
-						TEXT("空座\n下一位\n%.0fs"),
-						CustomerDirector->GetSpawnCooldownRemaining());
-				}
-			}
-			Character->SetHeadline(Headline, Color);
+			SeatOccupants[FreeSeat] = Key;
+		}
+	}
+
+	for (int32 SeatIndex = 0; SeatIndex < Seats.Num(); ++SeatIndex)
+	{
+		ASDayCharacterStandIn* Seat = Seats[SeatIndex];
+		const FName Occupant = SeatOccupants[SeatIndex];
+
+		if (Occupant.IsNone())
+		{
+			Seat->NpcId = NAME_None;
+			Seat->bOccupied = false;
+			ApplyTint(Seat->CharacterMesh, FLinearColor(0.55f, 0.53f, 0.50f));
+			const FString Headline = CustomerDirector && !CustomerDirector->HasActiveCustomer()
+				? FString::Printf(TEXT("空座\n下一位\n%.0fs"), CustomerDirector->GetSpawnCooldownRemaining())
+				: TEXT("空座");
+			Seat->SetHeadline(Headline, FLinearColor(0.62f, 0.58f, 0.54f));
+			continue;
+		}
+
+		// Seats sit ~210 units apart, so every line stays short enough not to collide
+		// with the neighbouring plate; the full wording lives on the HUD order bar.
+		if (Occupant == GuestSeatKey)
+		{
+			const FSCustomerState Customer = CustomerDirector->GetActiveCustomer();
+			Seat->NpcId = NAME_None;
+			Seat->bOccupied = true;
+			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
+			Seat->SetHeadline(
+				FString::Printf(
+					TEXT("%s\n%sLv%d\n等待中"),
+					Customer.DisplayName.IsEmpty() ? *Customer.CustomerId : *Customer.DisplayName,
+					*IngredientShortName(Customer.Order.IngredientId),
+					Customer.Order.Level),
+				FLinearColor(0.98f, 0.86f, 0.42f));
 			continue;
 		}
 
 		FSSpecialNpcState Npc;
-		if (!NpcDirector || !NpcDirector->TryGetNpc(Character->NpcId, Npc))
+		if (!NpcDirector || !NpcDirector->TryGetNpc(Occupant, Npc))
 		{
-			Character->SetHeadline(
-				FString::Printf(TEXT("%s\n未到店"), *Character->NpcId.ToString()),
-				FLinearColor(0.62f, 0.58f, 0.54f));
+			SeatOccupants[SeatIndex] = NAME_None;
 			continue;
 		}
 
-		if (Npc.bServed)
-		{
-			Character->SetHeadline(
-				FString::Printf(TEXT("%s\n已服务✓"), *Npc.DisplayName),
-				FLinearColor(0.45f, 0.80f, 0.58f));
-			continue;
-		}
-
-		Character->SetHeadline(
+		Seat->NpcId = Npc.NpcId;
+		Seat->bOccupied = true;
+		ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
+		Seat->SetHeadline(
 			FString::Printf(
 				TEXT("%s\n%sLv%d\n→%s"),
 				*Npc.DisplayName,
@@ -802,6 +853,11 @@ void ASDayBoardPresenter::RefreshCharacters()
 bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board)
 {
 	if (!Character || !Character->bDeliveryTarget || !Board || !Board->IsDragging())
+	{
+		return false;
+	}
+
+	if (!Character->bOccupied) //add by K2
 	{
 		return false;
 	}
@@ -869,13 +925,91 @@ ASDayCharacterStandIn* ASDayBoardPresenter::GetSeat(const FName InNpcId) const
 {
 	for (ASDayCharacterStandIn* Character : CharacterStandIns)
 	{
-		if (Character && Character->bDeliveryTarget && Character->NpcId == InNpcId)
+		if (Character && Character->bDeliveryTarget && Character->bOccupied && Character->NpcId == InNpcId)
 		{
 			return Character;
 		}
 	}
 	return nullptr;
 }
+
+#pragma region K2 moonyfli
+int32 ASDayBoardPresenter::GetDeliverySeatCount() const
+{
+	int32 Count = 0;
+	for (const ASDayCharacterStandIn* Character : CharacterStandIns)
+	{
+		if (Character && Character->bDeliveryTarget)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+ASDayIngredientBinVisual* ASDayBoardPresenter::GetIngredientBin(const FName IngredientId) const
+{
+	for (ASDayIngredientBinVisual* Bin : IngredientBins)
+	{
+		if (Bin && Bin->IngredientId == IngredientId)
+		{
+			return Bin;
+		}
+	}
+	return nullptr;
+}
+
+bool ASDayBoardPresenter::IsInIngredientDropZone(const FVector2D& ScreenPosition) const
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PlayerController || IngredientBins.IsEmpty())
+	{
+		return false;
+	}
+
+	FVector2D Min(FLT_MAX, FLT_MAX);
+	FVector2D Max(-FLT_MAX, -FLT_MAX);
+	int32 ProjectedCount = 0;
+	for (const ASDayIngredientBinVisual* Bin : IngredientBins)
+	{
+		FVector2D BinScreen;
+		if (Bin && UGameplayStatics::ProjectWorldToScreen(
+			PlayerController,
+			Bin->GetActorLocation(),
+			BinScreen))
+		{
+			Min.X = FMath::Min(Min.X, BinScreen.X);
+			Min.Y = FMath::Min(Min.Y, BinScreen.Y);
+			Max.X = FMath::Max(Max.X, BinScreen.X);
+			Max.Y = FMath::Max(Max.Y, BinScreen.Y);
+			++ProjectedCount;
+		}
+	}
+
+	if (ProjectedCount == 0)
+	{
+		return false;
+	}
+
+	// A generous shared rectangle covers all five baskets and the gaps between them.
+	const FVector2D Padding(120.0f, 100.0f);
+	return ScreenPosition.X >= Min.X - Padding.X
+		&& ScreenPosition.X <= Max.X + Padding.X
+		&& ScreenPosition.Y >= Min.Y - Padding.Y
+		&& ScreenPosition.Y <= Max.Y + Padding.Y;
+}
+
+bool ASDayBoardPresenter::TryDecomposeInIngredientArea(
+	const FVector2D& ScreenPosition,
+	ASMergeBoard* Board)
+{
+	if (!Board || !Board->IsDragging() || !IsInIngredientDropZone(ScreenPosition))
+	{
+		return false;
+	}
+	return Board->TryDecomposePieceToInventory(Board->GetActiveDragCellIndex());
+}
+#pragma endregion K2 moonyfli
 
 bool ASDayBoardPresenter::GetPointerState(FVector2D& OutScreenPosition) const
 {
@@ -932,6 +1066,13 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 		return;
 	}
 	bDropHandledOnPress = false;
+
+	if (TryDecomposeInIngredientArea(ScreenPosition, Board))
+	{
+		bDropHandledOnPress = true;
+		RefreshFromLogic();
+		return;
+	}
 
 	if (ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitTest(ScreenPosition)))
 	{
@@ -994,6 +1135,11 @@ void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 	}
 
 	const int32 FromIndex = Board->GetActiveDragCellIndex();
+	if (TryDecomposeInIngredientArea(ScreenPosition, Board))
+	{
+		RefreshFromLogic();
+		return;
+	}
 	AActor* HitActor = HitTest(ScreenPosition);
 	if (ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitActor))
 	{
@@ -1032,6 +1178,13 @@ void USDayHUD::NativeConstruct()
 	{
 		GameInstance->OnSandboxStateChanged.AddUniqueDynamic(this, &USDayHUD::Refresh);
 	}
+#pragma region K2 moonyfli
+	// The shop clock only advances on tick, so poll it instead of waiting for a state event.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(RefreshTimerHandle, this, &USDayHUD::Refresh, 0.2f, true);
+	}
+#pragma endregion K2 moonyfli
 	Refresh();
 }
 
@@ -1040,6 +1193,10 @@ void USDayHUD::NativeDestruct()
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
 		GameInstance->OnSandboxStateChanged.RemoveDynamic(this, &USDayHUD::Refresh);
+	}
+	if (UWorld* World = GetWorld()) //add by K2
+	{
+		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
 	}
 	Super::NativeDestruct();
 }
@@ -1123,17 +1280,14 @@ void USDayHUD::BuildWidgetTree()
 	Yue->OnClicked.AddDynamic(this, &USDayHUD::HandleYueLinYu);
 	Xuan->OnClicked.AddDynamic(this, &USDayHUD::HandleXuanYuQin);
 
-	UHorizontalBox* Gifts = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GiftRow"));
-	Root->AddChildToVerticalBox(Gifts)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
-	GuideKiteButton = MakeButton(TEXT("DayGuideKiteButton"), TEXT("纸鸢"));
-	LifeLampButton = MakeButton(TEXT("DayLifeLampButton"), TEXT("纸灯"));
-	ConfirmNightButton = MakeButton(TEXT("DayConfirmNightButton"), TEXT("确认入夜"));
-	Gifts->AddChildToHorizontalBox(GuideKiteButton)->SetPadding(FMargin(4.0f));
-	Gifts->AddChildToHorizontalBox(LifeLampButton)->SetPadding(FMargin(4.0f));
-	Gifts->AddChildToHorizontalBox(ConfirmNightButton)->SetPadding(FMargin(4.0f));
-	GuideKiteButton->OnClicked.AddDynamic(this, &USDayHUD::HandleGuideKite);
-	LifeLampButton->OnClicked.AddDynamic(this, &USDayHUD::HandleLifeLamp);
-	ConfirmNightButton->OnClicked.AddDynamic(this, &USDayHUD::HandleConfirmNight);
+	GiftTabText = MakeText(TEXT("DayGiftTabText"), 18, FLinearColor(0.72f, 0.88f, 1.0f));
+	Root->AddChildToVerticalBox(GiftTabText)->SetPadding(FMargin(18.0f, 4.0f));
+
+	UHorizontalBox* Flow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FlowRow"));
+	Root->AddChildToVerticalBox(Flow)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
+	FlowButton = MakeButton(TEXT("DayFlowButton"), TEXT("入夜"));
+	Flow->AddChildToHorizontalBox(FlowButton)->SetPadding(FMargin(4.0f));
+	FlowButton->OnClicked.AddDynamic(this, &USDayHUD::HandleFlowButton);
 }
 
 void USDayHUD::Refresh()
@@ -1146,13 +1300,18 @@ void USDayHUD::Refresh()
 
 	if (PhaseText)
 	{
+		const FString ClockLine = GameInstance->IsShopOpen()
+			? FString::Printf(TEXT("  剩余 %.0fs"), GameInstance->GetDayTimeRemaining())
+			: FString();
 		PhaseText->SetText(FText::FromString(FString::Printf(
-			TEXT("%s  %s  营业额 %d/%d  缺口 %d"),
+			TEXT("%s  %s  营业额 %d/%d  缺口 %d%s\n%s"),
 			*GameInstance->GetPhaseDisplayName(),
 			*GameInstance->StageId.ToString(),
 			GameInstance->Revenue,
 			GameInstance->RevenueTarget,
-			GameInstance->GetRevenueGap())));
+			GameInstance->GetRevenueGap(),
+			*ClockLine,
+			*GameInstance->GetPlannedOrderSummary())));
 	}
 	if (InventoryText)
 	{
@@ -1176,14 +1335,12 @@ void USDayHUD::Refresh()
 				const FString Name = Customer.DisplayName.IsEmpty() ? Customer.CustomerId : Customer.DisplayName;
 				CustomerButtonText = FString::Printf(TEXT("交付给 %s"), *Name);
 				OrderLine = FString::Printf(
-					TEXT("当前顾客：%s（%s）｜订单：%s Lv%d｜售价：%d｜耐心：%.0f/%.0fs"),
+					TEXT("当前顾客：%s（%s）｜订单：%s Lv%d｜售价：%d｜可一直等待"),
 					*Name,
 					*Customer.CustomerId,
 					*IngredientShortName(Customer.Order.IngredientId),
 					Customer.Order.Level,
-					Customer.Order.SellValue,
-					Customer.PatienceRemaining,
-					Customer.PatienceMax);
+					Customer.Order.SellValue);
 			}
 			else
 			{
@@ -1217,16 +1374,34 @@ void USDayHUD::Refresh()
 		FeedbackText->SetText(FText::FromString(FString::Printf(TEXT("操作：%s"), *GameInstance->LastBoardFeedback)));
 	}
 
-	const bool bGiftSelect = GameInstance->Phase == ESGamePhase::GiftSelect;
-	GuideKiteButton->SetVisibility(bGiftSelect ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	LifeLampButton->SetVisibility(bGiftSelect ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	ConfirmNightButton->SetVisibility(bGiftSelect ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	SetButtonText(
-		GuideKiteButton,
-		GameInstance->PendingGiftIds.Contains(GiftGuideKiteId) ? TEXT("纸鸢 ✓") : TEXT("纸鸢"));
-	SetButtonText(
-		LifeLampButton,
-		GameInstance->PendingGiftIds.Contains(GiftLifeLampId) ? TEXT("纸灯 ✓") : TEXT("纸灯"));
+	if (GiftTabText)
+	{
+		// 页签只做展示：谢礼完成订单即得即用，没有勾选也没有背包。
+		const bool bBeforeNight = GameInstance->Phase == ESGamePhase::PrepareNight;
+		GiftTabText->SetText(FText::FromString(bBeforeNight
+			? FString::Printf(TEXT("入夜前｜%s"), *GameInstance->GetGiftTabSummary())
+			: GameInstance->GetGiftTabSummary()));
+		GiftTabText->SetColorAndOpacity(FSlateColor(bBeforeNight
+			? FLinearColor(1.0f, 0.88f, 0.45f)
+			: FLinearColor(0.72f, 0.88f, 1.0f)));
+	}
+
+	FString FlowLabel;
+	switch (GameInstance->Phase)
+	{
+	case ESGamePhase::Boot:
+	case ESGamePhase::PrepareNight: FlowLabel = TEXT("入夜"); break;
+	case ESGamePhase::NightRunning: FlowLabel = TEXT("模拟夜间到达终点"); break;
+	case ESGamePhase::DayRunning: FlowLabel = TEXT("闭店（未达标将回档）"); break;
+	case ESGamePhase::DayQualified: FlowLabel = TEXT("闭店日结"); break;
+	case ESGamePhase::Ending: FlowLabel = TEXT("尾声"); break;
+	default: break;
+	}
+	if (FlowButton)
+	{
+		FlowButton->SetVisibility(FlowLabel.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		SetButtonText(FlowButton, FlowLabel);
+	}
 }
 
 void USDayHUD::HandleCustomer()
@@ -1262,22 +1437,12 @@ void USDayHUD::HandleChiYanJiao() { SpawnIngredient(ChiYanJiaoId); }
 void USDayHUD::HandleYueLinYu() { SpawnIngredient(YueLinYuId); }
 void USDayHUD::HandleXuanYuQin() { SpawnIngredient(XuanYuQinId); }
 
-void USDayHUD::ToggleGift(const FName GiftId)
+void USDayHUD::HandleFlowButton()
 {
-	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	if (ASFakeNightGateway* Gateway = Cast<ASFakeNightGateway>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), ASFakeNightGateway::StaticClass())))
 	{
-		GameInstance->TogglePendingGiftSelection(GiftId);
-	}
-}
-
-void USDayHUD::HandleGuideKite() { ToggleGift(GiftGuideKiteId); }
-void USDayHUD::HandleLifeLamp() { ToggleGift(GiftLifeLampId); }
-
-void USDayHUD::HandleConfirmNight()
-{
-	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
-	{
-		GameInstance->ConfirmGiftSelection();
+		Gateway->AdvanceFlow();
 	}
 }
 

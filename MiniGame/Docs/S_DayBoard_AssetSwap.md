@@ -17,9 +17,9 @@
 |---|---|---|
 | `BP_SDayBoardPresenter` | 竖屏构图、相机、棋盘框、柜台和各锚点 | `DA_SDayBoardVisualConfig` |
 | `BP_SDayCellVisual` | 可玩孔位、点击碰撞、棋子挂点 | `CellMesh` / `PieceMesh` |
-| `BP_SDayIngredientBinVisual` | 底部五类食材箱和点击碰撞 | `IngredientBinMesh` |
-| `BP_SDayCharacterStandIn` | 厨师、顾客、NPC 的占位壳；顶部三个座位同时是交付目标 | `ChefMesh` / `CustomerMesh` / `NpcMesh` |
-| `WBP_SDayHUD` | 顶部订单/交付、营业额、库存、选礼 | Widget Blueprint 外观 |
+| `BP_SDayIngredientBinVisual` | 底部五类食材箱；五箱及间隙共同构成高级食材分解区 | `IngredientBinMesh` |
+| `BP_SDayCharacterStandIn` | 厨师、顾客、NPC 的占位壳；顶部四个共享座位同时是交付目标 | `ChefMesh` / `CustomerMesh` / `NpcMesh` |
+| `WBP_SDayHUD` | 顶部订单/交付、营业额与开店倒计时、库存、谢礼页签、流程按钮 | Widget Blueprint 外观 |
 | `DT_SDayBoardLayout` | 12 个逻辑格的世界位置与视觉半径 | 仅允许调 Transform/VisualRadius |
 | `DA_SDayBoardVisualConfig` | 全部软引用的集中替换表 | 美术交付后只改这里 |
 
@@ -31,10 +31,10 @@
 - 棋盘、孔位、棋子、箱子均以底部中心为 Pivot，Z+ 朝上。
 - 孔位和棋子默认面向顶视相机；孔位 Mesh 不负责逻辑碰撞，碰撞由 `ASDayCellVisual` 管理。
 - 棋子模型建议直径 100 cm、高度 40–90 cm；等级尺寸由表现层统一缩放。
-- 食材箱建议 120×80×70 cm，点击碰撞必须覆盖箱体上表面。
+- 食材箱建议 120×80×70 cm；母棋子点击仍依赖箱体碰撞，高级食材分解使用覆盖整个食材区的共享屏幕区域。
 - 角色占位建议原点在脚底，朝向 Y-；厨师与顾客/NPC 可分别替换 Mesh 和 AnimClass。
-- 顶部三个座位（顾客、阿翎、桑婆）是交付目标，Mesh 必须响应 `Visibility` Trace；厨师不接收交付。
-- 座位名牌是 `Label` TextRender，挂在角色下方（屏幕方向），最多三行：姓名 / 需求 / 倒计时或谢礼。
+- 顶部四个座位是共享席位，普通顾客与特殊 NPC 到店时按空位入座、订单完成后立即离店空出；Mesh 必须响应 `Visibility` Trace；厨师不接收交付。
+- 座位名牌是 `Label` TextRender，挂在角色下方（屏幕方向），最多三行：姓名 / 需求 / 等待状态或谢礼；空座只显示「空座」与下一位倒计时。
 - 所有可交互组件必须响应 `Visibility` Trace；装饰孔位必须关闭碰撞。
 
 ### 世界标签字体
@@ -65,12 +65,15 @@
 1. 只替换 `DA_SDayBoardVisualConfig` 中一个 Mesh。
 2. PIE 后确认 12 格位置、点击和拖放不变。
 3. 取两个同链同级棋子合成，确认模型和 Lv 标签刷新。
-4. 异链/异级拖放应回弹，不扣库存。
-5. 选中棋子必须有明显高亮（孔位变色 + 棋子抬升放大）。
-6. 把棋子拖到（或点到）顶部座位可完成交付；座位名牌显示姓名与需求。
-7. 闭店时盘上未交付棋子按 `PaidUnits` 退回库存。
-8. 0/1/2 件谢礼均可确认进入下一夜。
-9. 棋子、食材箱、座位三处标签的中文与 `Lv0`/倒计时必须完整显示，不得出现方块或缺字。
+4. 把 Lv1–Lv4 食材拖到五个基础食材箱或其间隙，确认撤销全部合成并按 `PaidUnits` 回到对应基础库存。
+5. 异链/异级拖放应回弹，不扣库存。
+6. 选中棋子必须有明显高亮（孔位变色 + 棋子抬升放大）。
+7. 把棋子拖到（或点到）顶部座位可完成交付；普通顾客没有耐心值，可一直等待。
+8. 闭店时盘上未交付棋子按 `PaidUnits` 退回库存。
+9. 服务阿翎/桑婆后谢礼**立刻**出现在页签且已生效；页签只读，没有勾选与确认。
+10. HUD 顶部显示开店剩余秒数；倒计时归零自动闭店（未达标回档日初，达标进日结）。
+11. 棋子、食材箱、座位三处标签的中文与 `Lv0` 必须完整显示，不得出现方块或缺字。
 
 PIE 内可用 `S.Day.OpenDay` 开店、`S.Day.Select <格号>` 选中棋子、`S.Day.RunSmoke` 跑全量冒烟。
+HUD 底部「流程」按钮按阶段变化：入夜 → 模拟夜间到达终点 → 闭店。
 

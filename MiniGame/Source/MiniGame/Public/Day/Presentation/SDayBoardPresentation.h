@@ -161,13 +161,17 @@ public:
 
 	void SetLabelFont(UFont* InFont);
 
-	/** None on the walk-in customer seat; set to ALing/SangPo on the guaranteed NPC seats. */
+	/** None while empty or taken by a walk-in guest; set to ALing/SangPo when an NPC sits down. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	FName NpcId = NAME_None;
 
 	/** Seats accept a dragged piece; the chef stand-in does not. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	bool bDeliveryTarget = false;
+
+	/** Seats are shared: a guest or NPC takes one on arrival and frees it once served. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	bool bOccupied = false; //add by K2
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UStaticMeshComponent> CharacterMesh;
@@ -200,9 +204,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	ASDayCellVisual* GetCellVisual(int32 CellIndex) const;
 
-	/** NAME_None returns the walk-in customer seat. */
+	/** NAME_None returns the seat the walk-in guest currently occupies. */
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	ASDayCharacterStandIn* GetSeat(FName InNpcId) const;
+
+	/** Shared seats in the top row; the chef stand-in is not one of them. */
+	static constexpr int32 SeatCount = 4; //add by K2
+
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	int32 GetDeliverySeatCount() const; //add by K2
+
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	ASDayIngredientBinVisual* GetIngredientBin(FName IngredientId) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TSoftObjectPtr<USDayBoardVisualConfig> VisualConfig;
@@ -236,6 +249,8 @@ private:
 	void RefreshCharacters();
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+	bool IsInIngredientDropZone(const FVector2D& ScreenPosition) const;
+	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
 	void HandlePointerPressed(const FVector2D& ScreenPosition);
 	void HandlePointerReleased(const FVector2D& ScreenPosition);
 	bool GetPointerState(FVector2D& OutScreenPosition) const;
@@ -252,6 +267,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
+
+	/** Who owns each shared seat; GuestSeatKey for the walk-in guest, NPC id otherwise. */
+	TArray<FName> SeatOccupants; //add by K2
 
 	bool bPointerWasDown = false;
 	bool bDropHandledOnPress = false;
@@ -300,17 +318,10 @@ private:
 	void HandleXuanYuQin();
 
 	UFUNCTION()
-	void HandleGuideKite();
-
-	UFUNCTION()
-	void HandleLifeLamp();
-
-	UFUNCTION()
-	void HandleConfirmNight();
+	void HandleFlowButton();
 
 	void SpawnIngredient(FName IngredientId);
 	void DeliverNpc(FName NpcId);
-	void ToggleGift(FName GiftId);
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> PhaseText;
@@ -333,14 +344,15 @@ private:
 	UPROPERTY()
 	TObjectPtr<UButton> SangPoButton;
 
+	/** 入夜前礼品卡页签：只读展示，谢礼拿到即生效，玩家不需要挑选。 */
 	UPROPERTY()
-	TObjectPtr<UButton> GuideKiteButton;
+	TObjectPtr<UTextBlock> GiftTabText;
 
 	UPROPERTY()
-	TObjectPtr<UButton> LifeLampButton;
+	TObjectPtr<UButton> FlowButton;
 
-	UPROPERTY()
-	TObjectPtr<UButton> ConfirmNightButton;
+	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
+	FTimerHandle RefreshTimerHandle; //add by K2
 };
 
 #pragma endregion K2 moonyfli
