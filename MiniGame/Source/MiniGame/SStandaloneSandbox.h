@@ -116,6 +116,158 @@ struct FSGameStageRow : public FTableRowBase
 	FString DisplayName;
 };
 
+#pragma region K2 moonyfli
+/** DT_SDayBalance 单行 Default：白天全局可调数值。 */
+USTRUCT(BlueprintType)
+struct FSDayBalanceRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0"))
+	int32 CarryOverTargetBonusPerUnit = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 MaxDishLevel = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1"))
+	int32 MinPlannedOrderSlots = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float OrderMidLevelWeight = 1.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float OrderEdgeLevelWeight = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float T0LowLevelBias = 1.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float T0HighLevelBias = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float LaterMidLevelBias = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float LaterEdgeLevelBias = 0.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0"))
+	float GluttonBoxFoeWeight = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "6"))
+	int32 MaxServiceSeats = 6;
+};
+
+/** DT_Ingredients 行：食材显示与短名。 */
+USTRUCT(BlueprintType)
+struct FSIngredientDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName IngredientId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString ShortName;
+};
+
+/** DT_SpecialNpcs 行：特殊顾客委托规则、谢礼与对白。 */
+USTRUCT(BlueprintType)
+struct FSSpecialNpcDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName NpcId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName DefaultIngredientId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 DefaultLevel = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName GiftId = NAME_None;
+
+	/** Designer-facing commission rule (mirrors design sheet). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString CommissionSummary;
+
+	/** Preferred distinct ingredient-chain count for the commission (e.g. NPC A = 2). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "5"))
+	int32 RequiredChainCount = 1;
+
+	/** Minimum dish level for the preferred commission. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 MinLevel = 0;
+
+	/** Fallback Lv0 portion count when the preferred dish cannot be cooked. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "8"))
+	int32 FallbackLv0Count = 1;
+
+	/** Optional seal tag filter: None / Reverse / Double / Miasma. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName SealRequirement = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString AppearanceNote;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString Dialogue;
+};
+
+/** DT_Gifts 行：谢礼显示、Buff 开关与下局自动效果数值。 */
+USTRUCT(BlueprintType)
+struct FSGiftDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName GiftId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString EffectText;
+
+	/** When the night buff applies: BeforeFork / EnterMatch / AfterFork / NearDeath. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName EffectTrigger = NAME_None;
+
+	/** Numeric magnitude from the design sheet (0.3 rhythm, 2.5s dash, 40 HP, …). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float EffectValue = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bGuideKite = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bLifeLamp = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bBeatCoin = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bGluttonBox = false;
+};
+
+/** DT_CustomerNames 行：普通顾客显示名池。 */
+USTRUCT(BlueprintType)
+struct FSCustomerNameRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+};
+#pragma endregion K2 moonyfli
+
 USTRUCT(BlueprintType)
 struct FSIngredientStack
 {
@@ -243,6 +395,10 @@ struct FSCustomerState
 #pragma region K2 moonyfli
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString DisplayName;
+
+	/** Shared service seat occupied by this customer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 SeatIndex = INDEX_NONE;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -270,6 +426,18 @@ struct FSGiftBuffState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bGluttonBox = false;
 
+	/** Pre-fork gather rhythm bonus (e.g. 0.3 = +30%). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PreForkGatherRhythmBonus = 0.0f;
+
+	/** Invulnerable dash seconds after entering a fork. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PostForkInvulnDashSeconds = 0.0f;
+
+	/** HP restored when near death. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float NearDeathHeal = 0.0f;
+
 	FString ToDebugString() const
 	{
 		TArray<FString> Parts;
@@ -277,6 +445,18 @@ struct FSGiftBuffState
 		if (bLifeLamp) Parts.Add(TEXT("LifeLamp"));
 		if (bBeatCoin) Parts.Add(TEXT("BeatCoin"));
 		if (bGluttonBox) Parts.Add(TEXT("GluttonBox"));
+		if (PreForkGatherRhythmBonus > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("PreForkRhythm+%.0f%%"), PreForkGatherRhythmBonus * 100.0f));
+		}
+		if (PostForkInvulnDashSeconds > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("PostForkDash%.1fs"), PostForkInvulnDashSeconds));
+		}
+		if (NearDeathHeal > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("NearDeath+%.0f"), NearDeathHeal));
+		}
 		return Parts.IsEmpty() ? TEXT("None") : FString::Join(Parts, TEXT(", "));
 	}
 };
@@ -441,6 +621,12 @@ struct FSSpecialNpcState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName GiftId = NAME_None;
 
+#pragma region K2 moonyfli
+	/** Shared service seat occupied while this NPC is present. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 SeatIndex = INDEX_NONE;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bPresent = false;
 
@@ -517,6 +703,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Orders")
 	FString GetPlannedOrderSummary() const;
 
+#pragma region K2 moonyfli
+	/** Take the next appearance slot and advance the queue cursor immediately. */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	bool TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder);
+#pragma endregion K2 moonyfli
+
 	/** Reveal leading NPC slots, then return the next guest order without advancing past it. */
 	UFUNCTION(BlueprintCallable, Category = "S Orders")
 	bool TryPrepareNextGuestOrder(FSOrderRequest& OutOrder);
@@ -584,6 +776,32 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Gifts")
 	static FString GetGiftDisplayName(FName GiftId);
 
+#pragma region K2 moonyfli
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FSDayBalanceRow GetDayBalance() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	int32 GetConfiguredMaxDishLevel() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	int32 GetServiceSeatCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FString ResolveIngredientDisplayName(FName IngredientId) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FString ResolveIngredientShortName(FName IngredientId) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	bool TryGetSpecialNpcDef(FName NpcId, FSSpecialNpcDefRow& OutRow) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	bool TryGetGiftDef(FName GiftId, FSGiftDefRow& OutRow) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	TArray<FString> GetCustomerNamePool() const;
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool ApplyStage(FName InStageId);
 
@@ -609,6 +827,24 @@ public:
 	/** 调试：白天判失败，回档日初快照并重开当日。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool FailDayForDebug();
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
+	/** Dev modifier: set absolute pantry count for one ingredient. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	bool SetInventoryQuantityForDebug(FName IngredientId, int32 Quantity);
+
+	/** Dev modifier: clear all earned gifts for the current run. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void ClearActiveGiftsForDebug();
+
+	/** Dev modifier: rewrite the open-shop countdown. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void SetDayTimeRemainingForDebug(float Seconds);
+
+	/** Dev modifier: bump revenue to the stage target if the shop is open. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void ForceQualifyRevenueForDebug();
 #pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Save")
@@ -710,6 +946,23 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Flow")
 	TSoftObjectPtr<UDataTable> RecipeTable;
+
+#pragma region K2 moonyfli
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> DayBalanceTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> IngredientTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> SpecialNpcTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> GiftTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> CustomerNameTable;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	FString LastConsumedNightResultId = TEXT("None");
@@ -951,32 +1204,62 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
 	bool TryDeliverFromCell(int32 CellIndex);
 
-	UFUNCTION(BlueprintPure, Category = "S Customers")
-	bool HasActiveCustomer() const { return ActiveCustomer.bActive; }
+#pragma region K2 moonyfli
+	/** Deliver to the exact walk-in customer occupying the clicked seat. */
+	UFUNCTION(BlueprintCallable, Category = "S Customers")
+	bool TryDeliverFromCellToCustomer(int32 CellIndex, const FString& CustomerId);
+
+	/** Called by the NPC director when a special customer leaves a seat. */
+	void NotifySeatVacated(int32 SeatIndex);
 
 	UFUNCTION(BlueprintPure, Category = "S Customers")
-	FSCustomerState GetActiveCustomer() const { return ActiveCustomer; }
+	TArray<FSCustomerState> GetActiveCustomers() const { return ActiveCustomers; }
 
 	UFUNCTION(BlueprintPure, Category = "S Customers")
-	float GetSpawnCooldownRemaining() const { return SpawnCooldownRemaining; }
+	bool TryGetCustomerAtSeat(int32 SeatIndex, FSCustomerState& OutCustomer) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	float GetSeatCooldownRemaining(int32 SeatIndex) const;
+
+	/** Dev modifier: clear empty-seat cooldowns and try to seat the next queued guests now. */
+	UFUNCTION(BlueprintCallable, Category = "S Customers")
+	int32 ForceNextCustomersNow();
+#pragma endregion K2 moonyfli
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	bool HasActiveCustomer() const { return !ActiveCustomers.IsEmpty(); }
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	FSCustomerState GetActiveCustomer() const { return ActiveCustomers.IsEmpty() ? FSCustomerState() : ActiveCustomers[0]; }
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	float GetSpawnCooldownRemaining() const;
 
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
 	static ASCustomerDirector* FindDirector(const UObject* WorldContextObject);
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "S Customers")
-	FSCustomerState ActiveCustomer;
+	TArray<FSCustomerState> ActiveCustomers;
 
 	UPROPERTY(EditAnywhere, Category = "S Customers")
 	float SpawnIntervalSeconds = 7.0f;
 
-	float SpawnCooldownRemaining = 0.0f;
+#pragma region K2 moonyfli
+	TArray<float> SeatCooldowns;
+	bool bOrderQueueExhausted = false;
+#pragma endregion K2 moonyfli
 	bool bDayServiceActive = false;
 	int32 NextCustomerNumber = 1;
 
 	USChefGameInstance* GetChefGameInstance() const;
 	void SetFeedback(const FString& Message);
-	void ClearActiveCustomer(const FString& Reason);
+#pragma region K2 moonyfli
+	int32 GetConfiguredSeatCount() const;
+	bool TryFillSeat(int32 SeatIndex);
+	bool IsSeatOccupied(int32 SeatIndex) const;
+	void ClearCustomer(const FString& CustomerId, const FString& Reason);
+#pragma endregion K2 moonyfli
 };
 
 /** 第五步：特殊 NPC 按订单队列揭示；服务成功留下谢礼卡。 */
@@ -999,7 +1282,7 @@ public:
 	bool TryDeliverToNpc(FName NpcId);
 
 	UFUNCTION(BlueprintCallable, Category = "S NPC")
-	bool RevealNpc(FName NpcId);
+	bool RevealNpc(FName NpcId, int32 SeatIndex);
 
 	UFUNCTION(BlueprintPure, Category = "S NPC")
 	TArray<FSSpecialNpcState> GetNpcs() const { return Npcs; }

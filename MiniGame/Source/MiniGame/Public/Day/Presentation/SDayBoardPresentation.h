@@ -8,7 +8,9 @@
 #include "SDayBoardPresentation.generated.h"
 
 class ASMergeBoard;
+class UBorder;
 class UButton;
+class UCanvasPanelSlot;
 class UCameraComponent;
 class UDirectionalLightComponent;
 class UMaterialInterface;
@@ -18,6 +20,9 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UTextBlock;
 class UTextRenderComponent;
+class USChefGameInstance;
+class UScrollBox;
+class USizeBox;
 
 #pragma region K2 moonyfli
 
@@ -165,6 +170,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	FName NpcId = NAME_None;
 
+#pragma region K2 moonyfli
+	/** Walk-in customer occupying this seat; empty for NPC and vacant seats. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	FString CustomerId;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	int32 SeatIndex = INDEX_NONE;
+#pragma endregion K2 moonyfli
+
 	/** Seats accept a dragged piece; the chef stand-in does not. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	bool bDeliveryTarget = false;
@@ -208,9 +222,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	ASDayCharacterStandIn* GetSeat(FName InNpcId) const;
 
-	/** Shared seats in the top row; the chef stand-in is not one of them. */
-	static constexpr int32 SeatCount = 4; //add by K2
-
+	/** Shared seats in the top row; the chef stand-in is not one of them. Count comes from GI. */
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	int32 GetDeliverySeatCount() const; //add by K2
 
@@ -267,9 +279,6 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
-
-	/** Who owns each shared seat; GuestSeatKey for the walk-in guest, NPC id otherwise. */
-	TArray<FName> SeatOccupants; //add by K2
 
 	bool bPointerWasDown = false;
 	bool bDropHandledOnPress = false;
@@ -353,6 +362,129 @@ private:
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
 	FTimerHandle RefreshTimerHandle; //add by K2
+
+#pragma region K2 moonyfli
+	UFUNCTION()
+	void HandleToggleCheatPanel();
+
+	UPROPERTY()
+	TObjectPtr<UButton> CheatToggleButton;
+
+	UPROPERTY()
+	TObjectPtr<class USDayCheatPanel> CheatPanel;
+#pragma endregion K2 moonyfli
+};
+
+/** Dev-only daytime modifier overlay; HUD entry is omitted in Shipping builds. */
+UCLASS()
+class MINIGAME_API USDayCheatPanel : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void SetPanelVisible(bool bVisible);
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+	/** Keeps the frame inside the viewport across resolutions and UI scales. */
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+	/** Title bar acts as the drag handle; body clicks stay with the buttons. */
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
+
+private:
+	void BuildWidgetTree();
+	UFUNCTION()
+	void RefreshStatus();
+	USChefGameInstance* GetChef() const;
+	void SetSelectedIngredient(FName IngredientId);
+	void AdjustStock(int32 Delta);
+	void SetStock(int32 Quantity);
+	/** Frame lives in a full-screen canvas, so all placement math stays in widget-local space. */
+	void ApplyFramePosition(const FVector2D& DesiredPosition, const FGeometry& CanvasGeometry);
+	/** Scroll body needs a definite height; collapsed body falls back to auto height. */
+	void ApplyBodyHeight();
+
+	UFUNCTION() void HandleToggleBody();
+	UFUNCTION() void HandleClose();
+	UFUNCTION() void HandleSelectLingGu();
+	UFUNCTION() void HandleSelectYin();
+	UFUNCTION() void HandleSelectChi();
+	UFUNCTION() void HandleSelectYue();
+	UFUNCTION() void HandleSelectXuan();
+	UFUNCTION() void HandleStockPlus1();
+	UFUNCTION() void HandleStockPlus10();
+	UFUNCTION() void HandleStockClear();
+	UFUNCTION() void HandleStockSet0();
+	UFUNCTION() void HandleStockSet10();
+	UFUNCTION() void HandleStockSet20();
+	UFUNCTION() void HandleStockSet50();
+	UFUNCTION() void HandleStockSet99();
+	UFUNCTION() void HandleForceNextCustomer();
+	UFUNCTION() void HandleRevenuePlus10();
+	UFUNCTION() void HandleRevenuePlus50();
+	UFUNCTION() void HandleRevenueQualify();
+	UFUNCTION() void HandleTimePlus30();
+	UFUNCTION() void HandleTimeMinus30();
+	UFUNCTION() void HandleTimeSet60();
+	UFUNCTION() void HandleTimeSet10();
+	UFUNCTION() void HandleOpenShop();
+	UFUNCTION() void HandleForceClose();
+	UFUNCTION() void HandleFailDay();
+	UFUNCTION() void HandleGiftKite();
+	UFUNCTION() void HandleGiftLamp();
+	UFUNCTION() void HandleGiftCoin();
+	UFUNCTION() void HandleGiftBox();
+	UFUNCTION() void HandleClearGifts();
+	UFUNCTION() void HandleJumpT0();
+	UFUNCTION() void HandleJumpL1();
+	UFUNCTION() void HandleJumpL2();
+	UFUNCTION() void HandleJumpL3();
+	UFUNCTION() void HandleSave();
+	UFUNCTION() void HandleLoad();
+	UFUNCTION() void HandleDeleteSave();
+	UFUNCTION() void HandleCorruptSave();
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> StatusText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> OrderQueueText;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> DragHandle;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> Frame;
+
+	UPROPERTY()
+	TObjectPtr<UCanvasPanelSlot> FrameSlot;
+
+	UPROPERTY()
+	TObjectPtr<USizeBox> FrameSizeBox;
+
+	UPROPERTY()
+	TObjectPtr<USizeBox> BodySizeBox;
+
+	UPROPERTY()
+	TObjectPtr<UScrollBox> BodyScroll;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> CollapseLabel;
+
+	FName SelectedIngredientId = TEXT("LingGu");
+
+	FVector2D FramePosition = FVector2D(24.0f, 140.0f);
+	/** Cursor offset inside the drag handle when the grab started. */
+	FVector2D DragGrabOffset = FVector2D::ZeroVector;
+	float AppliedFrameWidth = 0.0f;
+	float AppliedFrameHeight = 0.0f;
+	bool bDraggingPanel = false;
 };
 
 #pragma endregion K2 moonyfli

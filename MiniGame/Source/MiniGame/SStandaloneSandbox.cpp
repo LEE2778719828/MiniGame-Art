@@ -110,15 +110,40 @@ void USChefGameInstance::Init()
 	if (StageTable.IsNull())
 	{
 		StageTable = TSoftObjectPtr<UDataTable>(
-			FSoftObjectPath(TEXT("/Game/Game/Day/Data/DT_GameStages.DT_GameStages")));
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_GameStages.DT_GameStages")));
 	}
 	if (RecipeTable.IsNull())
 	{
 		RecipeTable = TSoftObjectPtr<UDataTable>(
-			FSoftObjectPath(TEXT("/Game/Game/Day/Data/DT_Recipes.DT_Recipes")));
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Recipes.DT_Recipes")));
+	}
+#pragma region K2 moonyfli
+	if (DayBalanceTable.IsNull())
+	{
+		DayBalanceTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_SDayBalance.DT_SDayBalance")));
+	}
+	if (IngredientTable.IsNull())
+	{
+		IngredientTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Ingredients.DT_Ingredients")));
+	}
+	if (SpecialNpcTable.IsNull())
+	{
+		SpecialNpcTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_SpecialNpcs.DT_SpecialNpcs")));
+	}
+	if (GiftTable.IsNull())
+	{
+		GiftTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Gifts.DT_Gifts")));
+	}
+	if (CustomerNameTable.IsNull())
+	{
+		CustomerNameTable = TSoftObjectPtr<UDataTable>(
+			FSoftObjectPath(TEXT("/Game/Shared/Data/DT_CustomerNames.DT_CustomerNames")));
 	}
 
-#pragma region K2 moonyfli
 	// Prefer restored profile; fall back to the fixed review starter on miss/corrupt.
 	if (!LoadChefProfile())
 	{
@@ -459,22 +484,37 @@ namespace
 		return Out;
 	}
 
-	FName DefaultNpcIngredient(const FName NpcId)
+	FName DefaultNpcIngredient(const USChefGameInstance* GameInstance, const FName NpcId)
 	{
+		FSSpecialNpcDefRow Def;
+		if (GameInstance && GameInstance->TryGetSpecialNpcDef(NpcId, Def) && !Def.DefaultIngredientId.IsNone())
+		{
+			return Def.DefaultIngredientId;
+		}
 		if (NpcId == NpcALingId) return LingGuId;
 		if (NpcId == NpcSangPoId) return YinShanJunId;
 		return LingGuId;
 	}
 
-	FName DefaultNpcGift(const FName NpcId)
+	FName DefaultNpcGift(const USChefGameInstance* GameInstance, const FName NpcId)
 	{
+		FSSpecialNpcDefRow Def;
+		if (GameInstance && GameInstance->TryGetSpecialNpcDef(NpcId, Def) && !Def.GiftId.IsNone())
+		{
+			return Def.GiftId;
+		}
 		if (NpcId == NpcALingId) return GiftGuideKiteId;
 		if (NpcId == NpcSangPoId) return GiftLifeLampId;
 		return NAME_None;
 	}
 
-	FString DefaultNpcDisplayName(const FName NpcId)
+	FString DefaultNpcDisplayName(const USChefGameInstance* GameInstance, const FName NpcId)
 	{
+		FSSpecialNpcDefRow Def;
+		if (GameInstance && GameInstance->TryGetSpecialNpcDef(NpcId, Def) && !Def.DisplayName.IsEmpty())
+		{
+			return Def.DisplayName;
+		}
 		if (NpcId == NpcALingId) return TEXT("阿翎");
 		if (NpcId == NpcSangPoId) return TEXT("桑婆");
 		return NpcId.ToString();
@@ -608,6 +648,9 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 		EffectiveTarget = MaxValue;
 	}
 
+	const FSDayBalanceRow Balance = GetDayBalance();
+	const int32 DishCap = FMath::Clamp(Balance.MaxDishLevel, 0, MaxDishLevel);
+	const int32 MinimumAppearanceSlots = FMath::Max(1, Balance.MinPlannedOrderSlots);
 	const TArray<FName> NpcIds = ParseGuaranteedNpcIds(ActiveStageRow.GuaranteedNpcRules);
 	const uint32 StageHash = GetTypeHash(StageId) ^ GetTypeHash(ActiveStageRow.CustomerConfigId);
 	bool bAccepted = false;
@@ -628,7 +671,7 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 			TArray<float> Weights;
 			float WeightSum = 0.0f;
 			const int32 Have = Remaining.FindRef(IngredientId);
-			for (int32 Level = 0; Level <= MaxDishLevel; ++Level)
+			for (int32 Level = 0; Level <= DishCap; ++Level)
 			{
 				const int32 Cost = OrderUnitCost(Level);
 				if (Have < Cost)
@@ -638,14 +681,16 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 				float Weight = 1.0f + static_cast<float>(Have - Cost);
 				if (bPreferMid)
 				{
-					Weight *= (Level == 0 || Level == MaxDishLevel) ? 0.55f : 1.35f;
+					Weight *= (Level == 0 || Level == DishCap)
+						? Balance.OrderEdgeLevelWeight
+						: Balance.OrderMidLevelWeight;
 				}
 				else
 				{
 					// Early stages lean low; later stages open mid tiers.
 					const float StageBias = StageId == TEXT("T0")
-						? (Level <= 1 ? 1.4f : 0.45f)
-						: (Level >= 1 && Level <= 3 ? 1.25f : 0.7f);
+						? (Level <= 1 ? Balance.T0LowLevelBias : Balance.T0HighLevelBias)
+						: (Level >= 1 && Level <= 3 ? Balance.LaterMidLevelBias : Balance.LaterEdgeLevelBias);
 					Weight *= StageBias;
 				}
 				const int32 Seen = LevelCounts.FindRef(Level);
@@ -672,7 +717,7 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 
 		for (const FName NpcId : NpcIds)
 		{
-			const FName IngredientId = DefaultNpcIngredient(NpcId);
+			const FName IngredientId = DefaultNpcIngredient(this, NpcId);
 			const int32 Level = TryPickLevel(IngredientId, true);
 			if (Level == INDEX_NONE)
 			{
@@ -694,8 +739,12 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 			continue;
 		}
 
+		// Keep a small reserve behind the visible seats so an independently freed
+		// seat can demonstrate automatic replenishment without waiting for a new batch.
 		int32 Guard = 0;
-		while (SumValue < EffectiveTarget && Guard++ < 64)
+		while ((SumValue < EffectiveTarget
+			|| GuestSlots.Num() + NpcSlots.Num() < MinimumAppearanceSlots)
+			&& Guard++ < 64)
 		{
 			TArray<FName> IngredientChoices;
 			TArray<float> IngredientWeights;
@@ -830,7 +879,7 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 		int32 SumValue = 0;
 		for (const FName NpcId : NpcIds)
 		{
-			const FName IngredientId = DefaultNpcIngredient(NpcId);
+			const FName IngredientId = DefaultNpcIngredient(this, NpcId);
 			if (Remaining.FindRef(IngredientId) <= 0)
 			{
 				continue;
@@ -847,7 +896,8 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 		int32 GuestCounter = 0;
 		for (const FName Id : GetKnownIds())
 		{
-			while (Remaining.FindRef(Id) > 0 && SumValue < EffectiveTarget)
+			while (Remaining.FindRef(Id) > 0
+				&& (SumValue < EffectiveTarget || PlannedDayOrders.Num() < MinimumAppearanceSlots))
 			{
 				const bool bPromote = (GuestCounter % 3) == 2 && Remaining.FindRef(Id) >= OrderUnitCost(1);
 				const int32 Level = bPromote ? 1 : 0;
@@ -927,6 +977,18 @@ FString USChefGameInstance::GetPlannedOrderSummary() const
 		*FString::Join(Parts, TEXT(" ")));
 }
 
+bool USChefGameInstance::TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder)
+{
+	if (!PlannedDayOrders.IsValidIndex(NextPlannedOrderIndex))
+	{
+		return false;
+	}
+
+	OutOrder = PlannedDayOrders[NextPlannedOrderIndex++];
+	NotifyStateChanged();
+	return true;
+}
+
 void USChefGameInstance::RevealLeadingNpcOrders()
 {
 	ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this);
@@ -936,7 +998,7 @@ void USChefGameInstance::RevealLeadingNpcOrders()
 		const FName NpcId = PlannedDayOrders[NextPlannedOrderIndex].NpcId;
 		if (NpcDirector)
 		{
-			NpcDirector->RevealNpc(NpcId);
+			NpcDirector->RevealNpc(NpcId, INDEX_NONE);
 		}
 		++NextPlannedOrderIndex;
 	}
@@ -995,8 +1057,198 @@ int32 USChefGameInstance::GetRevenueGap() const
 	return FMath::Max(0, RevenueTarget - Revenue);
 }
 
+#pragma region K2 moonyfli
+FSDayBalanceRow USChefGameInstance::GetDayBalance() const
+{
+	FSDayBalanceRow BuiltIn;
+	if (UDataTable* Table = DayBalanceTable.LoadSynchronous())
+	{
+		if (const FSDayBalanceRow* Row = Table->FindRow<FSDayBalanceRow>(TEXT("Default"), TEXT("GetDayBalance"), false))
+		{
+			return *Row;
+		}
+		TArray<FSDayBalanceRow*> Rows;
+		Table->GetAllRows(TEXT("GetDayBalance"), Rows);
+		if (Rows.Num() > 0 && Rows[0])
+		{
+			return *Rows[0];
+		}
+	}
+	return BuiltIn;
+}
+
+int32 USChefGameInstance::GetConfiguredMaxDishLevel() const
+{
+	return FMath::Clamp(GetDayBalance().MaxDishLevel, 0, 4);
+}
+
+int32 USChefGameInstance::GetServiceSeatCount() const
+{
+	const FSDayBalanceRow Balance = GetDayBalance();
+	const int32 MaxSeats = FMath::Clamp(Balance.MaxServiceSeats, 1, 6);
+	return FMath::Clamp(CustomerConcurrentMax, 1, MaxSeats);
+}
+
+FString USChefGameInstance::ResolveIngredientDisplayName(const FName IngredientId) const
+{
+	if (UDataTable* Table = IngredientTable.LoadSynchronous())
+	{
+		if (const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(IngredientId, TEXT("ResolveIngredientDisplayName"), false))
+		{
+			if (!Row->DisplayName.IsEmpty())
+			{
+				return Row->DisplayName;
+			}
+		}
+		TArray<FSIngredientDefRow*> Rows;
+		Table->GetAllRows(TEXT("ResolveIngredientDisplayName"), Rows);
+		for (const FSIngredientDefRow* Row : Rows)
+		{
+			if (Row && Row->IngredientId == IngredientId && !Row->DisplayName.IsEmpty())
+			{
+				return Row->DisplayName;
+			}
+		}
+	}
+	return IngredientDisplayName(IngredientId);
+}
+
+FString USChefGameInstance::ResolveIngredientShortName(const FName IngredientId) const
+{
+	if (UDataTable* Table = IngredientTable.LoadSynchronous())
+	{
+		if (const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(IngredientId, TEXT("ResolveIngredientShortName"), false))
+		{
+			if (!Row->ShortName.IsEmpty())
+			{
+				return Row->ShortName;
+			}
+			if (!Row->DisplayName.IsEmpty())
+			{
+				return Row->DisplayName.Left(1);
+			}
+		}
+		TArray<FSIngredientDefRow*> Rows;
+		Table->GetAllRows(TEXT("ResolveIngredientShortName"), Rows);
+		for (const FSIngredientDefRow* Row : Rows)
+		{
+			if (Row && Row->IngredientId == IngredientId)
+			{
+				if (!Row->ShortName.IsEmpty())
+				{
+					return Row->ShortName;
+				}
+				if (!Row->DisplayName.IsEmpty())
+				{
+					return Row->DisplayName.Left(1);
+				}
+			}
+		}
+	}
+	return IngredientDisplayName(IngredientId).Left(1);
+}
+
+bool USChefGameInstance::TryGetSpecialNpcDef(const FName NpcId, FSSpecialNpcDefRow& OutRow) const
+{
+	if (NpcId.IsNone())
+	{
+		return false;
+	}
+	if (UDataTable* Table = SpecialNpcTable.LoadSynchronous())
+	{
+		if (const FSSpecialNpcDefRow* Row = Table->FindRow<FSSpecialNpcDefRow>(NpcId, TEXT("TryGetSpecialNpcDef"), false))
+		{
+			OutRow = *Row;
+			return true;
+		}
+		TArray<FSSpecialNpcDefRow*> Rows;
+		Table->GetAllRows(TEXT("TryGetSpecialNpcDef"), Rows);
+		for (const FSSpecialNpcDefRow* Row : Rows)
+		{
+			if (Row && Row->NpcId == NpcId)
+			{
+				OutRow = *Row;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool USChefGameInstance::TryGetGiftDef(const FName GiftId, FSGiftDefRow& OutRow) const
+{
+	if (GiftId.IsNone())
+	{
+		return false;
+	}
+	if (UDataTable* Table = GiftTable.LoadSynchronous())
+	{
+		if (const FSGiftDefRow* Row = Table->FindRow<FSGiftDefRow>(GiftId, TEXT("TryGetGiftDef"), false))
+		{
+			OutRow = *Row;
+			return true;
+		}
+		TArray<FSGiftDefRow*> Rows;
+		Table->GetAllRows(TEXT("TryGetGiftDef"), Rows);
+		for (const FSGiftDefRow* Row : Rows)
+		{
+			if (Row && Row->GiftId == GiftId)
+			{
+				OutRow = *Row;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+TArray<FString> USChefGameInstance::GetCustomerNamePool() const
+{
+	TArray<FString> Names;
+	if (UDataTable* Table = CustomerNameTable.LoadSynchronous())
+	{
+		TArray<FSCustomerNameRow*> Rows;
+		Table->GetAllRows(TEXT("GetCustomerNamePool"), Rows);
+		for (const FSCustomerNameRow* Row : Rows)
+		{
+			if (Row && !Row->DisplayName.IsEmpty())
+			{
+				Names.Add(Row->DisplayName);
+			}
+		}
+	}
+	if (Names.IsEmpty())
+	{
+		Names = GetCustomerNames();
+	}
+	return Names;
+}
+#pragma endregion K2 moonyfli
+
 FString USChefGameInstance::GetGiftDisplayName(const FName GiftId)
 {
+	UDataTable* Table = LoadObject<UDataTable>(
+		nullptr,
+		TEXT("/Game/Shared/Data/DT_Gifts.DT_Gifts"));
+	if (Table)
+	{
+		if (const FSGiftDefRow* Row = Table->FindRow<FSGiftDefRow>(GiftId, TEXT("GetGiftDisplayName"), false))
+		{
+			if (!Row->DisplayName.IsEmpty())
+			{
+				return Row->DisplayName;
+			}
+		}
+		TArray<FSGiftDefRow*> Rows;
+		Table->GetAllRows(TEXT("GetGiftDisplayName"), Rows);
+		for (const FSGiftDefRow* Row : Rows)
+		{
+			if (Row && Row->GiftId == GiftId && !Row->DisplayName.IsEmpty())
+			{
+				return Row->DisplayName;
+			}
+		}
+	}
 	if (GiftId == GiftGuideKiteId) return TEXT("引路纸鸢");
 	if (GiftId == GiftLifeLampId) return TEXT("借命纸灯");
 	if (GiftId == GiftBeatCoinId) return TEXT("定键铜钱");
@@ -1009,6 +1261,52 @@ void USChefGameInstance::RebuildGiftBuffState()
 	GiftBuffState = FSGiftBuffState();
 	for (const FName GiftId : ActiveGiftIds)
 	{
+		FSGiftDefRow Def;
+		if (TryGetGiftDef(GiftId, Def))
+		{
+			GiftBuffState.bGuideKite |= Def.bGuideKite;
+			GiftBuffState.bLifeLamp |= Def.bLifeLamp;
+			GiftBuffState.bBeatCoin |= Def.bBeatCoin;
+			GiftBuffState.bGluttonBox |= Def.bGluttonBox;
+
+			const FString Trigger = Def.EffectTrigger.ToString();
+			if (Trigger.Equals(TEXT("BeforeFork"), ESearchCase::IgnoreCase))
+			{
+				GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
+					GiftBuffState.PreForkGatherRhythmBonus, Def.EffectValue);
+			}
+			else if (Trigger.Equals(TEXT("AfterFork"), ESearchCase::IgnoreCase))
+			{
+				GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
+					GiftBuffState.PostForkInvulnDashSeconds, Def.EffectValue);
+			}
+			else if (Trigger.Equals(TEXT("NearDeath"), ESearchCase::IgnoreCase))
+			{
+				GiftBuffState.NearDeathHeal = FMath::Max(
+					GiftBuffState.NearDeathHeal, Def.EffectValue);
+			}
+			else
+			{
+				// Live Coding may not yet expose EffectTrigger on the DataTable row;
+				// fall back to stable GiftId mapping from the design sheet.
+				if (GiftId == TEXT("WindfallWealth"))
+				{
+					GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
+						GiftBuffState.PreForkGatherRhythmBonus, 0.3f);
+				}
+				else if (GiftId == TEXT("BossPie"))
+				{
+					GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
+						GiftBuffState.PostForkInvulnDashSeconds, 2.5f);
+				}
+				else if (GiftId == TEXT("WildMilk"))
+				{
+					GiftBuffState.NearDeathHeal = FMath::Max(
+						GiftBuffState.NearDeathHeal, 40.0f);
+				}
+			}
+			continue;
+		}
 		if (GiftId == GiftGuideKiteId) GiftBuffState.bGuideKite = true;
 		else if (GiftId == GiftLifeLampId) GiftBuffState.bLifeLamp = true;
 		else if (GiftId == GiftBeatCoinId) GiftBuffState.bBeatCoin = true;
@@ -1019,6 +1317,28 @@ void USChefGameInstance::RebuildGiftBuffState()
 #pragma region K2 moonyfli
 FString USChefGameInstance::GetGiftEffectText(const FName GiftId)
 {
+	UDataTable* Table = LoadObject<UDataTable>(
+		nullptr,
+		TEXT("/Game/Shared/Data/DT_Gifts.DT_Gifts"));
+	if (Table)
+	{
+		if (const FSGiftDefRow* Row = Table->FindRow<FSGiftDefRow>(GiftId, TEXT("GetGiftEffectText"), false))
+		{
+			if (!Row->EffectText.IsEmpty())
+			{
+				return Row->EffectText;
+			}
+		}
+		TArray<FSGiftDefRow*> Rows;
+		Table->GetAllRows(TEXT("GetGiftEffectText"), Rows);
+		for (const FSGiftDefRow* Row : Rows)
+		{
+			if (Row && Row->GiftId == GiftId && !Row->EffectText.IsEmpty())
+			{
+				return Row->EffectText;
+			}
+		}
+	}
 	if (GiftId == GiftGuideKiteId) return TEXT("夜路提前显影");
 	if (GiftId == GiftLifeLampId) return TEXT("多一次容错");
 	if (GiftId == GiftBeatCoinId) return TEXT("判定窗口放宽");
@@ -1236,7 +1556,7 @@ void USChefGameInstance::EnterDaySettlement(const ESDayEndReason Reason)
 	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose();
 	const int32 LeftoverUnits = CountPantryUnits();
 	CarryOverTargetBonus = Reason == ESDayEndReason::TimeUp
-		? LeftoverUnits * FMath::Max(0, CarryOverTargetBonusPerUnit)
+		? LeftoverUnits * FMath::Max(0, GetDayBalance().CarryOverTargetBonusPerUnit)
 		: 0;
 	CompletedDayFlags.AddUnique(StageId);
 	DayTimeRemaining = 0.0f;
@@ -1367,9 +1687,12 @@ bool USChefGameInstance::HasCompletableOrder() const
 {
 	if (const ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
 	{
-		if (Director->HasActiveCustomer() && CanFulfillOrder(Director->GetActiveCustomer().Order))
+		for (const FSCustomerState& Customer : Director->GetActiveCustomers())
 		{
-			return true;
+			if (Customer.bActive && CanFulfillOrder(Customer.Order))
+			{
+				return true;
+			}
 		}
 	}
 	if (const ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
@@ -1458,6 +1781,8 @@ void USChefGameInstance::OpenShopForDebug()
 	}
 	DayStartSnapshot = CaptureSnapshot();
 	ResetDayDirectors(true);
+	LastBoardFeedback = TEXT("调试开店：倒计时已启动。");
+	NotifyStateChanged();
 }
 #pragma endregion K2 moonyfli
 
@@ -1573,6 +1898,7 @@ bool USChefGameInstance::ApplyStage(const FName InStageId)
 	RevenueTarget = Row.RevenueTarget + FMath::Max(0, CarryOverTargetBonus); //add by K2
 	CustomerSpawnIntervalSeconds = Row.CustomerSpawnInterval;
 	CustomerConcurrentMax = Row.CustomerConcurrentMax;
+	CarryOverTargetBonusPerUnit = GetDayBalance().CarryOverTargetBonusPerUnit;
 	BuildNightBootstrap();
 	return true;
 }
@@ -1584,7 +1910,9 @@ FSNightBootstrap USChefGameInstance::BuildNightBootstrap()
 	PendingNightBootstrap.ForkPair = ForkPair;
 	PendingNightBootstrap.GiftBuffState = GiftBuffState;
 	PendingNightBootstrap.Seed = ReviewSeed;
-	PendingNightBootstrap.FoeWeightOverride = GiftBuffState.bGluttonBox ? 1.25f : -1.0f;
+	PendingNightBootstrap.FoeWeightOverride = GiftBuffState.bGluttonBox
+		? GetDayBalance().GluttonBoxFoeWeight
+		: -1.0f;
 	return PendingNightBootstrap;
 }
 
@@ -1659,6 +1987,78 @@ bool USChefGameInstance::FailDayForDebug()
 	FailDay(ESDayEndReason::TimeUp);
 	return true;
 }
+
+#pragma region K2 moonyfli
+bool USChefGameInstance::SetInventoryQuantityForDebug(const FName IngredientId, const int32 Quantity)
+{
+#if UE_BUILD_SHIPPING
+	return false;
+#else
+	if (!IsKnownIngredient(IngredientId))
+	{
+		LastBoardFeedback = FString::Printf(TEXT("未知食材 ID：%s"), *IngredientId.ToString());
+		NotifyStateChanged();
+		return false;
+	}
+	const int32 Clamped = FMath::Max(0, Quantity);
+	Inventory.FindOrAdd(IngredientId) = Clamped;
+	LastBoardFeedback = FString::Printf(
+		TEXT("修改器：%s 库存设为 %d。"),
+		*ResolveIngredientDisplayName(IngredientId),
+		Clamped);
+	NotifyStateChanged();
+	return true;
+#endif
+}
+
+void USChefGameInstance::ClearActiveGiftsForDebug()
+{
+#if UE_BUILD_SHIPPING
+	return;
+#else
+	ActiveGiftIds.Empty();
+	RebuildGiftBuffState();
+	BuildNightBootstrap();
+	LastBoardFeedback = TEXT("修改器：已清空本日谢礼。");
+	NotifyStateChanged();
+#endif
+}
+
+void USChefGameInstance::SetDayTimeRemainingForDebug(const float Seconds)
+{
+#if UE_BUILD_SHIPPING
+	return;
+#else
+	DayTimeRemaining = FMath::Max(0.0f, Seconds);
+	LastBoardFeedback = FString::Printf(TEXT("修改器：营业剩余时间设为 %.1fs。"), DayTimeRemaining);
+	NotifyStateChanged();
+#endif
+}
+
+void USChefGameInstance::ForceQualifyRevenueForDebug()
+{
+#if UE_BUILD_SHIPPING
+	return;
+#else
+	if (!IsShopOpen())
+	{
+		LastBoardFeedback = TEXT("修改器：仅营业中可直接达标。");
+		NotifyStateChanged();
+		return;
+	}
+	const int32 Gap = FMath::Max(0, RevenueTarget - Revenue);
+	if (Gap > 0)
+	{
+		AddRevenue(Gap);
+	}
+	else
+	{
+		LastBoardFeedback = FString::Printf(TEXT("修改器：营业额已达标 %d/%d。"), Revenue, RevenueTarget);
+		NotifyStateChanged();
+	}
+#endif
+}
+#pragma endregion K2 moonyfli
 
 void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 {
@@ -2649,8 +3049,11 @@ void ASCustomerDirector::BeginPlay()
 
 void ASCustomerDirector::ResetDirector()
 {
-	ActiveCustomer = FSCustomerState();
-	SpawnCooldownRemaining = 0.0f;
+#pragma region K2 moonyfli
+	ActiveCustomers.Reset();
+	SeatCooldowns.Init(0.0f, GetConfiguredSeatCount());
+	bOrderQueueExhausted = false;
+#pragma endregion K2 moonyfli
 	bDayServiceActive = false;
 	NextCustomerNumber = 1;
 }
@@ -2658,18 +3061,41 @@ void ASCustomerDirector::ResetDirector()
 void ASCustomerDirector::NotifyDayStarted()
 {
 	bDayServiceActive = true;
-	SpawnCooldownRemaining = 0.0f;
+#pragma region K2 moonyfli
+	ActiveCustomers.Reset();
+	const int32 SeatCount = GetConfiguredSeatCount();
+	SeatCooldowns.Init(0.0f, SeatCount);
+	bOrderQueueExhausted = false;
+#pragma endregion K2 moonyfli
 	if (const USChefGameInstance* GameInstance = GetChefGameInstance())
 	{
 		SpawnIntervalSeconds = GameInstance->CustomerSpawnIntervalSeconds;
 	}
-	SpawnNextPlannedCustomer();
+#pragma region K2 moonyfli
+	// Every seat owns its own arrival clock. All start ready and independently
+	// consume the unified appearance queue.
+	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
+	{
+		TryFillSeat(SeatIndex);
+	}
+#pragma endregion K2 moonyfli
 }
 
 USChefGameInstance* ASCustomerDirector::GetChefGameInstance() const
 {
 	return GetGameInstance<USChefGameInstance>();
 }
+
+#pragma region K2 moonyfli
+int32 ASCustomerDirector::GetConfiguredSeatCount() const
+{
+	if (const USChefGameInstance* GameInstance = GetChefGameInstance())
+	{
+		return GameInstance->GetServiceSeatCount();
+	}
+	return 2;
+}
+#pragma endregion K2 moonyfli
 
 void ASCustomerDirector::SetFeedback(const FString& Message)
 {
@@ -2683,9 +3109,22 @@ void ASCustomerDirector::SetFeedback(const FString& Message)
 
 bool ASCustomerDirector::SpawnNextPlannedCustomer()
 {
-	if (ActiveCustomer.bActive)
+	const int32 SeatCount = GetConfiguredSeatCount();
+	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
 	{
-		SetFeedback(TEXT("已有顾客在场，不再重复生成。"));
+		if (!IsSeatOccupied(SeatIndex) && GetSeatCooldownRemaining(SeatIndex) <= 0.0f)
+		{
+			return TryFillSeat(SeatIndex);
+		}
+	}
+	return false;
+}
+
+#pragma region K2 moonyfli
+bool ASCustomerDirector::TryFillSeat(const int32 SeatIndex)
+{
+	if (!SeatCooldowns.IsValidIndex(SeatIndex) || IsSeatOccupied(SeatIndex) || bOrderQueueExhausted)
+	{
 		return false;
 	}
 
@@ -2695,40 +3134,163 @@ bool ASCustomerDirector::SpawnNextPlannedCustomer()
 		return false;
 	}
 
-	FSOrderRequest Order;
-	if (!GameInstance->TryPrepareNextGuestOrder(Order))
+	FSPlannedOrder Slot;
+	if (!GameInstance->TryDequeueNextPlannedOrder(Slot))
 	{
-		SetFeedback(TEXT("本日预生成客单已全部出现。"));
+		bOrderQueueExhausted = true;
 		return false;
 	}
 
-	ActiveCustomer = FSCustomerState();
-	ActiveCustomer.bActive = true;
-#pragma region K2 moonyfli
+	if (Slot.Kind == ESOrderSlotKind::Npc)
+	{
+		if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+		{
+			if (NpcDirector->RevealNpc(Slot.NpcId, SeatIndex))
+			{
+				SeatCooldowns[SeatIndex] = 0.0f;
+				return true;
+			}
+		}
+
+		// A malformed NPC slot must not block this seat forever.
+		SeatCooldowns[SeatIndex] = SpawnIntervalSeconds;
+		return false;
+	}
+
+	FSCustomerState Customer;
+	Customer.bActive = true;
+	Customer.SeatIndex = SeatIndex;
 	const int32 CustomerNumber = NextCustomerNumber++;
-	const TArray<FString>& CustomerNames = GetCustomerNames();
-	ActiveCustomer.CustomerId = FString::Printf(TEXT("Guest-%02d"), CustomerNumber);
-	ActiveCustomer.DisplayName = CustomerNames[(CustomerNumber - 1) % CustomerNames.Num()];
-#pragma endregion K2 moonyfli
-	ActiveCustomer.Order = Order;
-	SpawnCooldownRemaining = 0.0f;
+	const TArray<FString> CustomerNames = GameInstance->GetCustomerNamePool();
+	Customer.CustomerId = FString::Printf(TEXT("Guest-%02d"), CustomerNumber);
+	Customer.DisplayName = CustomerNames[(CustomerNumber - 1) % CustomerNames.Num()];
+	Customer.Order = Slot.Order;
+	ActiveCustomers.Add(Customer);
+	SeatCooldowns[SeatIndex] = 0.0f;
 
 	SetFeedback(FString::Printf(
-		TEXT("顾客 %s（%s）入座，订单 %s（售价 %d），会一直等待。%s"),
-		*ActiveCustomer.DisplayName,
-		*ActiveCustomer.CustomerId,
-		*ActiveCustomer.Order.RecipeId.ToString(),
-		ActiveCustomer.Order.SellValue,
+		TEXT("座位 %d：顾客 %s（%s）入座，订单 %s（售价 %d），会一直等待。%s"),
+		SeatIndex + 1,
+		*Customer.DisplayName,
+		*Customer.CustomerId,
+		*Customer.Order.RecipeId.ToString(),
+		Customer.Order.SellValue,
 		*GameInstance->GetPlannedOrderSummary()));
 	return true;
 }
 
-void ASCustomerDirector::ClearActiveCustomer(const FString& Reason)
+bool ASCustomerDirector::IsSeatOccupied(const int32 SeatIndex) const
 {
-	ActiveCustomer = FSCustomerState();
-	SpawnCooldownRemaining = SpawnIntervalSeconds;
+	if (ActiveCustomers.ContainsByPredicate(
+		[SeatIndex](const FSCustomerState& Customer) { return Customer.bActive && Customer.SeatIndex == SeatIndex; }))
+	{
+		return true;
+	}
+
+	if (const ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
+	{
+		for (const FSSpecialNpcState& Npc : NpcDirector->GetNpcs())
+		{
+			if (Npc.bPresent && !Npc.bServed && Npc.SeatIndex == SeatIndex)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void ASCustomerDirector::ClearCustomer(const FString& CustomerId, const FString& Reason)
+{
+	const int32 CustomerIndex = ActiveCustomers.IndexOfByPredicate(
+		[&CustomerId](const FSCustomerState& Customer) { return Customer.CustomerId == CustomerId; });
+	if (!ActiveCustomers.IsValidIndex(CustomerIndex))
+	{
+		return;
+	}
+
+	const int32 SeatIndex = ActiveCustomers[CustomerIndex].SeatIndex;
+	ActiveCustomers.RemoveAt(CustomerIndex);
+	NotifySeatVacated(SeatIndex);
 	SetFeedback(Reason);
 }
+
+void ASCustomerDirector::NotifySeatVacated(const int32 SeatIndex)
+{
+	if (SeatCooldowns.IsValidIndex(SeatIndex))
+	{
+		SeatCooldowns[SeatIndex] = SpawnIntervalSeconds;
+		bOrderQueueExhausted = false;
+	}
+}
+
+bool ASCustomerDirector::TryGetCustomerAtSeat(const int32 SeatIndex, FSCustomerState& OutCustomer) const
+{
+	for (const FSCustomerState& Customer : ActiveCustomers)
+	{
+		if (Customer.bActive && Customer.SeatIndex == SeatIndex)
+		{
+			OutCustomer = Customer;
+			return true;
+		}
+	}
+	return false;
+}
+
+float ASCustomerDirector::GetSeatCooldownRemaining(const int32 SeatIndex) const
+{
+	return SeatCooldowns.IsValidIndex(SeatIndex) ? SeatCooldowns[SeatIndex] : 0.0f;
+}
+
+#pragma region K2 moonyfli
+int32 ASCustomerDirector::ForceNextCustomersNow()
+{
+#if UE_BUILD_SHIPPING
+	return 0;
+#else
+	if (!bDayServiceActive)
+	{
+		SetFeedback(TEXT("修改器：店未开，无法提前到客。"));
+		return 0;
+	}
+
+	bOrderQueueExhausted = false;
+	int32 Spawned = 0;
+	const int32 SeatCount = GetConfiguredSeatCount();
+	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
+	{
+		if (IsSeatOccupied(SeatIndex))
+		{
+			continue;
+		}
+		if (SeatCooldowns.IsValidIndex(SeatIndex))
+		{
+			SeatCooldowns[SeatIndex] = 0.0f;
+		}
+		if (TryFillSeat(SeatIndex))
+		{
+			++Spawned;
+		}
+	}
+	SetFeedback(FString::Printf(TEXT("修改器：提前到客 %d 位。"), Spawned));
+	return Spawned;
+#endif
+}
+#pragma endregion K2 moonyfli
+
+float ASCustomerDirector::GetSpawnCooldownRemaining() const
+{
+	float Minimum = TNumericLimits<float>::Max();
+	for (int32 SeatIndex = 0; SeatIndex < SeatCooldowns.Num(); ++SeatIndex)
+	{
+		if (!IsSeatOccupied(SeatIndex))
+		{
+			Minimum = FMath::Min(Minimum, SeatCooldowns[SeatIndex]);
+		}
+	}
+	return Minimum == TNumericLimits<float>::Max() ? 0.0f : Minimum;
+}
+#pragma endregion K2 moonyfli
 
 void ASCustomerDirector::Tick(const float DeltaSeconds)
 {
@@ -2750,12 +3312,17 @@ void ASCustomerDirector::Tick(const float DeltaSeconds)
 		return;
 	}
 
-	if (!ActiveCustomer.bActive)
+	for (int32 SeatIndex = 0; SeatIndex < SeatCooldowns.Num(); ++SeatIndex)
 	{
-		SpawnCooldownRemaining = FMath::Max(0.0f, SpawnCooldownRemaining - DeltaSeconds);
-		if (SpawnCooldownRemaining <= 0.0f)
+		if (IsSeatOccupied(SeatIndex))
 		{
-			SpawnNextPlannedCustomer();
+			continue;
+		}
+
+		SeatCooldowns[SeatIndex] = FMath::Max(0.0f, SeatCooldowns[SeatIndex] - DeltaSeconds);
+		if (SeatCooldowns[SeatIndex] <= 0.0f && !bOrderQueueExhausted)
+		{
+			TryFillSeat(SeatIndex);
 		}
 	}
 }
@@ -2786,7 +3353,7 @@ bool ASCustomerDirector::TryDeliverFromCell(const int32 CellIndex)
 		return false;
 	}
 
-	if (!ActiveCustomer.bActive)
+	if (ActiveCustomers.IsEmpty())
 	{
 		SetFeedback(TEXT("当前没有等候顾客。"));
 		Board->ClearActiveDrag();
@@ -2801,20 +3368,70 @@ bool ASCustomerDirector::TryDeliverFromCell(const int32 CellIndex)
 		return false;
 	}
 
-	if (Piece.RecipeId != ActiveCustomer.Order.RecipeId)
+	// Legacy HUD/debug delivery chooses the first waiting guest who ordered this dish.
+	const FSCustomerState* Target = ActiveCustomers.FindByPredicate(
+		[&Piece](const FSCustomerState& Customer) { return Customer.Order.RecipeId == Piece.RecipeId; });
+	if (!Target)
 	{
 		SetFeedback(FString::Printf(
-			TEXT("订单需要 %s，当前是 %s，已回弹，未扣棋子/营业额。"),
-			*ActiveCustomer.Order.RecipeId.ToString(),
+			TEXT("当前普通顾客都不需要 %s，已回弹，未扣棋子/营业额。"),
+			*Piece.RecipeId.ToString()));
+		Board->ClearActiveDrag();
+		return false;
+	}
+	return TryDeliverFromCellToCustomer(CellIndex, Target->CustomerId);
+}
+
+bool ASCustomerDirector::TryDeliverFromCellToCustomer(const int32 CellIndex, const FString& CustomerId)
+{
+	USChefGameInstance* GameInstance = GetChefGameInstance();
+	ASMergeBoard* Board = ASMergeBoard::FindBoard(this);
+	if (!GameInstance || !Board)
+	{
+		return false;
+	}
+
+	if (!GameInstance->IsShopOpen())
+	{
+		SetFeedback(TEXT("尚未开店，无法交付。"));
+		return false;
+	}
+
+	const FSCustomerState* Target = ActiveCustomers.FindByPredicate(
+		[&CustomerId](const FSCustomerState& Customer) { return Customer.CustomerId == CustomerId; });
+	if (!Target)
+	{
+		SetFeedback(TEXT("该座位当前没有等候顾客。"));
+		Board->ClearActiveDrag();
+		return false;
+	}
+
+	FSDishPiece Piece;
+	if (!Board->TryGetPiece(CellIndex, Piece))
+	{
+		SetFeedback(TEXT("来源格没有棋子，交付取消。"));
+		Board->ClearActiveDrag();
+		return false;
+	}
+
+	if (Piece.RecipeId != Target->Order.RecipeId)
+	{
+		SetFeedback(FString::Printf(
+			TEXT("%s 需要 %s，当前是 %s，已回弹，未扣棋子/营业额。"),
+			*Target->DisplayName,
+			*Target->Order.RecipeId.ToString(),
 			*Piece.RecipeId.ToString()));
 		Board->ClearActiveDrag();
 		return false;
 	}
 
-	const int32 SellValue = ActiveCustomer.Order.SellValue > 0
-		? ActiveCustomer.Order.SellValue
+	const int32 SellValue = Target->Order.SellValue > 0
+		? Target->Order.SellValue
 		: GameInstance->GetRecipeSellValue(Piece.RecipeId);
 	const int32 RevenueBefore = GameInstance->Revenue;
+	const FString ServedId = Target->CustomerId;
+	const FString ServedName = Target->DisplayName;
+	const int32 ServedSeatIndex = Target->SeatIndex;
 
 	if (!Board->RemovePieceAt(CellIndex))
 	{
@@ -2823,14 +3440,11 @@ bool ASCustomerDirector::TryDeliverFromCell(const int32 CellIndex)
 	}
 
 	GameInstance->AddRevenue(SellValue);
-	GameInstance->AdvancePastCurrentGuestOrder();
-	const FString ServedId = ActiveCustomer.CustomerId;
-	const FString ServedName = ActiveCustomer.DisplayName;
-	ClearActiveCustomer(FString::Printf(
-		TEXT("交付成功：%s（%s）收到 %s 后离店，营业额 %d→%d。下一位约 %.0fs 后入座。%s"),
+	ClearCustomer(ServedId, FString::Printf(
+		TEXT("交付成功：%s（%s）从座位 %d 离店，营业额 %d→%d。该座位约 %.0fs 后补客。%s"),
 		*ServedName,
 		*ServedId,
-		*Piece.RecipeId.ToString(),
+		ServedSeatIndex + 1,
 		RevenueBefore,
 		GameInstance->Revenue,
 		SpawnIntervalSeconds,
@@ -2929,16 +3543,16 @@ void ASSpecialNpcDirector::BuildNpcsFromPlan()
 
 		FSSpecialNpcState Npc;
 		Npc.NpcId = Slot.NpcId;
-		Npc.DisplayName = DefaultNpcDisplayName(Slot.NpcId);
+		Npc.DisplayName = DefaultNpcDisplayName(GameInstance, Slot.NpcId);
 		Npc.Order = Slot.Order.SellValue > 0 ? Slot.Order : MakeOrder(Slot.Order.IngredientId, Slot.Order.Level);
-		Npc.GiftId = DefaultNpcGift(Slot.NpcId);
+		Npc.GiftId = DefaultNpcGift(GameInstance, Slot.NpcId);
 		Npc.bPresent = false;
 		Npc.bServed = false;
 		Npcs.Add(Npc);
 	}
 }
 
-bool ASSpecialNpcDirector::RevealNpc(const FName NpcId)
+bool ASSpecialNpcDirector::RevealNpc(const FName NpcId, const int32 SeatIndex)
 {
 	for (FSSpecialNpcState& Npc : Npcs)
 	{
@@ -2951,9 +3565,11 @@ bool ASSpecialNpcDirector::RevealNpc(const FName NpcId)
 			if (!Npc.bPresent)
 			{
 				Npc.bPresent = true;
+				Npc.SeatIndex = SeatIndex;
 				SetFeedback(FString::Printf(
-					TEXT("%s 到店，订单 %s（售价 %d）。"),
+					TEXT("%s 到店并坐入座位 %d，订单 %s（售价 %d）。"),
 					*Npc.DisplayName,
+					SeatIndex + 1,
 					*Npc.Order.RecipeId.ToString(),
 					Npc.Order.SellValue));
 			}
@@ -3056,6 +3672,7 @@ bool ASSpecialNpcDirector::TryDeliverToNpc(const FName NpcId)
 		? Target->Order.SellValue
 		: GameInstance->GetRecipeSellValue(Piece.RecipeId);
 	const int32 RevenueBefore = GameInstance->Revenue;
+	const int32 ServedSeatIndex = Target->SeatIndex;
 
 	if (!Board->RemovePieceAt(CellIndex))
 	{
@@ -3065,13 +3682,18 @@ bool ASSpecialNpcDirector::TryDeliverToNpc(const FName NpcId)
 
 	Target->bServed = true;
 	Target->bPresent = false; //add by K2 订单完成即离店，座位立刻空出。
+	Target->SeatIndex = INDEX_NONE;
 	GameInstance->GrantGift(Target->GiftId); //add by K2
 	GameInstance->AddRevenue(SellValue);
+	if (ASCustomerDirector* CustomerDirector = ASCustomerDirector::FindDirector(this))
+	{
+		CustomerDirector->NotifySeatVacated(ServedSeatIndex);
+	}
 
 	SetFeedback(FString::Printf(
-		TEXT("服务成功：%s 收到 %s 后离店，营业额 %d→%d，谢礼 %s 立即生效。"),
+		TEXT("服务成功：%s 从座位 %d 离店，营业额 %d→%d，谢礼 %s 立即生效；该座位独立补客。"),
 		*Target->DisplayName,
-		*Piece.RecipeId.ToString(),
+		ServedSeatIndex + 1,
 		RevenueBefore,
 		GameInstance->Revenue,
 		*USChefGameInstance::GetGiftDisplayName(Target->GiftId)));
@@ -3555,12 +4177,11 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			&& Board->CountPiecesAtLevel(LingGuId, 1) == 0,
 			TEXT("ingredient area decomposes advanced dish to inventory"));
 
-		CustomerDirector->NotifyDayStarted();
 		const bool bCustomerReady = CustomerDirector->HasActiveCustomer()
 			|| CustomerDirector->SpawnNextPlannedCustomer();
-		CustomerDirector->Tick(40.0f);
 		Check(CustomerDirector->HasActiveCustomer(), TEXT("customer waits indefinitely"));
-		const FSOrderRequest GuestOrder = CustomerDirector->GetActiveCustomer().Order;
+		const FSCustomerState GuestCustomer = CustomerDirector->GetActiveCustomer();
+		const FSOrderRequest GuestOrder = GuestCustomer.Order;
 		const int32 CustomerCell = ProduceDish(GuestOrder.IngredientId, GuestOrder.Level);
 		Check(CustomerCell != INDEX_NONE, TEXT("spawn customer dish"));
 		if (DayBoardPresenter)
@@ -3568,54 +4189,46 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			DayBoardPresenter->RefreshFromLogic();
 		}
 		Check(
-			DayBoardPresenter && DayBoardPresenter->GetDeliverySeatCount() == 4,
-			TEXT("day board offers four shared seats"));
+			DayBoardPresenter
+			&& DayBoardPresenter->GetDeliverySeatCount() == GameInstance->GetServiceSeatCount()
+			&& GameInstance->GetServiceSeatCount() == GameInstance->CustomerConcurrentMax
+			&& GameInstance->CustomerConcurrentMax == 2,
+			TEXT("T0 seats match CustomerConcurrentMax"));
 		const ASDayCharacterStandIn* CustomerSeat = DayBoardPresenter
 			? DayBoardPresenter->GetSeat(NAME_None)
 			: nullptr;
 		Check(
 			bCustomerReady
 			&& CustomerSeat
-			&& !CustomerDirector->GetActiveCustomer().DisplayName.IsEmpty()
+			&& !GuestCustomer.DisplayName.IsEmpty()
 			&& CustomerSeat->Label->Text.ToString().Contains(
-				CustomerDirector->GetActiveCustomer().DisplayName),
+				GuestCustomer.DisplayName),
 			TEXT("customer seat shows guest name"));
 		Check(
-			bCustomerReady && CustomerDirector->TryDeliverFromCell(CustomerCell),
+			bCustomerReady
+			&& CustomerDirector->TryDeliverFromCellToCustomer(CustomerCell, GuestCustomer.CustomerId),
 			TEXT("customer delivery"));
 		if (DayBoardPresenter)
 		{
 			DayBoardPresenter->RefreshFromLogic();
 		}
 		Check(
-			!CustomerDirector->HasActiveCustomer()
-			&& DayBoardPresenter
-			&& DayBoardPresenter->GetSeat(NAME_None) == nullptr,
-			TEXT("served guest leaves the seat"));
-
-		// Keep delivering planned guests until ALing has been revealed (NPC slots are mid-queue).
-		for (int32 Guard = 0; Guard < 8; ++Guard)
-		{
-			FSSpecialNpcState Probe;
-			if (NpcDirector->TryGetNpc(NpcALingId, Probe) && Probe.bPresent && !Probe.bServed)
-			{
-				break;
-			}
-			if (!CustomerDirector->HasActiveCustomer())
-			{
-				CustomerDirector->SpawnNextPlannedCustomer();
-			}
-			if (!CustomerDirector->HasActiveCustomer())
-			{
-				break;
-			}
-			const FSOrderRequest NextGuest = CustomerDirector->GetActiveCustomer().Order;
-			const int32 Cell = ProduceDish(NextGuest.IngredientId, NextGuest.Level);
-			if (Cell == INDEX_NONE || !CustomerDirector->TryDeliverFromCell(Cell))
-			{
-				break;
-			}
-		}
+			CustomerDirector->GetSeatCooldownRemaining(GuestCustomer.SeatIndex) > 0.0f
+			&& CustomerDirector->HasActiveCustomer()
+			&& CustomerSeat
+			&& !CustomerSeat->bOccupied,
+			TEXT("served guest frees only its own seat"));
+		CustomerDirector->Tick(3.0f);
+		FSCustomerState EarlyReplacement;
+		Check(
+			!CustomerDirector->TryGetCustomerAtSeat(GuestCustomer.SeatIndex, EarlyReplacement),
+			TEXT("vacant seat respects its independent cooldown"));
+		CustomerDirector->Tick(5.0f);
+		FSCustomerState Replacement;
+		Check(
+			CustomerDirector->TryGetCustomerAtSeat(GuestCustomer.SeatIndex, Replacement)
+			&& Replacement.CustomerId != GuestCustomer.CustomerId,
+			TEXT("vacant seat automatically receives next customer"));
 
 		FSSpecialNpcState ALingBefore;
 		Check(
@@ -3680,29 +4293,17 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			&& ALingSeat->Label->Text.ToString().Contains(TEXT("空座"))
 			&& DayBoardPresenter->GetSeat(NpcALingId) == nullptr,
 			TEXT("served NPC leaves and frees the seat"));
+		CustomerDirector->Tick(3.0f);
+		FSCustomerState EarlyNpcSeatReplacement;
+		Check(
+			!CustomerDirector->TryGetCustomerAtSeat(ALingBefore.SeatIndex, EarlyNpcSeatReplacement),
+			TEXT("served NPC seat keeps its own cooldown"));
+		CustomerDirector->Tick(5.0f);
+		FSCustomerState NpcSeatReplacement;
+		Check(
+			CustomerDirector->TryGetCustomerAtSeat(ALingBefore.SeatIndex, NpcSeatReplacement),
+			TEXT("served NPC seat independently receives next customer"));
 
-		for (int32 Guard = 0; Guard < 8; ++Guard)
-		{
-			FSSpecialNpcState Probe;
-			if (NpcDirector->TryGetNpc(NpcSangPoId, Probe) && Probe.bPresent && !Probe.bServed)
-			{
-				break;
-			}
-			if (!CustomerDirector->HasActiveCustomer())
-			{
-				CustomerDirector->SpawnNextPlannedCustomer();
-			}
-			if (!CustomerDirector->HasActiveCustomer())
-			{
-				break;
-			}
-			const FSOrderRequest NextGuest = CustomerDirector->GetActiveCustomer().Order;
-			const int32 Cell = ProduceDish(NextGuest.IngredientId, NextGuest.Level);
-			if (Cell == INDEX_NONE || !CustomerDirector->TryDeliverFromCell(Cell))
-			{
-				break;
-			}
-		}
 		FSSpecialNpcState SangPoBefore;
 		Check(
 			NpcDirector->TryGetNpc(NpcSangPoId, SangPoBefore)
@@ -3896,17 +4497,40 @@ static FAutoConsoleCommandWithWorld GSDayRunSmokeCmd(
 	{
 		if (!World)
 		{
+			UE_LOG(LogSSandbox, Warning, TEXT("[SDaySmoke] no world for RunSmoke"));
 			return;
 		}
-		if (ASFakeNightGateway* Gateway = Cast<ASFakeNightGateway>(
-			UGameplayStatics::GetActorOfClass(World, ASFakeNightGateway::StaticClass())))
+		AActor* GatewayActor = UGameplayStatics::GetActorOfClass(World, ASFakeNightGateway::StaticClass());
+		if (!GatewayActor)
+		{
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if ((*It)->GetClass()->GetName().Contains(TEXT("FakeNightGateway")))
+				{
+					GatewayActor = *It;
+					break;
+				}
+			}
+		}
+		if (ASFakeNightGateway* Gateway = Cast<ASFakeNightGateway>(GatewayActor))
 		{
 			Gateway->RunDayWhiteboxSmokeTest();
+			return;
 		}
-		else
+		if (GatewayActor)
 		{
-			UE_LOG(LogSSandbox, Warning, TEXT("[SDaySmoke] no gateway in world"));
+			if (UFunction* Func = GatewayActor->FindFunction(TEXT("RunDayWhiteboxSmokeTest")))
+			{
+				GatewayActor->ProcessEvent(Func, nullptr);
+				return;
+			}
 		}
+		UE_LOG(
+			LogSSandbox,
+			Warning,
+			TEXT("[SDaySmoke] no gateway in world %s (pie=%d)"),
+			*World->GetName(),
+			World->IsPlayInEditor() ? 1 : 0);
 	}));
 #pragma endregion K2 moonyfli
 
