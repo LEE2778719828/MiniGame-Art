@@ -11,6 +11,7 @@ class UNightFeelStubComponent;
 class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
+class UStaticMesh;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -82,6 +83,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds);
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ApplyHeroMesh(UStaticMesh* Mesh);
+
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
@@ -92,5 +96,6 @@ protected:
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;
 	float AdvanceSpeed = 1400.f;
 	bool bTrackAdvancing = false;
+	bool bUsingHeroArt = false;
 };
 #pragma endregion K2 moonyfli

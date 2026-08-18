@@ -26,7 +26,7 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	PlatformMesh->SetVisibility(false);
 
 	FoeCapsule = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FoeCapsule"));
-	FoeCapsule->SetupAttachment(PlatformMesh);
+	FoeCapsule->SetupAttachment(ArtRoot);
 	FoeCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 95.f));
 	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
@@ -72,6 +72,20 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	FoeCapsule->SetVisibility(bShowFoe);
 	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
 	ApplyColors();
+}
+
+void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
+{
+	if (!FoeCapsule || !Mesh)
+	{
+		return;
+	}
+
+	FoeCapsule->SetStaticMesh(Mesh);
+	// ArtSubmit models use a different forward axis than the course lane.
+	FoeCapsule->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
+	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
+	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
 }
 
 void ANightCourseStoneActor::SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation)

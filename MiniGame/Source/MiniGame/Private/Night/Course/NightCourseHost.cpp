@@ -131,6 +131,10 @@ void ANightCourseHost::WireFeelFromPlayer()
 
 	if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(Pawn))
 	{
+		if (Config)
+		{
+			CoursePawn->ApplyHeroMesh(Config->HeroMesh.LoadSynchronous());
+		}
 		if (Director)
 		{
 			Director->BindRunnerPawn(CoursePawn);

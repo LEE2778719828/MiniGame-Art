@@ -37,14 +37,25 @@ ANightCoursePawn::ANightCoursePawn()
 	HeadMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.35f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> HeroMesh(
+		TEXT("/Game/Night/Course/Art/Hero/kat.kat"));
 	if (CubeMesh.Succeeded())
 	{
 		BodyMesh->SetStaticMesh(CubeMesh.Object);
 		HeadMesh->SetStaticMesh(CubeMesh.Object);
 	}
+	if (HeroMesh.Succeeded())
+	{
+		bUsingHeroArt = true;
+		BodyMesh->SetStaticMesh(HeroMesh.Object);
+		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+		BodyMesh->SetRelativeScale3D(FVector(0.75f));
+		HeadMesh->SetVisibility(false);
+		HeadMesh->SetHiddenInGame(true);
+	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (UnlitMat.Succeeded())
+	if (!bUsingHeroArt && UnlitMat.Succeeded())
 	{
 		BodyMesh->SetMaterial(0, UnlitMat.Object);
 		HeadMesh->SetMaterial(0, UnlitMat.Object);
@@ -144,6 +155,21 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	AdvanceTargetRotation = WorldRotation;
 	AdvanceSpeed = FMath::Max(100.f, SpeedCmPerSec);
 	bTrackAdvancing = true;
+}
+
+void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
+{
+	if (!BodyMesh || !Mesh)
+	{
+		return;
+	}
+
+	bUsingHeroArt = true;
+	BodyMesh->SetStaticMesh(Mesh);
+	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+	BodyMesh->SetRelativeScale3D(FVector(0.75f));
+	HeadMesh->SetVisibility(false);
+	HeadMesh->SetHiddenInGame(true);
 }
 
 void ANightCoursePawn::Tick(float DeltaSeconds)
