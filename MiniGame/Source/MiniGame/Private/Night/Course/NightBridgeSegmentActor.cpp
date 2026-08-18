@@ -58,7 +58,8 @@ void ANightBridgeSegmentActor::SetupBridge(
 	const FNightBridgeSpec& InSpec,
 	UStaticMesh* MeshOverride,
 	UMaterialInterface* MaterialOverride,
-	const FVector& PivotOffsetCm)
+	const FVector& PivotOffsetCm,
+	float GlobalScaleMultiplier)
 {
 	Spec = InSpec;
 	if (MeshOverride)
@@ -68,15 +69,14 @@ void ANightBridgeSegmentActor::SetupBridge(
 	SetActorLocationAndRotation(Spec.WorldLocation, FRotator(0.f, Spec.YawDeg, 0.f));
 	if (BridgeMesh)
 	{
-		const FVector Base = FVector::OneVector;
-		BridgeMesh->SetRelativeScale3D(FVector(
-			12.f * Base.X,
-			FMath::Max(0.05f, Spec.LengthScale) * Base.Y,
-			4.f * Base.Z));
+		const float GlobalScale = FMath::Max(
+			0.05f,
+			Spec.LengthScale * FMath::Max(0.01f, GlobalScaleMultiplier));
+		const FVector MeshScale(GlobalScale);
+		BridgeMesh->SetRelativeScale3D(MeshScale);
 		const FVector MeshCenter = BridgeMesh->GetStaticMesh()
 			? BridgeMesh->GetStaticMesh()->GetBounds().Origin
 			: FVector::ZeroVector;
-		const FVector MeshScale = BridgeMesh->GetRelativeScale3D();
 		BridgeMesh->SetRelativeLocation(
 			BridgeMesh->GetRelativeRotation().RotateVector(
 				(PivotOffsetCm - MeshCenter) * MeshScale));

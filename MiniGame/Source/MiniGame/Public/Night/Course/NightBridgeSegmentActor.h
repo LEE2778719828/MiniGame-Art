@@ -34,7 +34,8 @@ public:
 		const FNightBridgeSpec& InSpec,
 		UStaticMesh* MeshOverride = nullptr,
 		UMaterialInterface* MaterialOverride = nullptr,
-		const FVector& PivotOffsetCm = FVector::ZeroVector);
+		const FVector& PivotOffsetCm = FVector::ZeroVector,
+		float GlobalScaleMultiplier = 1.f);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void ApplyMesh(UStaticMesh* Mesh);

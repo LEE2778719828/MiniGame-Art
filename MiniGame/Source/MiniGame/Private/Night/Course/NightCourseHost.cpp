@@ -242,10 +242,10 @@ void ANightCourseHost::RebuildEditorPreview()
 			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
 		UStaticMesh* BridgeMesh = BridgePreview ? BridgePreview->GetStaticMesh() : nullptr;
 		const FRotator BridgeRotation(0.f, Bridge.YawDeg - 90.f, 0.f);
-		const FVector BridgeScale(
-			12.f,
-			FMath::Max(0.05f, Bridge.LengthScale),
-			4.f);
+		const float BridgeGlobalScale = FMath::Max(
+			0.05f,
+			Bridge.LengthScale * FMath::Max(0.01f, Config->BridgeGlobalScale));
+		const FVector BridgeScale(BridgeGlobalScale);
 		const FVector BridgeMeshCenter = BridgeMesh
 			? BridgeMesh->GetBounds().Origin
 			: FVector::ZeroVector;

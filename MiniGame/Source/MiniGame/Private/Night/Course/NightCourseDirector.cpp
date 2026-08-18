@@ -262,7 +262,8 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 		BridgeSpecs[Index],
 		Mesh,
 		BridgeMaterial,
-		Config ? Config->BridgePivotOffsetCm : FVector::ZeroVector);
+		Config ? Config->BridgePivotOffsetCm : FVector::ZeroVector,
+		Config ? Config->BridgeGlobalScale : 1.f);
 	SpawnedBridges[Index] = Bridge;
 }
 

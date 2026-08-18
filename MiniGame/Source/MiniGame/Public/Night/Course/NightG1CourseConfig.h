@@ -147,6 +147,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Transform")
 	FVector BridgePivotOffsetCm = FVector::ZeroVector;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Transform")
+	float BridgeGlobalScale = 1.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
 
