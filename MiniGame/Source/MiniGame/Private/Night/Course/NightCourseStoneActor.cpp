@@ -86,6 +86,17 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 	FoeCapsule->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
 	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
+	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	{
+		FoeCapsule->SetMaterial(0, NightMat);
+		if (UMaterialInstanceDynamic* MID =
+			FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, NightMat))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), FoeColor);
+		}
+	}
 }
 
 void ANightCourseStoneActor::SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation)
