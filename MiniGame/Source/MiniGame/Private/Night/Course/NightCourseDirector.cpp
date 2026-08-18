@@ -181,6 +181,14 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 			BridgeSpecs[Index].MeshVariant == 0 ? Config->BridgeMeshA : Config->BridgeMeshB;
 		Mesh = SoftMesh.LoadSynchronous();
 	}
+	if (!Mesh)
+	{
+		Mesh = LoadObject<UStaticMesh>(
+			nullptr,
+			BridgeSpecs[Index].MeshVariant == 0
+				? TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1")
+				: TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
+	}
 	Bridge->SetupBridge(BridgeSpecs[Index], Mesh);
 	SpawnedBridges[Index] = Bridge;
 }
