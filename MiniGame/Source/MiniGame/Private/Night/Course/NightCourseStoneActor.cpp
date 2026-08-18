@@ -70,7 +70,7 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	const bool bShowFoe = Spec.bHasFoe;
 	FoeCapsule->SetHiddenInGame(!bShowFoe);
 	FoeCapsule->SetVisibility(bShowFoe);
-	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	ApplyColors();
 }
 
@@ -83,9 +83,9 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 
 	FoeCapsule->SetStaticMesh(Mesh);
 	// ArtSubmit models use a different forward axis than the course lane.
-	FoeCapsule->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
-	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
+	FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
+	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, FoeHeightOffsetCm));
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
 		nullptr,
 		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
@@ -99,6 +99,22 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 	}
 }
 
+void ANightCourseStoneActor::SetFoeArtTransform(
+	float YawOffsetDeg,
+	float Scale,
+	float HeightOffsetCm)
+{
+	FoeYawOffsetDeg = YawOffsetDeg;
+	FoeScale = FMath::Max(0.01f, Scale);
+	FoeHeightOffsetCm = HeightOffsetCm;
+	if (FoeCapsule)
+	{
+		FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
+		FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, FoeHeightOffsetCm));
+		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
+	}
+}
+
 void ANightCourseStoneActor::ShowFoe()
 {
 	if (!FoeCapsule)
@@ -107,7 +123,7 @@ void ANightCourseStoneActor::ShowFoe()
 	}
 
 	Spec.bHasFoe = true;
-	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	FoeCapsule->SetHiddenInGame(false);
 	FoeCapsule->SetVisibility(true);
 	ApplyColors();
@@ -161,7 +177,7 @@ void ANightCourseStoneActor::Tick(float DeltaSeconds)
 
 	FoeClearAlpha -= DeltaSeconds * 2.5f;
 	const float Alpha = FMath::Clamp(FoeClearAlpha, 0.f, 1.f);
-		FoeCapsule->SetRelativeScale3D(FVector(0.35f) * Alpha);
+		FoeCapsule->SetRelativeScale3D(FVector(FoeScale) * Alpha);
 	FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
 
 	if (Alpha <= 0.01f)

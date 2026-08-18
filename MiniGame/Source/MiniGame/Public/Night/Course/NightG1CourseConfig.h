@@ -95,6 +95,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeYawOffsetDeg = 90.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeScale = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeHeightOffsetCm = 70.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
 

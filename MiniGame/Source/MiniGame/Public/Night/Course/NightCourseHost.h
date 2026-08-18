@@ -63,6 +63,24 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
 	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	TSoftObjectPtr<UMaterialInterface> EditorPreviewMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewBridgeColorA = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewBridgeColorB = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM01 = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM02 = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM03 = FLinearColor::White;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartCourse();
 

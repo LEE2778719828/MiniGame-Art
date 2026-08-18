@@ -177,6 +177,13 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 			FoeMesh = LoadObject<UStaticMesh>(nullptr, FoePath);
 		}
 		Stone->ApplyFoeMesh(FoeMesh);
+		if (Config)
+		{
+			Stone->SetFoeArtTransform(
+				Config->FoeYawOffsetDeg,
+				Config->FoeScale,
+				Config->FoeHeightOffsetCm);
+		}
 	}
 	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
 	SpawnedStones[Index] = Stone;

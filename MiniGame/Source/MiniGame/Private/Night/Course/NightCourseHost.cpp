@@ -173,11 +173,16 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewFoeM02->SetStaticMesh(FoeM02);
 	PreviewFoeM03->SetStaticMesh(FoeM03);
 
-	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
-		nullptr,
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	UMaterialInterface* PreviewMat = EditorPreviewMaterial.LoadSynchronous();
+	if (!PreviewMat)
 	{
-		const auto ApplyPreviewMaterial = [NightMat](
+		PreviewMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+	if (PreviewMat)
+	{
+		const auto ApplyPreviewMaterial = [PreviewMat](
 			UInstancedStaticMeshComponent* Component,
 			const FLinearColor& Color)
 		{
@@ -185,18 +190,18 @@ void ANightCourseHost::RebuildEditorPreview()
 			{
 				return;
 			}
-			Component->SetMaterial(0, NightMat);
+			Component->SetMaterial(0, PreviewMat);
 			if (UMaterialInstanceDynamic* MID =
 				Component->CreateAndSetMaterialInstanceDynamic(0))
 			{
 				MID->SetVectorParameterValue(TEXT("Color"), Color);
 			}
 		};
-		ApplyPreviewMaterial(PreviewBridgeA, FLinearColor(0.12f, 0.55f, 0.95f));
-		ApplyPreviewMaterial(PreviewBridgeB, FLinearColor(0.95f, 0.35f, 0.12f));
-		ApplyPreviewMaterial(PreviewFoeM01, FLinearColor(1.f, 0.18f, 0.12f));
-		ApplyPreviewMaterial(PreviewFoeM02, FLinearColor(1.f, 0.55f, 0.08f));
-		ApplyPreviewMaterial(PreviewFoeM03, FLinearColor(0.85f, 0.12f, 0.9f));
+		ApplyPreviewMaterial(PreviewBridgeA, EditorPreviewBridgeColorA);
+		ApplyPreviewMaterial(PreviewBridgeB, EditorPreviewBridgeColorB);
+		ApplyPreviewMaterial(PreviewFoeM01, EditorPreviewFoeColorM01);
+		ApplyPreviewMaterial(PreviewFoeM02, EditorPreviewFoeColorM02);
+		ApplyPreviewMaterial(PreviewFoeM03, EditorPreviewFoeColorM03);
 	}
 
 	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
@@ -238,9 +243,12 @@ void ANightCourseHost::RebuildEditorPreview()
 		if (FoePreview && FoePreview->GetStaticMesh())
 		{
 			FoePreview->AddInstance(FTransform(
-				FRotator(0.f, Stone.YawDeg + 90.f, 0.f),
-				Stone.WorldLocation + FVector(0.f, 0.f, 70.f),
-				FVector(0.6f)));
+				FRotator(0.f, Stone.YawDeg + Config->FoeYawOffsetDeg, 0.f),
+				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm),
+				FVector(
+					Config->FoeScale,
+					Config->FoeScale,
+					Config->FoeScale)));
 		}
 	}
 }
