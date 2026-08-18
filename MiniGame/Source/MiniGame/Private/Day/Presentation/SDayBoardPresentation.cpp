@@ -390,7 +390,7 @@ ASDayBoardPresenter::ASDayBoardPresenter()
 	WhiteboxFillLight->SetLightColor(FLinearColor(0.55f, 0.68f, 1.0f));
 
 	VisualConfig = TSoftObjectPtr<USDayBoardVisualConfig>(
-		FSoftObjectPath(TEXT("/Game/Game/Day/Data/DA_SDayBoardVisualConfig.DA_SDayBoardVisualConfig")));
+		FSoftObjectPath(TEXT("/Game/Day/Data/DA_SDayBoardVisualConfig.DA_SDayBoardVisualConfig")));
 }
 
 void ASDayBoardPresenter::BeginPlay()
@@ -767,7 +767,7 @@ UFont* ASDayBoardPresenter::ResolveLabelFont() const
 		}
 	}
 	// Fall back to the generated asset so labels stay readable before the config is re-saved.
-	return LoadObject<UFont>(nullptr, TEXT("/Game/Game/Day/UI/F_SDayLabel.F_SDayLabel"));
+	return LoadObject<UFont>(nullptr, TEXT("/Game/Day/UI/F_SDayLabel.F_SDayLabel"));
 }
 
 void ASDayBoardPresenter::RefreshCharacters()

@@ -73,7 +73,7 @@ namespace
 
 	UWidgetBlueprint* CreateDayHudBlueprint()
 	{
-		const FString PackagePath(TEXT("/Game/Game/Day/UI/WBP_SDayHUD"));
+		const FString PackagePath(TEXT("/Game/Day/UI/WBP_SDayHUD"));
 		const FString AssetName(TEXT("WBP_SDayHUD"));
 		if (UWidgetBlueprint* Existing = Cast<UWidgetBlueprint>(LoadAssetByPackage(PackagePath, AssetName)))
 		{
@@ -84,7 +84,7 @@ namespace
 		Factory->ParentClass = USDayHUD::StaticClass();
 		UObject* Asset = FAssetToolsModule::GetModule().Get().CreateAsset(
 			AssetName,
-			TEXT("/Game/Game/Day/UI"),
+			TEXT("/Game/Day/UI"),
 			UWidgetBlueprint::StaticClass(),
 			Factory);
 		UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Asset);
@@ -100,7 +100,7 @@ namespace
 		const FString& AssetName,
 		const FLinearColor& Color)
 	{
-		const FString PackagePath = FString::Printf(TEXT("/Game/Game/Day/Materials/%s"), *AssetName);
+		const FString PackagePath = FString::Printf(TEXT("/Game/Day/Materials/%s"), *AssetName);
 		if (UMaterialInstanceConstant* Existing =
 			Cast<UMaterialInstanceConstant>(LoadAssetByPackage(PackagePath, AssetName)))
 		{
@@ -113,7 +113,7 @@ namespace
 			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 		UObject* Asset = FAssetToolsModule::GetModule().Get().CreateAsset(
 			AssetName,
-			TEXT("/Game/Game/Day/Materials"),
+			TEXT("/Game/Day/Materials"),
 			UMaterialInstanceConstant::StaticClass(),
 			Factory);
 		UMaterialInstanceConstant* Material = Cast<UMaterialInstanceConstant>(Asset);
@@ -156,7 +156,7 @@ namespace
 
 	UFont* CreateLabelFont()
 	{
-		const FString PackagePath(TEXT("/Game/Game/Day/UI/F_SDayLabel"));
+		const FString PackagePath(TEXT("/Game/Day/UI/F_SDayLabel"));
 		const FString AssetName(TEXT("F_SDayLabel"));
 		if (UFont* Existing = Cast<UFont>(LoadAssetByPackage(PackagePath, AssetName)))
 		{
@@ -200,7 +200,7 @@ namespace
 
 	UDataTable* CreateLayoutTable()
 	{
-		const FString PackagePath(TEXT("/Game/Game/Day/Data/DT_SDayBoardLayout"));
+		const FString PackagePath(TEXT("/Game/Day/Data/DT_SDayBoardLayout"));
 		const FString AssetName(TEXT("DT_SDayBoardLayout"));
 		if (UDataTable* Existing = Cast<UDataTable>(LoadAssetByPackage(PackagePath, AssetName)))
 		{
@@ -245,7 +245,7 @@ namespace
 		UMaterialInterface* PieceMaterial,
 		UFont* LabelFont)
 	{
-		const FString PackagePath(TEXT("/Game/Game/Day/Data/DA_SDayBoardVisualConfig"));
+		const FString PackagePath(TEXT("/Game/Day/Data/DA_SDayBoardVisualConfig"));
 		const FString AssetName(TEXT("DA_SDayBoardVisualConfig"));
 		USDayBoardVisualConfig* Config =
 			Cast<USDayBoardVisualConfig>(LoadAssetByPackage(PackagePath, AssetName));
@@ -308,19 +308,19 @@ int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 	(void)Params;
 #if WITH_EDITOR
 	UBlueprint* Presenter = CreateActorBlueprint(
-		TEXT("/Game/Game/Day/Board/BP_SDayBoardPresenter"),
+		TEXT("/Game/Day/Board/BP_SDayBoardPresenter"),
 		TEXT("BP_SDayBoardPresenter"),
 		ASDayBoardPresenter::StaticClass());
 	UBlueprint* Cell = CreateActorBlueprint(
-		TEXT("/Game/Game/Day/Board/BP_SDayCellVisual"),
+		TEXT("/Game/Day/Board/BP_SDayCellVisual"),
 		TEXT("BP_SDayCellVisual"),
 		ASDayCellVisual::StaticClass());
 	UBlueprint* Bin = CreateActorBlueprint(
-		TEXT("/Game/Game/Day/Board/BP_SDayIngredientBinVisual"),
+		TEXT("/Game/Day/Board/BP_SDayIngredientBinVisual"),
 		TEXT("BP_SDayIngredientBinVisual"),
 		ASDayIngredientBinVisual::StaticClass());
 	UBlueprint* Character = CreateActorBlueprint(
-		TEXT("/Game/Game/Day/Board/BP_SDayCharacterStandIn"),
+		TEXT("/Game/Day/Board/BP_SDayCharacterStandIn"),
 		TEXT("BP_SDayCharacterStandIn"),
 		ASDayCharacterStandIn::StaticClass());
 	UWidgetBlueprint* Hud = CreateDayHudBlueprint();
