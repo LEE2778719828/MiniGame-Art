@@ -96,6 +96,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM04;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM05;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
 	TSoftObjectPtr<UMaterialInterface> DefaultArtMaterial;
 
@@ -116,6 +122,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
 	TSoftObjectPtr<UMaterialInterface> FoeMaterialM03;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM04;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM05;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
 	float FoeYawOffsetDeg = 90.f;

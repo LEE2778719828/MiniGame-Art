@@ -170,6 +170,14 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 				FoeMesh = Config->FoeMeshM03.LoadSynchronous();
 				FoeMaterial = Config->FoeMaterialM03.LoadSynchronous();
 				break;
+			case EFoeId::M04:
+				FoeMesh = Config->FoeMeshM04.LoadSynchronous();
+				FoeMaterial = Config->FoeMaterialM04.LoadSynchronous();
+				break;
+			case EFoeId::M05:
+				FoeMesh = Config->FoeMeshM05.LoadSynchronous();
+				FoeMaterial = Config->FoeMaterialM05.LoadSynchronous();
+				break;
 			default: break;
 			}
 			if (!FoeMaterial)

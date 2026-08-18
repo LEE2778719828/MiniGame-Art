@@ -61,6 +61,12 @@ public:
 	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM03;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM04;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM05;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
 	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")

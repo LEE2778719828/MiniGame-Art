@@ -97,6 +97,12 @@ ANightCourseHost::ANightCourseHost()
 	PreviewFoeM03 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM03"));
 	PreviewFoeM03->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PreviewFoeM03->SetHiddenInGame(true);
+	PreviewFoeM04 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM04"));
+	PreviewFoeM04->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewFoeM04->SetHiddenInGame(true);
+	PreviewFoeM05 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM05"));
+	PreviewFoeM05->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewFoeM05->SetHiddenInGame(true);
 	PreviewKeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("PreviewKeyLight"));
 	PreviewKeyLight->SetRelativeRotation(FRotator(-35.f, -35.f, 0.f));
 	PreviewKeyLight->Intensity = 5000.f;
@@ -126,7 +132,9 @@ void ANightCourseHost::OnConstruction(const FTransform& Transform)
 
 void ANightCourseHost::RebuildEditorPreview()
 {
-	if (!PreviewBridgeA || !PreviewBridgeB)
+	if (!PreviewBridgeA || !PreviewBridgeB
+		|| !PreviewFoeM01 || !PreviewFoeM02 || !PreviewFoeM03
+		|| !PreviewFoeM04 || !PreviewFoeM05)
 	{
 		return;
 	}
@@ -136,6 +144,8 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewFoeM01->ClearInstances();
 	PreviewFoeM02->ClearInstances();
 	PreviewFoeM03->ClearInstances();
+	PreviewFoeM04->ClearInstances();
+	PreviewFoeM05->ClearInstances();
 	if (!Config || !Config->ProcParams.bEnableProcGenerator)
 	{
 		return;
@@ -157,6 +167,8 @@ void ANightCourseHost::RebuildEditorPreview()
 	UStaticMesh* FoeM01 = Config->FoeMeshM01.LoadSynchronous();
 	UStaticMesh* FoeM02 = Config->FoeMeshM02.LoadSynchronous();
 	UStaticMesh* FoeM03 = Config->FoeMeshM03.LoadSynchronous();
+	UStaticMesh* FoeM04 = Config->FoeMeshM04.LoadSynchronous();
+	UStaticMesh* FoeM05 = Config->FoeMeshM05.LoadSynchronous();
 	if (!FoeM01)
 	{
 		FoeM01 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/fish.fish"));
@@ -169,9 +181,19 @@ void ANightCourseHost::RebuildEditorPreview()
 	{
 		FoeM03 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box2.box2"));
 	}
+	if (!FoeM04)
+	{
+		FoeM04 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box3.box3"));
+	}
+	if (!FoeM05)
+	{
+		FoeM05 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/cantingguai.cantingguai"));
+	}
 	PreviewFoeM01->SetStaticMesh(FoeM01);
 	PreviewFoeM02->SetStaticMesh(FoeM02);
 	PreviewFoeM03->SetStaticMesh(FoeM03);
+	PreviewFoeM04->SetStaticMesh(FoeM04);
+	PreviewFoeM05->SetStaticMesh(FoeM05);
 
 	UMaterialInterface* DefaultPreviewMat = EditorPreviewMaterial.LoadSynchronous();
 	if (!DefaultPreviewMat)
@@ -206,6 +228,8 @@ void ANightCourseHost::RebuildEditorPreview()
 		ApplyPreviewMaterial(PreviewFoeM01, ResolveMaterial(Config->FoeMaterialM01), EditorPreviewFoeColorM01);
 		ApplyPreviewMaterial(PreviewFoeM02, ResolveMaterial(Config->FoeMaterialM02), EditorPreviewFoeColorM02);
 		ApplyPreviewMaterial(PreviewFoeM03, ResolveMaterial(Config->FoeMaterialM03), EditorPreviewFoeColorM03);
+		ApplyPreviewMaterial(PreviewFoeM04, ResolveMaterial(Config->FoeMaterialM04), EditorPreviewFoeColorM03);
+		ApplyPreviewMaterial(PreviewFoeM05, ResolveMaterial(Config->FoeMaterialM05), EditorPreviewFoeColorM03);
 	}
 
 	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
@@ -251,11 +275,17 @@ void ANightCourseHost::RebuildEditorPreview()
 		{
 			FoePreview = PreviewFoeM02;
 		}
-		else if (Stone.FoeId == EFoeId::M03
-			|| Stone.FoeId == EFoeId::M04
-			|| Stone.FoeId == EFoeId::M05)
+		else if (Stone.FoeId == EFoeId::M03)
 		{
 			FoePreview = PreviewFoeM03;
+		}
+		else if (Stone.FoeId == EFoeId::M04)
+		{
+			FoePreview = PreviewFoeM04;
+		}
+		else if (Stone.FoeId == EFoeId::M05)
+		{
+			FoePreview = PreviewFoeM05;
 		}
 		if (FoePreview && FoePreview->GetStaticMesh())
 		{
