@@ -160,7 +160,7 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	bTrackAdvancing = true;
 }
 
-void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
+void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride)
 {
 	if (!BodyMesh || !Mesh)
 	{
@@ -169,17 +169,27 @@ void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
 
 	bUsingHeroArt = true;
 	BodyMesh->SetStaticMesh(Mesh);
-	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
-	BodyMesh->SetRelativeScale3D(FVector(0.75f));
+	const FVector MeshCenter = Mesh->GetBounds().Origin;
+	const float HeroScale = 0.75f;
+	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f) - MeshCenter * HeroScale);
+	BodyMesh->SetRelativeScale3D(FVector(HeroScale));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
-	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
-		nullptr,
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	UMaterialInterface* HeroMat = MaterialOverride;
+	if (!HeroMat)
 	{
-		BodyMesh->SetMaterial(0, NightMat);
+		HeroMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+	if (HeroMat)
+	{
+		for (int32 MaterialIndex = 0; MaterialIndex < BodyMesh->GetNumMaterials(); ++MaterialIndex)
+		{
+			BodyMesh->SetMaterial(MaterialIndex, HeroMat);
+		}
 		if (UMaterialInstanceDynamic* MID =
-			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, NightMat))
+			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, HeroMat))
 		{
 			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
 		}

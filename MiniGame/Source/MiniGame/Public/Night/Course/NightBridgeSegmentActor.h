@@ -8,6 +8,7 @@
 class UStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
+class UMaterialInterface;
 
 #pragma region K2 moonyfli
 /** Art bridge board spanning FromStone -> ToStone. */
@@ -29,7 +30,10 @@ public:
 	FNightBridgeSpec Spec;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
-	void SetupBridge(const FNightBridgeSpec& InSpec, UStaticMesh* MeshOverride = nullptr);
+	void SetupBridge(
+		const FNightBridgeSpec& InSpec,
+		UStaticMesh* MeshOverride = nullptr,
+		UMaterialInterface* MaterialOverride = nullptr);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void ApplyMesh(UStaticMesh* Mesh);

@@ -74,7 +74,7 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	ApplyColors();
 }
 
-void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
+void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride)
 {
 	if (!FoeCapsule || !Mesh)
 	{
@@ -84,15 +84,27 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 	FoeCapsule->SetStaticMesh(Mesh);
 	// ArtSubmit models use a different forward axis than the course lane.
 	FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
-	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, FoeHeightOffsetCm));
+	const FVector MeshCenter = Mesh->GetBounds().Origin;
 	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
-	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
-		nullptr,
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	const FRotator FoeRotation(0.f, FoeYawOffsetDeg, 0.f);
+	FoeCapsule->SetRelativeLocation(
+		FVector(0.f, 0.f, FoeHeightOffsetCm)
+		+ FoeRotation.RotateVector(-MeshCenter * FoeScale));
+	UMaterialInterface* FoeMat = MaterialOverride;
+	if (!FoeMat)
 	{
-		FoeCapsule->SetMaterial(0, NightMat);
+		FoeMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+	if (FoeMat)
+	{
+		for (int32 MaterialIndex = 0; MaterialIndex < FoeCapsule->GetNumMaterials(); ++MaterialIndex)
+		{
+			FoeCapsule->SetMaterial(MaterialIndex, FoeMat);
+		}
 		if (UMaterialInstanceDynamic* MID =
-			FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, NightMat))
+			FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, FoeMat))
 		{
 			MID->SetVectorParameterValue(TEXT("Color"), FoeColor);
 		}
@@ -110,7 +122,13 @@ void ANightCourseStoneActor::SetFoeArtTransform(
 	if (FoeCapsule)
 	{
 		FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
-		FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, FoeHeightOffsetCm));
+		const FVector MeshCenter = FoeCapsule->GetStaticMesh()
+			? FoeCapsule->GetStaticMesh()->GetBounds().Origin
+			: FVector::ZeroVector;
+		const FRotator FoeRotation(0.f, FoeYawOffsetDeg, 0.f);
+		FoeCapsule->SetRelativeLocation(
+			FVector(0.f, 0.f, FoeHeightOffsetCm)
+			+ FoeRotation.RotateVector(-MeshCenter * FoeScale));
 		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	}
 }

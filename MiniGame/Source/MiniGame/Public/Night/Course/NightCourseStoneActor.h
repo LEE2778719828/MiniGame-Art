@@ -8,6 +8,7 @@
 class UStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
+class UMaterialInterface;
 
 #pragma region K2 moonyfli
 /** Single stepping stone; optional foe capsule on top (刃心 whitebox). */
@@ -53,7 +54,7 @@ public:
 	void SetupStone(int32 InIndex, const FNightStoneSpec& InSpec);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void ApplyFoeMesh(UStaticMesh* Mesh);
+	void ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride = nullptr);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ShowFoe();

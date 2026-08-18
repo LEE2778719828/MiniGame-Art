@@ -153,14 +153,28 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	if (StoneSpecs[Index].bHasFoe)
 	{
 		UStaticMesh* FoeMesh = nullptr;
+		UMaterialInterface* FoeMaterial = nullptr;
 		if (Config)
 		{
 			switch (StoneSpecs[Index].FoeId)
 			{
-			case EFoeId::M01: FoeMesh = Config->FoeMeshM01.LoadSynchronous(); break;
-			case EFoeId::M02: FoeMesh = Config->FoeMeshM02.LoadSynchronous(); break;
-			case EFoeId::M03: FoeMesh = Config->FoeMeshM03.LoadSynchronous(); break;
+			case EFoeId::M01:
+				FoeMesh = Config->FoeMeshM01.LoadSynchronous();
+				FoeMaterial = Config->FoeMaterialM01.LoadSynchronous();
+				break;
+			case EFoeId::M02:
+				FoeMesh = Config->FoeMeshM02.LoadSynchronous();
+				FoeMaterial = Config->FoeMaterialM02.LoadSynchronous();
+				break;
+			case EFoeId::M03:
+				FoeMesh = Config->FoeMeshM03.LoadSynchronous();
+				FoeMaterial = Config->FoeMaterialM03.LoadSynchronous();
+				break;
 			default: break;
+			}
+			if (!FoeMaterial)
+			{
+				FoeMaterial = Config->DefaultArtMaterial.LoadSynchronous();
 			}
 		}
 		if (!FoeMesh)
@@ -176,7 +190,7 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 			}
 			FoeMesh = LoadObject<UStaticMesh>(nullptr, FoePath);
 		}
-		Stone->ApplyFoeMesh(FoeMesh);
+		Stone->ApplyFoeMesh(FoeMesh, FoeMaterial);
 		if (Config)
 		{
 			Stone->SetFoeArtTransform(
@@ -224,7 +238,18 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 				? TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1")
 				: TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
 	}
-	Bridge->SetupBridge(BridgeSpecs[Index], Mesh);
+	UMaterialInterface* BridgeMaterial = nullptr;
+	if (Config)
+	{
+		BridgeMaterial = BridgeSpecs[Index].MeshVariant == 0
+			? Config->BridgeMaterialA.LoadSynchronous()
+			: Config->BridgeMaterialB.LoadSynchronous();
+		if (!BridgeMaterial)
+		{
+			BridgeMaterial = Config->DefaultArtMaterial.LoadSynchronous();
+		}
+	}
+	Bridge->SetupBridge(BridgeSpecs[Index], Mesh, BridgeMaterial);
 	SpawnedBridges[Index] = Bridge;
 }
 

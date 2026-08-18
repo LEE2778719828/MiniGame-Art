@@ -173,35 +173,39 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewFoeM02->SetStaticMesh(FoeM02);
 	PreviewFoeM03->SetStaticMesh(FoeM03);
 
-	UMaterialInterface* PreviewMat = EditorPreviewMaterial.LoadSynchronous();
-	if (!PreviewMat)
+	UMaterialInterface* DefaultPreviewMat = EditorPreviewMaterial.LoadSynchronous();
+	if (!DefaultPreviewMat)
 	{
-		PreviewMat = LoadObject<UMaterialInterface>(
+		DefaultPreviewMat = LoadObject<UMaterialInterface>(
 			nullptr,
 			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	}
-	if (PreviewMat)
+	if (DefaultPreviewMat)
 	{
-		const auto ApplyPreviewMaterial = [PreviewMat](
+		const auto ApplyPreviewMaterial = [](
 			UInstancedStaticMeshComponent* Component,
+			UMaterialInterface* Material,
 			const FLinearColor& Color)
 		{
-			if (!Component || !Component->GetStaticMesh())
+			if (!Component || !Component->GetStaticMesh() || !Material)
 			{
 				return;
 			}
-			Component->SetMaterial(0, PreviewMat);
-			if (UMaterialInstanceDynamic* MID =
-				Component->CreateAndSetMaterialInstanceDynamic(0))
+			for (int32 MaterialIndex = 0; MaterialIndex < Component->GetNumMaterials(); ++MaterialIndex)
 			{
-				MID->SetVectorParameterValue(TEXT("Color"), Color);
+				Component->SetMaterial(MaterialIndex, Material);
 			}
 		};
-		ApplyPreviewMaterial(PreviewBridgeA, EditorPreviewBridgeColorA);
-		ApplyPreviewMaterial(PreviewBridgeB, EditorPreviewBridgeColorB);
-		ApplyPreviewMaterial(PreviewFoeM01, EditorPreviewFoeColorM01);
-		ApplyPreviewMaterial(PreviewFoeM02, EditorPreviewFoeColorM02);
-		ApplyPreviewMaterial(PreviewFoeM03, EditorPreviewFoeColorM03);
+		const auto ResolveMaterial = [this, DefaultPreviewMat](const TSoftObjectPtr<UMaterialInterface>& ConfigMaterial)
+		{
+			UMaterialInterface* Material = ConfigMaterial.LoadSynchronous();
+			return Material ? Material : DefaultPreviewMat;
+		};
+		ApplyPreviewMaterial(PreviewBridgeA, ResolveMaterial(Config->BridgeMaterialA), EditorPreviewBridgeColorA);
+		ApplyPreviewMaterial(PreviewBridgeB, ResolveMaterial(Config->BridgeMaterialB), EditorPreviewBridgeColorB);
+		ApplyPreviewMaterial(PreviewFoeM01, ResolveMaterial(Config->FoeMaterialM01), EditorPreviewFoeColorM01);
+		ApplyPreviewMaterial(PreviewFoeM02, ResolveMaterial(Config->FoeMaterialM02), EditorPreviewFoeColorM02);
+		ApplyPreviewMaterial(PreviewFoeM03, ResolveMaterial(Config->FoeMaterialM03), EditorPreviewFoeColorM03);
 	}
 
 	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
@@ -210,10 +214,21 @@ void ANightCourseHost::RebuildEditorPreview()
 		Config->TrackForward);
 	for (const FNightBridgeSpec& Bridge : Preview.Bridges)
 	{
+		UInstancedStaticMeshComponent* BridgePreview =
+			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
+		UStaticMesh* BridgeMesh = BridgePreview ? BridgePreview->GetStaticMesh() : nullptr;
+		const FRotator BridgeRotation(0.f, Bridge.YawDeg - 90.f, 0.f);
+		const FVector BridgeScale(
+			12.f,
+			FMath::Max(0.05f, Bridge.LengthScale),
+			4.f);
+		const FVector BridgeCenterOffset = BridgeMesh
+			? BridgeRotation.RotateVector(-BridgeMesh->GetBounds().Origin * BridgeScale)
+			: FVector::ZeroVector;
 		const FTransform InstanceTransform(
-			FRotator(0.f, Bridge.YawDeg - 90.f, 0.f),
-			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f),
-			FVector(12.f, FMath::Max(0.05f, Bridge.LengthScale), 4.f));
+			BridgeRotation,
+			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f) + BridgeCenterOffset,
+			BridgeScale);
 		if (Bridge.MeshVariant == 0 && MeshA)
 		{
 			PreviewBridgeA->AddInstance(InstanceTransform);
@@ -242,13 +257,17 @@ void ANightCourseHost::RebuildEditorPreview()
 		}
 		if (FoePreview && FoePreview->GetStaticMesh())
 		{
+			const float FoeScale = Config->FoeScale;
+			const FRotator FoeRotation(0.f, Stone.YawDeg + Config->FoeYawOffsetDeg, 0.f);
+			const FVector MeshCenter = FoePreview->GetStaticMesh()->GetBounds().Origin;
+			const FVector CenterOffset = FoeRotation.RotateVector(-MeshCenter * FoeScale);
 			FoePreview->AddInstance(FTransform(
-				FRotator(0.f, Stone.YawDeg + Config->FoeYawOffsetDeg, 0.f),
-				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm),
+				FoeRotation,
+				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm) + CenterOffset,
 				FVector(
-					Config->FoeScale,
-					Config->FoeScale,
-					Config->FoeScale)));
+					FoeScale,
+					FoeScale,
+					FoeScale)));
 		}
 	}
 }
@@ -302,7 +321,14 @@ void ANightCourseHost::WireFeelFromPlayer()
 	{
 		if (Config)
 		{
-			CoursePawn->ApplyHeroMesh(Config->HeroMesh.LoadSynchronous());
+			UMaterialInterface* HeroMaterial = Config->HeroMaterial.LoadSynchronous();
+			if (!HeroMaterial)
+			{
+				HeroMaterial = Config->DefaultArtMaterial.LoadSynchronous();
+			}
+			CoursePawn->ApplyHeroMesh(
+				Config->HeroMesh.LoadSynchronous(),
+				HeroMaterial);
 		}
 		if (Director)
 		{

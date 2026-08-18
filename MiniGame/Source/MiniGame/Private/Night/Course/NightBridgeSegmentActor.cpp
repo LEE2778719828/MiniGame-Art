@@ -39,7 +39,7 @@ ANightBridgeSegmentActor::ANightBridgeSegmentActor()
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> NightMat(
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (NightMat.Succeeded())
 	{
 		BridgeMesh->SetMaterial(0, NightMat.Object);
@@ -54,7 +54,10 @@ void ANightBridgeSegmentActor::ApplyMesh(UStaticMesh* Mesh)
 	}
 }
 
-void ANightBridgeSegmentActor::SetupBridge(const FNightBridgeSpec& InSpec, UStaticMesh* MeshOverride)
+void ANightBridgeSegmentActor::SetupBridge(
+	const FNightBridgeSpec& InSpec,
+	UStaticMesh* MeshOverride,
+	UMaterialInterface* MaterialOverride)
 {
 	Spec = InSpec;
 	if (MeshOverride)
@@ -69,6 +72,19 @@ void ANightBridgeSegmentActor::SetupBridge(const FNightBridgeSpec& InSpec, UStat
 			12.f * Base.X,
 			FMath::Max(0.05f, Spec.LengthScale) * Base.Y,
 			4.f * Base.Z));
+		const FVector MeshCenter = BridgeMesh->GetStaticMesh()
+			? BridgeMesh->GetStaticMesh()->GetBounds().Origin
+			: FVector::ZeroVector;
+		const FVector MeshScale = BridgeMesh->GetRelativeScale3D();
+		BridgeMesh->SetRelativeLocation(
+			-BridgeMesh->GetRelativeRotation().RotateVector(MeshCenter * MeshScale));
+		if (MaterialOverride)
+		{
+			for (int32 MaterialIndex = 0; MaterialIndex < BridgeMesh->GetNumMaterials(); ++MaterialIndex)
+			{
+				BridgeMesh->SetMaterial(MaterialIndex, MaterialOverride);
+			}
+		}
 		if (UMaterialInstanceDynamic* MID =
 			BridgeMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, BridgeMesh->GetMaterial(0)))
 		{

@@ -12,6 +12,7 @@ class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
 class UStaticMesh;
+class UMaterialInterface;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -84,7 +85,7 @@ public:
 	void ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void ApplyHeroMesh(UStaticMesh* Mesh);
+	void ApplyHeroMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride = nullptr);
 
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);

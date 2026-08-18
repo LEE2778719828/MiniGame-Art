@@ -8,6 +8,7 @@
 #include "NightG1CourseConfig.generated.h"
 
 class UStaticMesh;
+class UMaterialInterface;
 
 #pragma region K2 moonyfli
 /**
@@ -94,6 +95,27 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> DefaultArtMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> BridgeMaterialA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> BridgeMaterialB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> HeroMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM01;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM02;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM03;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
 	float FoeYawOffsetDeg = 90.f;
