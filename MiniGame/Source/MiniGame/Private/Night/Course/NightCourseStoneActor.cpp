@@ -46,6 +46,12 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 		PlatformMesh->SetMaterial(0, UnlitMat.Object);
 		FoeCapsule->SetMaterial(0, UnlitMat.Object);
 	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FadeMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitFade.M_NightUnlitFade"));
+	if (FadeMat.Succeeded())
+	{
+		FadeMaterialParent = FadeMat.Object;
+	}
 }
 
 void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& InSpec)
@@ -54,6 +60,7 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	Spec = InSpec;
 	bClearingFoe = false;
 	FoeClearAlpha = 1.f;
+	CurrentFadeOpacity = 1.f;
 
 	const bool bShowFoe = Spec.bHasFoe;
 	FoeCapsule->SetHiddenInGame(!bShowFoe);
@@ -73,6 +80,10 @@ void ANightCourseStoneActor::SetHighlight(bool bHighlight)
 	if (bHighlight)
 	{
 		TintMesh(PlatformMesh, FLinearColor(1.f, 0.85f, 0.2f));
+		if (PlatformMid && bFadeMaterialConfigured)
+		{
+			PushFadeToMid(PlatformMid, CurrentFadeOpacity, CachedFadeSettings);
+		}
 	}
 }
 
@@ -91,13 +102,102 @@ void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 	{
 		FoeCapsule->SetHiddenInGame(true);
 		FoeCapsule->SetVisibility(false);
-		SetActorTickEnabled(false);
+		if (!bClearingFoe)
+		{
+			SetActorTickEnabled(false);
+		}
 		return;
 	}
 
 	bClearingFoe = true;
 	FoeClearAlpha = 1.f;
 	SetActorTickEnabled(true);
+}
+
+void ANightCourseStoneActor::ConfigureDistanceFadeMaterial(UMaterialInterface* FadeMaterial, const FNightDistanceFadeSettings& Settings)
+{
+	CachedFadeSettings = Settings;
+	if (FadeMaterial)
+	{
+		FadeMaterialParent = FadeMaterial;
+	}
+	bFadeMaterialConfigured = (FadeMaterialParent != nullptr) && Settings.bEnabled;
+	EnsureMeshMids();
+	ApplyColors();
+	ApplyDistanceFade(CurrentFadeOpacity, Settings);
+}
+
+void ANightCourseStoneActor::EnsureMeshMids()
+{
+	UMaterialInterface* Parent = FadeMaterialParent;
+	if (!Parent && PlatformMesh)
+	{
+		Parent = PlatformMesh->GetMaterial(0);
+	}
+	if (!Parent)
+	{
+		return;
+	}
+
+	if (PlatformMesh)
+	{
+		if (bFadeMaterialConfigured && FadeMaterialParent)
+		{
+			PlatformMid = PlatformMesh->CreateDynamicMaterialInstance(0, FadeMaterialParent);
+		}
+		else
+		{
+			PlatformMid = PlatformMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, PlatformMesh->GetMaterial(0));
+		}
+	}
+	if (FoeCapsule)
+	{
+		if (bFadeMaterialConfigured && FadeMaterialParent)
+		{
+			FoeMid = FoeCapsule->CreateDynamicMaterialInstance(0, FadeMaterialParent);
+		}
+		else
+		{
+			FoeMid = FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, FoeCapsule->GetMaterial(0));
+		}
+	}
+}
+
+void ANightCourseStoneActor::PushFadeToMid(UMaterialInstanceDynamic* Mid, float Opacity01, const FNightDistanceFadeSettings& Settings)
+{
+	if (!Mid)
+	{
+		return;
+	}
+	const float Clamped = FMath::Clamp(Opacity01, 0.f, 1.f);
+	if (!Settings.OpacityParamName.IsNone())
+	{
+		Mid->SetScalarParameterValue(Settings.OpacityParamName, Clamped);
+	}
+	if (!Settings.FadeAlphaParamName.IsNone())
+	{
+		Mid->SetScalarParameterValue(Settings.FadeAlphaParamName, Clamped);
+	}
+}
+
+void ANightCourseStoneActor::ApplyDistanceFade(float Opacity01, const FNightDistanceFadeSettings& Settings)
+{
+	CachedFadeSettings = Settings;
+	CurrentFadeOpacity = FMath::Clamp(Opacity01, 0.f, 1.f);
+
+	if (Settings.bAffectPlatform)
+	{
+		PushFadeToMid(PlatformMid, CurrentFadeOpacity, Settings);
+	}
+	if (Settings.bAffectFoe)
+	{
+		PushFadeToMid(FoeMid, CurrentFadeOpacity, Settings);
+	}
+
+	const bool bShouldHide = Settings.bHideWhenBelowThreshold
+		&& CurrentFadeOpacity <= Settings.HideBelowOpacity;
+	SetActorHiddenInGame(bShouldHide);
+	SetActorEnableCollision(!bShouldHide);
 }
 
 void ANightCourseStoneActor::Tick(float DeltaSeconds)
@@ -125,9 +225,14 @@ void ANightCourseStoneActor::Tick(float DeltaSeconds)
 void ANightCourseStoneActor::ApplyColors()
 {
 	TintMesh(PlatformMesh, PadColor);
-	if (FoeCapsule && FoeCapsule->IsVisible())
+	if (FoeCapsule && (FoeCapsule->IsVisible() || Spec.bHasFoe))
 	{
 		TintMesh(FoeCapsule, FoeColor);
+	}
+	if (bFadeMaterialConfigured)
+	{
+		PushFadeToMid(PlatformMid, CurrentFadeOpacity, CachedFadeSettings);
+		PushFadeToMid(FoeMid, CurrentFadeOpacity, CachedFadeSettings);
 	}
 }
 
@@ -137,14 +242,47 @@ void ANightCourseStoneActor::TintMesh(UStaticMeshComponent* Mesh, const FLinearC
 	{
 		return;
 	}
-	UMaterialInterface* Base = Mesh->GetMaterial(0);
-	if (!Base)
+
+	UMaterialInstanceDynamic* Mid = nullptr;
+	if (Mesh == PlatformMesh)
 	{
-		return;
+		if (!PlatformMid)
+		{
+			EnsureMeshMids();
+		}
+		Mid = PlatformMid;
 	}
-	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, Base))
+	else if (Mesh == FoeCapsule)
 	{
-		MID->SetVectorParameterValue(TEXT("Color"), Color);
+		if (!FoeMid)
+		{
+			EnsureMeshMids();
+		}
+		Mid = FoeMid;
+	}
+
+	if (!Mid)
+	{
+		UMaterialInterface* Base = Mesh->GetMaterial(0);
+		if (!Base)
+		{
+			return;
+		}
+		Mid = Mesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, Base);
+		if (Mesh == PlatformMesh)
+		{
+			PlatformMid = Mid;
+		}
+		else if (Mesh == FoeCapsule)
+		{
+			FoeMid = Mid;
+		}
+	}
+
+	if (Mid)
+	{
+		const FName ColorName = bFadeMaterialConfigured ? CachedFadeSettings.ColorParamName : FName(TEXT("Color"));
+		Mid->SetVectorParameterValue(ColorName.IsNone() ? FName(TEXT("Color")) : ColorName, Color);
 	}
 }
 #pragma endregion K2 moonyfli

@@ -175,8 +175,11 @@ void ANightCourseHost::StartCourse()
 void ANightCourseHost::HandleFinished(const FNightResult& Result)
 {
 	LastResult = Result;
-	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d drops=%d soul=%.1f"),
-		Result.bSuccess ? 1 : 0, Result.Ingredients.Num(), Result.SoulLeft);
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d route=%d drops=%d soul=%.1f"),
+		Result.bSuccess ? 1 : 0,
+		static_cast<int32>(Result.RouteTaken),
+		Result.Ingredients.Num(),
+		Result.SoulLeft);
 	for (const FIngredientStack& Stack : Result.Ingredients)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("  Drop Id=%d Count=%d"), static_cast<int32>(Stack.Id), Stack.Count);

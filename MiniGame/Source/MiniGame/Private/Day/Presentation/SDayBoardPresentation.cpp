@@ -30,13 +30,21 @@
 
 namespace
 {
-	const FName LingGuId(TEXT("LingGu"));
-	const FName YinShanJunId(TEXT("YinShanJun"));
-	const FName ChiYanJiaoId(TEXT("ChiYanJiao"));
-	const FName YueLinYuId(TEXT("YueLinYu"));
-	const FName XuanYuQinId(TEXT("XuanYuQin"));
-	const FName NpcALingId(TEXT("ALing"));
-	const FName NpcSangPoId(TEXT("SangPo"));
+	const FName SDayLingGuId(TEXT("LingGu"));
+	const FName SDayYinShanJunId(TEXT("YinShanJun"));
+	const FName SDayChiYanJiaoId(TEXT("ChiYanJiao"));
+	const FName SDayYueLinYuId(TEXT("YueLinYu"));
+	const FName SDayXuanYuQinId(TEXT("XuanYuQin"));
+	const FName SDayNpcALingId(TEXT("ALing"));
+	const FName SDayNpcSangPoId(TEXT("SangPo"));
+
+#define LingGuId SDayLingGuId
+#define YinShanJunId SDayYinShanJunId
+#define ChiYanJiaoId SDayChiYanJiaoId
+#define YueLinYuId SDayYueLinYuId
+#define XuanYuQinId SDayXuanYuQinId
+#define NpcALingId SDayNpcALingId
+#define NpcSangPoId SDayNpcSangPoId
 
 	UStaticMesh* LoadBasicShape(const TCHAR* Path)
 	{
@@ -2184,4 +2192,11 @@ void USDayCheatPanel::HandleCorruptSave()
 		GameInstance->SimulateCorruptSaveForDebug();
 	}
 }
+#undef LingGuId
+#undef YinShanJunId
+#undef ChiYanJiaoId
+#undef YueLinYuId
+#undef XuanYuQinId
+#undef NpcALingId
+#undef NpcSangPoId
 #pragma endregion K2 moonyfli

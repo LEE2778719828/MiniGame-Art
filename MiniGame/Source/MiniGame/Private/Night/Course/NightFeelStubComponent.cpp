@@ -46,13 +46,19 @@ void UNightFeelStubComponent::NotifyJudgeRequest_Implementation(const FNightJudg
 	bHasActiveRequest = true;
 
 	const bool bAttack = (Request.Kind == ENightNodeKind::Enemy);
+	const bool bSwapped = (ControlScheme == ENightControlScheme::Swapped);
+	FString Msg;
+	if (bAttack)
+	{
+		Msg = bSwapped ? TEXT("WINDOW: ATTACK (Q)") : TEXT("WINDOW: ATTACK (E / LMB)");
+	}
+	else
+	{
+		Msg = bSwapped ? TEXT("WINDOW: JUMP (E)") : TEXT("WINDOW: JUMP (Q)");
+	}
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(
-			9911,
-			999.f,
-			bAttack ? FColor::Red : FColor::Cyan,
-			bAttack ? TEXT("WINDOW: ATTACK (E / LMB)") : TEXT("WINDOW: JUMP (Q)"));
+		GEngine->AddOnScreenDebugMessage(9911, 999.f, bAttack ? FColor::Red : FColor::Cyan, Msg);
 	}
 }
 
@@ -69,6 +75,15 @@ void UNightFeelStubComponent::ClearJudgeRequest_Implementation(int32 NodeIndex)
 	}
 }
 
+ENightFeelInput UNightFeelStubComponent::RemapInput(ENightFeelInput Input) const
+{
+	if (ControlScheme != ENightControlScheme::Swapped)
+	{
+		return Input;
+	}
+	return (Input == ENightFeelInput::Jump) ? ENightFeelInput::Attack : ENightFeelInput::Jump;
+}
+
 ENightJudgeOutcome UNightFeelStubComponent::TryResolveInput_Implementation(ENightFeelInput Input)
 {
 	if (!bHasActiveRequest)
@@ -76,11 +91,12 @@ ENightJudgeOutcome UNightFeelStubComponent::TryResolveInput_Implementation(ENigh
 		return ENightJudgeOutcome::None;
 	}
 
+	const ENightFeelInput Effective = RemapInput(Input);
 	const bool bExpectAttack = (ActiveRequest.Kind == ENightNodeKind::Enemy);
 	const bool bExpectJump = (ActiveRequest.Kind == ENightNodeKind::Hazard);
 	const bool bCorrect =
-		(bExpectAttack && Input == ENightFeelInput::Attack) ||
-		(bExpectJump && Input == ENightFeelInput::Jump);
+		(bExpectAttack && Effective == ENightFeelInput::Attack) ||
+		(bExpectJump && Effective == ENightFeelInput::Jump);
 
 	LastOutcome = bCorrect ? ENightJudgeOutcome::Success : ENightJudgeOutcome::WrongButton;
 	const int32 ResolvedIndex = ActiveRequest.NodeIndex;
@@ -123,6 +139,26 @@ void UNightFeelStubComponent::PlayFailFeedback_Implementation(ENightJudgeOutcome
 			: TEXT("MISS");
 		GEngine->AddOnScreenDebugMessage(9912, 1.2f, FColor::Orange, Msg);
 	}
+}
+
+void UNightFeelStubComponent::SetControlScheme_Implementation(ENightControlScheme Scheme)
+{
+	ControlScheme = Scheme;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			9913,
+			2.0f,
+			FColor::Magenta,
+			ControlScheme == ENightControlScheme::Swapped
+				? TEXT("KEYS SWAPPED: Q=ATTACK  E=JUMP")
+				: TEXT("KEYS NORMAL: Q=JUMP  E=ATTACK"));
+	}
+}
+
+ENightControlScheme UNightFeelStubComponent::GetControlScheme_Implementation() const
+{
+	return ControlScheme;
 }
 
 void UNightFeelStubComponent::HandleJump(const FInputActionValue& Value)

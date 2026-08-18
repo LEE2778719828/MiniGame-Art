@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
+#include "Night/Course/NightCourseDirector.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -241,6 +242,11 @@ void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 	{
 		return;
 	}
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
+	{
+		CourseDirector->ChooseForkLeft();
+		return;
+	}
 	if (FeelStub)
 	{
 		//add by K2
@@ -253,6 +259,11 @@ void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 	(void)Value;
 	if (bTrackAdvancing)
 	{
+		return;
+	}
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
+	{
+		CourseDirector->ChooseForkRight();
 		return;
 	}
 	if (FeelStub)

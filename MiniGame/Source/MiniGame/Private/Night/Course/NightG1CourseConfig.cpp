@@ -1,4 +1,6 @@
 #include "Night/Course/NightG1CourseConfig.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
 
 #pragma region K2 moonyfli
 UNightG1CourseConfig::UNightG1CourseConfig()
@@ -151,21 +153,94 @@ FNightBranchLayoutSettings UNightG1CourseConfig::ResolveBranchLayout(ENightRoute
 
 void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const
 {
+	BuildBaseCourse(OutStones, OutBeats);
+}
+
+void UNightG1CourseConfig::BuildBaseCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const
+{
+	OutStones.Reset();
+	OutBeats.Reset();
+	BuildSegment(
+		BeatCount,
+		PatternOverride,
+		FirstStoneDistance,
+		0,
+		true,
+		false,
+		JumpGapCm,
+		KillGapCm,
+		DefaultDropId,
+		DefaultDropCount,
+		OutStones,
+		OutBeats);
+}
+
+void UNightG1CourseConfig::BuildBranchCourse(
+	ENightRouteId RouteId,
+	float StartDistance,
+	int32 StoneIndexOffset,
+	TArray<FNightStoneSpec>& OutStones,
+	TArray<FNightBeatSpec>& OutBeats) const
+{
 	OutStones.Reset();
 	OutBeats.Reset();
 
-	FNightStoneSpec Start;
-	Start.TrackDistance = FirstStoneDistance;
-	Start.bHasFoe = false;
-	OutStones.Add(Start);
+	const FNightBranchLayoutSettings Layout = ResolveBranchLayout(RouteId);
+	const float UseJump = (Layout.JumpGapCm > 0.f) ? Layout.JumpGapCm : JumpGapCm;
+	const float UseKill = (Layout.KillGapCm > 0.f) ? Layout.KillGapCm : KillGapCm;
+	const EIngredientId UseDrop = (Layout.DropId != EIngredientId::None) ? Layout.DropId : DefaultDropId;
+	const int32 UseDropCount = (Layout.DropCount > 0) ? Layout.DropCount : DefaultDropCount;
 
-	float Cursor = FirstStoneDistance;
-	for (int32 Beat = 0; Beat < BeatCount; ++Beat)
+	BuildSegment(
+		Layout.BeatCount,
+		Layout.PatternOverride,
+		StartDistance,
+		StoneIndexOffset,
+		true,
+		Layout.bDefaultPreferAttack,
+		UseJump,
+		UseKill,
+		UseDrop,
+		UseDropCount,
+		OutStones,
+		OutBeats);
+}
+
+void UNightG1CourseConfig::BuildSegment(
+	int32 InBeatCount,
+	const TArray<ENightNodeKind>& Pattern,
+	float StartDistance,
+	int32 StoneIndexOffset,
+	bool bIncludeStartStone,
+	bool bDefaultPreferAttack,
+	float InJumpGapCm,
+	float InKillGapCm,
+	EIngredientId InDropId,
+	int32 InDropCount,
+	TArray<FNightStoneSpec>& OutStones,
+	TArray<FNightBeatSpec>& OutBeats) const
+{
+	const int32 SafeBeats = FMath::Max(0, InBeatCount);
+	float Cursor = StartDistance;
+
+	if (bIncludeStartStone)
+	{
+		FNightStoneSpec Start;
+		Start.TrackDistance = StartDistance;
+		Start.bHasFoe = false;
+		OutStones.Add(Start);
+	}
+
+	for (int32 Beat = 0; Beat < SafeBeats; ++Beat)
 	{
 		ENightNodeKind Action = ENightNodeKind::Hazard;
-		if (PatternOverride.IsValidIndex(Beat))
+		if (Pattern.IsValidIndex(Beat))
 		{
-			Action = PatternOverride[Beat];
+			Action = Pattern[Beat];
+		}
+		else if (bDefaultPreferAttack)
+		{
+			Action = (Beat % 3 == 1) ? ENightNodeKind::Hazard : ENightNodeKind::Enemy;
 		}
 		else
 		{
@@ -173,7 +248,7 @@ void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArra
 		}
 
 		const bool bAttack = (Action == ENightNodeKind::Enemy);
-		Cursor += bAttack ? KillGapCm : JumpGapCm;
+		Cursor += bAttack ? InKillGapCm : InJumpGapCm;
 
 		FNightStoneSpec Stone;
 		Stone.TrackDistance = Cursor;
@@ -181,14 +256,14 @@ void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArra
 		if (bAttack)
 		{
 			Stone.FoeId = static_cast<EFoeId>(1 + (Beat % 5));
-			Stone.DropId = DefaultDropId;
-			Stone.DropCount = DefaultDropCount;
+			Stone.DropId = InDropId;
+			Stone.DropCount = InDropCount;
 		}
 		OutStones.Add(Stone);
 
 		FNightBeatSpec BeatSpec;
-		BeatSpec.FromStoneIndex = Beat;
-		BeatSpec.ToStoneIndex = Beat + 1;
+		BeatSpec.FromStoneIndex = StoneIndexOffset + Beat;
+		BeatSpec.ToStoneIndex = StoneIndexOffset + Beat + 1;
 		BeatSpec.Action = Action;
 		OutBeats.Add(BeatSpec);
 	}

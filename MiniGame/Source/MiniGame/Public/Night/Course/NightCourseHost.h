@@ -15,7 +15,7 @@ class UNightProcParamsAsset;
 
 #pragma region K2 moonyfli
 /**
- * Place one in level (or spawn from GameMode). Owns Director, wires Feel, auto-starts G1.
+ * Place one in level (or spawn from GameMode). Owns Director, wires Feel, auto-starts course.
  */
 UCLASS(Blueprintable)
 class MINIGAME_API ANightCourseHost : public AActor

@@ -28,6 +28,10 @@ void UNightCourseDirector::BindFeelBridge(UObject* FeelObject)
 void UNightCourseDirector::BindRunnerPawn(ANightCoursePawn* InPawn)
 {
 	RunnerPawn = InPawn;
+	if (RunnerPawn)
+	{
+		RunnerPawn->CourseDirector = this;
+	}
 }
 
 INightFeelBridge* UNightCourseDirector::GetFeel() const
@@ -51,6 +55,11 @@ FNightG1DebugSettings UNightCourseDirector::GetDebug() const
 		return Config->Debug;
 	}
 	return FNightG1DebugSettings();
+}
+
+bool UNightCourseDirector::IsForkChoiceActive() const
+{
+	return Phase == ENightCoursePhase::ForkChoice && ForkController && ForkController->IsForkActive();
 }
 
 void UNightCourseDirector::SetPhase(ENightCoursePhase NewPhase)
@@ -134,7 +143,16 @@ void UNightCourseDirector::SyncPawnToProgress(bool bInstant)
 	}
 }
 
-void UNightCourseDirector::EnsureCourse()
+FNightRouteRuleRow UNightCourseDirector::ResolveRouteRule(ENightRouteId RouteId) const
+{
+	if (Config && Config->RouteRules)
+	{
+		return Config->RouteRules->GetRule(RouteId);
+	}
+	return UNightRouteRulesAsset::MakeDefaultRule(RouteId);
+}
+
+void UNightCourseDirector::EnsureBaseCourse()
 {
 	ClearSpawnedActors();
 	StoneSpecs.Reset();
@@ -206,8 +224,9 @@ void UNightCourseDirector::EnsureCourse()
 
 	if (Config)
 	{
-		Config->BuildCourse(StoneSpecs, BeatSpecs);
+		Config->BuildBaseCourse(StoneSpecs, BeatSpecs);
 	}
+	BaseBeatCount = BeatSpecs.Num();
 }
 
 void UNightCourseDirector::ClearSpawnedActors()
@@ -552,15 +571,41 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		return;
 	}
 
+	if (!ForkController)
+	{
+		ForkController = NewObject<UNightForkController>(this, TEXT("ForkController"));
+		ForkController->OnForkResolved.AddDynamic(this, &UNightCourseDirector::OnForkControllerResolved);
+	}
+
 	ActiveBootstrap = Bootstrap;
+	if (Config->bApplyLevelTableToBootstrap)
+	{
+		Config->ApplyLevelDefaultsToBootstrap(ActiveBootstrap);
+	}
+	ActiveLevelSettings = Config->GetLevelSettings(ActiveBootstrap.LevelId);
+
 	bRunning = true;
 	ElapsedSeconds = 0.f;
 	CurrentStoneIndex = 0;
 	ActiveBeatIndex = INDEX_NONE;
 	bWindowOpen = false;
 	bAdvancing = false;
+	bPendingBranchHop = false;
+	bKeySwapWarningActive = false;
+	bKeySwapSafetyActive = false;
+	bPendingOpenAfterKeySwap = false;
+	ActiveControlScheme = ENightControlScheme::Normal;
+	ApplyControlScheme(ENightControlScheme::Normal);
+	RouteTaken = ENightRouteId::None;
+	ActiveRouteRule = FNightRouteRuleRow();
+	BranchFirstBeatIndex = INDEX_NONE;
+	BranchFirstStoneIndex = INDEX_NONE;
+	BranchAttackResolveCount = 0;
+	BranchBeatsResolved = 0;
+	NextKeySwapCueIndex = 0;
 	CollectedIngredients.Reset();
-	EnsureCourse();
+	BranchCollectedIngredients.Reset();
+	EnsureBaseCourse();
 	BeatConsumed.Init(0, BeatSpecs.Num());
 	SpawnedStones.Init(nullptr, StoneSpecs.Num());
 
@@ -578,12 +623,17 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	ProgressDistance = StoneSpecs.IsValidIndex(0) ? StoneSpecs[0].TrackDistance : 0.f;
 	CurrentStoneIndex = 0;
 	SyncPawnToProgress(true);
+	RefreshStoneVisibility();
 	SetPhase(ENightCoursePhase::BaseSegment);
 	SetComponentTickEnabled(true);
 
 	if (BeatSpecs.Num() > 0)
 	{
 		TryOpenBeat(0);
+	}
+	else if (Config->bEnableFork)
+	{
+		BeginForkChoice();
 	}
 	else
 	{
@@ -606,10 +656,15 @@ void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 	{
 		return;
 	}
+	if (bKeySwapWarningActive || bKeySwapSafetyActive)
+	{
+		return;
+	}
 
 	ActiveBeatIndex = BeatIndex;
 	bWindowOpen = true;
 	CurrentStoneIndex = BeatSpecs[BeatIndex].FromStoneIndex;
+	RefreshStoneVisibility();
 
 	if (SpawnedStones.IsValidIndex(CurrentStoneIndex) && SpawnedStones[CurrentStoneIndex])
 	{
@@ -621,7 +676,7 @@ void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 	Request.NodeIndex = BeatIndex;
 	Request.Kind = Beat.Action;
 	Request.WindowOpenTime = ElapsedSeconds;
-	Request.WindowCloseTime = ElapsedSeconds + 3600.f;
+	Request.WindowCloseTime = ElapsedSeconds + (Config ? Config->JudgeWindowSeconds : 3600.f);
 	if (StoneSpecs.IsValidIndex(Beat.ToStoneIndex) && StoneSpecs[Beat.ToStoneIndex].bHasFoe)
 	{
 		Request.FoeId = StoneSpecs[Beat.ToStoneIndex].FoeId;
@@ -648,6 +703,11 @@ void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 void UNightCourseDirector::NotifyFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome)
 {
 	if (!bRunning || !bWindowOpen || bAdvancing || ActiveBeatIndex != NodeIndex)
+	{
+		return;
+	}
+	if (Phase == ENightCoursePhase::ForkChoice || Phase == ENightCoursePhase::BranchEnterBuffer
+		|| bKeySwapWarningActive || bKeySwapSafetyActive)
 	{
 		return;
 	}
@@ -722,20 +782,48 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 	const bool bAttackBeat = (Beat.Action == ENightNodeKind::Enemy);
 	if (Outcome == ENightJudgeOutcome::Success && bAttackBeat && StoneSpecs.IsValidIndex(Beat.ToStoneIndex))
 	{
-		AddDrop(StoneSpecs[Beat.ToStoneIndex].DropId, StoneSpecs[Beat.ToStoneIndex].DropCount);
-		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
+		bool bGrantDrop = true;
+		if (bOnBranch)
+		{
+			++BranchAttackResolveCount;
+			const int32 EveryN = FMath::Max(1, ActiveRouteRule.DropRhythmEveryN);
+			bGrantDrop = ((BranchAttackResolveCount % EveryN) == 0);
+		}
+
+		if (bGrantDrop)
+		{
+			EIngredientId DropId = StoneSpecs[Beat.ToStoneIndex].DropId;
+			int32 DropCount = StoneSpecs[Beat.ToStoneIndex].DropCount;
+			if (bOnBranch)
+			{
+				if (ActiveRouteRule.DropCycle.Num() > 0)
+				{
+					const int32 CycleIndex = (BranchAttackResolveCount - 1) % ActiveRouteRule.DropCycle.Num();
+					DropId = ActiveRouteRule.DropCycle[CycleIndex];
+				}
+				DropCount = FMath::Max(1, DropCount * FMath::Max(1, ActiveRouteRule.BranchDropCountMul));
+			}
+			AddDrop(DropId, DropCount, bOnBranch);
+			if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
+			{
+				SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
+				SpawnedStones[Beat.ToStoneIndex]->PlayDropBurst(DropId, DropCount);
+			}
+		}
+		else if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
 		{
 			SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
-			SpawnedStones[Beat.ToStoneIndex]->PlayDropBurst(
-				StoneSpecs[Beat.ToStoneIndex].DropId,
-				StoneSpecs[Beat.ToStoneIndex].DropCount);
 		}
 	}
 	else if (Outcome != ENightJudgeOutcome::Success && bAttackBeat
 		&& SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
 	{
-		// Wrong/Miss still advances onto the stone but foe can stay or clear — clear to keep chain readable.
 		SpawnedStones[Beat.ToStoneIndex]->ClearFoe(false);
+	}
+
+	if (bOnBranch)
+	{
+		++BranchBeatsResolved;
 	}
 
 	OnNodeResolved.Broadcast(BeatIndex, Beat.Action, Outcome);
@@ -760,6 +848,7 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 	bAdvancing = true;
 	CurrentStoneIndex = StoneIndex;
 	AdvanceTargetDistance = StoneSpecs[StoneIndex].TrackDistance;
+	RefreshStoneVisibility();
 	if (RunnerPawn)
 	{
 		RunnerPawn->BeginTrackAdvance(
@@ -774,18 +863,54 @@ void UNightCourseDirector::OnAdvanceArrived()
 	bAdvancing = false;
 	ProgressDistance = AdvanceTargetDistance;
 	SyncPawnToProgress(true);
+	RefreshStoneVisibility();
+
+	if (bPendingBranchHop)
+	{
+		bPendingBranchHop = false;
+		// Keep BranchEnterBuffer until the 1.2s pure-run window elapses.
+		if (ElapsedSeconds >= BranchEnterBufferEndTime)
+		{
+			EnterBranchSegment();
+		}
+		return;
+	}
+
+	if (Phase == ENightCoursePhase::BranchSegment && TryBeginPendingKeySwap())
+	{
+		return;
+	}
+
 	OpenNextBeatOrExit();
 }
 
 void UNightCourseDirector::OpenNextBeatOrExit()
 {
-	for (int32 Index = 0; Index < BeatSpecs.Num(); ++Index)
+	if (bKeySwapWarningActive || bKeySwapSafetyActive)
 	{
-		if (!BeatConsumed[Index])
+		return;
+	}
+
+	if (Phase == ENightCoursePhase::BaseSegment)
+	{
+		for (int32 Index = 0; Index < BaseBeatCount; ++Index)
 		{
-			TryOpenBeat(Index);
+			if (BeatConsumed.IsValidIndex(Index) && !BeatConsumed[Index])
+			{
+				TryOpenBeat(Index);
+				return;
+			}
+		}
+
+		if (Config && Config->bEnableFork)
+		{
+			BeginForkChoice();
 			return;
 		}
+
+		ExitBufferEndTime = ElapsedSeconds + (Config ? Config->ExitBufferSeconds : 1.f);
+		SetPhase(ENightCoursePhase::ExitBuffer);
+		return;
 	}
 
 	if (Phase == ENightCoursePhase::BranchSegment)
@@ -1017,21 +1142,80 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 		}
 	}
 
+	if (Phase == ENightCoursePhase::ForkChoice && ForkController)
+	{
+		ForkController->TickFork(DeltaTime);
+	}
+
+	if (bKeySwapWarningActive && ElapsedSeconds >= KeySwapPhaseEndTime)
+	{
+		ApplyPendingKeySwapScheme();
+	}
+	else if (bKeySwapSafetyActive && ElapsedSeconds >= KeySwapPhaseEndTime)
+	{
+		EndKeySwapSafetyAndResume();
+	}
+
 	if (bAdvancing)
 	{
 		if (RunnerPawn && !RunnerPawn->IsTrackAdvancing())
 		{
 			OnAdvanceArrived();
 		}
+		if (Config && Config->DistanceFade.bEnabled && Config->DistanceFade.bUpdateEveryTick)
+		{
+			RefreshStoneVisibility();
+		}
+
+		// Reverse-fire DoT continues while advancing.
+		if (Phase == ENightCoursePhase::BranchSegment
+			&& ActiveRouteRule.bReverseFire
+			&& ActiveRouteRule.DotSoulPerSecond > 0.f
+			&& FeelBridgeObject)
+		{
+			const float Dot = ActiveRouteRule.DotSoulPerSecond * DeltaTime;
+			if (Dot > 0.f)
+			{
+				INightFeelBridge::Execute_ApplySoulPenalty(FeelBridgeObject, Dot, ENightJudgeOutcome::Miss);
+			}
+		}
+		return;
+	}
+
+	if (Config && Config->DistanceFade.bEnabled && Config->DistanceFade.bUpdateEveryTick)
+	{
+		RefreshStoneVisibility();
+	}
+
+	if (Phase == ENightCoursePhase::BranchSegment
+		&& ActiveRouteRule.DotSoulPerSecond > 0.f
+		&& FeelBridgeObject
+		&& !bKeySwapWarningActive
+		&& !bKeySwapSafetyActive)
+	{
+		const float Dot = ActiveRouteRule.DotSoulPerSecond * DeltaTime;
+		if (Dot > 0.f)
+		{
+			INightFeelBridge::Execute_ApplySoulPenalty(FeelBridgeObject, Dot, ENightJudgeOutcome::Miss);
+		}
+	}
+
+	if (Phase == ENightCoursePhase::BranchEnterBuffer
+		&& !bPendingBranchHop
+		&& ElapsedSeconds >= BranchEnterBufferEndTime)
+	{
+		EnterBranchSegment();
 		return;
 	}
 
 	if (Phase == ENightCoursePhase::ExitBuffer && ElapsedSeconds >= ExitBufferEndTime)
 	{
+		ApplyCarryOutBonus();
+
 		FNightResult Result;
 		Result.bSuccess = true;
 		Result.bFailedMidway = false;
-		Result.RouteTaken = ENightRouteId::None;
+		Result.RouteTaken = RouteTaken;
 		Result.Ingredients = CollectedIngredients;
 		if (INightFeelBridge* Feel = GetFeel())
 		{
@@ -1045,24 +1229,208 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 	}
 }
 
-void UNightCourseDirector::AddDrop(EIngredientId Id, int32 Count)
+void UNightCourseDirector::AddDrop(EIngredientId Id, int32 Count, bool bCountAsBranch)
 {
 	if (Id == EIngredientId::None || Count <= 0)
 	{
 		return;
 	}
-	for (FIngredientStack& Stack : CollectedIngredients)
+
+	auto Accumulate = [](TArray<FIngredientStack>& Bags, EIngredientId InId, int32 InCount)
 	{
-		if (Stack.Id == Id)
+		for (FIngredientStack& Stack : Bags)
 		{
-			Stack.Count += Count;
-			return;
+			if (Stack.Id == InId)
+			{
+				Stack.Count += InCount;
+				return;
+			}
+		}
+		FIngredientStack NewStack;
+		NewStack.Id = InId;
+		NewStack.Count = InCount;
+		Bags.Add(NewStack);
+	};
+
+	Accumulate(CollectedIngredients, Id, Count);
+	if (bCountAsBranch)
+	{
+		Accumulate(BranchCollectedIngredients, Id, Count);
+	}
+}
+
+void UNightCourseDirector::ApplyCarryOutBonus()
+{
+	if (ActiveRouteRule.CarryOutBonus <= 0.f || BranchCollectedIngredients.Num() == 0)
+	{
+		return;
+	}
+
+	for (const FIngredientStack& Stack : BranchCollectedIngredients)
+	{
+		const int32 Bonus = FMath::CeilToInt(static_cast<float>(Stack.Count) * ActiveRouteRule.CarryOutBonus);
+		if (Bonus > 0)
+		{
+			AddDrop(Stack.Id, Bonus, false);
+			if (GetDebug().bLogEvents)
+			{
+				UE_LOG(LogTemp, Log, TEXT("[NightCourse] CarryOut +%d of %d (branch base %d)"),
+					Bonus, static_cast<int32>(Stack.Id), Stack.Count);
+			}
 		}
 	}
-	FIngredientStack NewStack;
-	NewStack.Id = Id;
-	NewStack.Count = Count;
-	CollectedIngredients.Add(NewStack);
+}
+
+bool UNightCourseDirector::ShouldRunKeySwaps() const
+{
+	if (!Config || !Config->bEnableKeySwap)
+	{
+		return false;
+	}
+	if (ActiveLevelSettings.KeySwaps.Num() == 0)
+	{
+		return false;
+	}
+	if (ActiveLevelSettings.bKeySwapOnlyOnRouteC && RouteTaken != ENightRouteId::C)
+	{
+		return false;
+	}
+	return true;
+}
+
+bool UNightCourseDirector::TryBeginPendingKeySwap()
+{
+	if (bKeySwapWarningActive || bKeySwapSafetyActive || !ShouldRunKeySwaps())
+	{
+		return false;
+	}
+
+	while (NextKeySwapCueIndex < ActiveLevelSettings.KeySwaps.Num())
+	{
+		const FNightKeySwapCue& Cue = ActiveLevelSettings.KeySwaps[NextKeySwapCueIndex];
+		if (BranchBeatsResolved < Cue.TriggerAfterBranchBeats)
+		{
+			return false;
+		}
+
+		++NextKeySwapCueIndex;
+
+		const bool bSkipFirst =
+			Config->bHonorKeyCoinSkipFirstSwap
+			&& ActiveBootstrap.GiftBuffs.bKeyCoin
+			&& (NextKeySwapCueIndex == 1);
+		if (bSkipFirst)
+		{
+			if (GetDebug().bLogEvents)
+			{
+				UE_LOG(LogTemp, Log, TEXT("[NightCourse] KeySwap cue skipped by KeyCoin"));
+			}
+			continue;
+		}
+
+		BeginKeySwapWarning(Cue);
+		return true;
+	}
+	return false;
+}
+
+void UNightCourseDirector::BeginKeySwapWarning(const FNightKeySwapCue& Cue)
+{
+	PendingKeySwapCue = Cue;
+	bPendingOpenAfterKeySwap = true;
+	bKeySwapWarningActive = true;
+	bKeySwapSafetyActive = false;
+
+	if (INightFeelBridge* Feel = GetFeel())
+	{
+		if (ActiveBeatIndex != INDEX_NONE)
+		{
+			INightFeelBridge::Execute_ClearJudgeRequest(FeelBridgeObject, ActiveBeatIndex);
+		}
+	}
+	bWindowOpen = false;
+	ActiveBeatIndex = INDEX_NONE;
+
+	const float Warn = (Cue.WarningSeconds > 0.f)
+		? Cue.WarningSeconds
+		: (Config ? Config->DefaultKeySwapWarningSeconds : 0.8f);
+	KeySwapPhaseEndTime = ElapsedSeconds + Warn;
+
+	if (GetDebug().bLogEvents)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] KeySwap WARNING %.2fs (branchBeats=%d)"),
+			Warn, BranchBeatsResolved);
+	}
+}
+
+void UNightCourseDirector::ApplyPendingKeySwapScheme()
+{
+	bKeySwapWarningActive = false;
+	bKeySwapSafetyActive = true;
+
+	ENightControlScheme NextScheme = PendingKeySwapCue.TargetScheme;
+	if (PendingKeySwapCue.bToggle)
+	{
+		NextScheme = (ActiveControlScheme == ENightControlScheme::Normal)
+			? ENightControlScheme::Swapped
+			: ENightControlScheme::Normal;
+	}
+	ApplyControlScheme(NextScheme);
+
+	const float Safety = (PendingKeySwapCue.SafetyHoldSeconds > 0.f)
+		? PendingKeySwapCue.SafetyHoldSeconds
+		: (Config ? Config->DefaultKeySwapSafetySeconds : 0.6f);
+	KeySwapPhaseEndTime = ElapsedSeconds + Safety;
+
+	if (GetDebug().bLogEvents)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] KeySwap APPLIED scheme=%d safety=%.2fs"),
+			static_cast<int32>(ActiveControlScheme), Safety);
+	}
+}
+
+void UNightCourseDirector::EndKeySwapSafetyAndResume()
+{
+	bKeySwapSafetyActive = false;
+	bKeySwapWarningActive = false;
+	const bool bResume = bPendingOpenAfterKeySwap;
+	bPendingOpenAfterKeySwap = false;
+	if (bResume && Phase == ENightCoursePhase::BranchSegment)
+	{
+		OpenNextBeatOrExit();
+	}
+}
+
+void UNightCourseDirector::ApplyControlScheme(ENightControlScheme Scheme)
+{
+	ActiveControlScheme = Scheme;
+	if (FeelBridgeObject)
+	{
+		INightFeelBridge::Execute_SetControlScheme(FeelBridgeObject, Scheme);
+	}
+}
+
+float UNightCourseDirector::GetKeySwapSecondsRemaining() const
+{
+	if (!bKeySwapWarningActive && !bKeySwapSafetyActive)
+	{
+		return 0.f;
+	}
+	return FMath::Max(0.f, KeySwapPhaseEndTime - ElapsedSeconds);
+}
+
+void UNightCourseDirector::DebugForceKeySwap()
+{
+	if (!bRunning || Phase != ENightCoursePhase::BranchSegment)
+	{
+		return;
+	}
+	FNightKeySwapCue Cue;
+	Cue.TriggerAfterBranchBeats = 0;
+	Cue.WarningSeconds = Config ? Config->DefaultKeySwapWarningSeconds : 0.8f;
+	Cue.SafetyHoldSeconds = Config ? Config->DefaultKeySwapSafetySeconds : 0.6f;
+	Cue.bToggle = true;
+	BeginKeySwapWarning(Cue);
 }
 
 void UNightCourseDirector::FinishNight(const FNightResult& Result)
@@ -1071,20 +1439,31 @@ void UNightCourseDirector::FinishNight(const FNightResult& Result)
 	bRunning = false;
 	bAdvancing = false;
 	bWindowOpen = false;
+	bPendingBranchHop = false;
+	bKeySwapWarningActive = false;
+	bKeySwapSafetyActive = false;
+	bPendingOpenAfterKeySwap = false;
+	if (ForkController)
+	{
+		ForkController->CancelFork();
+	}
 	SetPhase(ENightCoursePhase::Finished);
 	OnFinished.Broadcast(Result);
 	if (GetDebug().bLogEvents)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[NightCourse] Finished success=%d ingredients=%d soul=%.1f"),
-			Result.bSuccess ? 1 : 0, Result.Ingredients.Num(), Result.SoulLeft);
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] Finished success=%d route=%d ingredients=%d soul=%.1f scheme=%d"),
+			Result.bSuccess ? 1 : 0, static_cast<int32>(Result.RouteTaken), Result.Ingredients.Num(), Result.SoulLeft,
+			static_cast<int32>(ActiveControlScheme));
 	}
 }
 
 void UNightCourseDirector::DebugForceFinish(bool bSuccess)
 {
+	ApplyCarryOutBonus();
 	FNightResult Result;
 	Result.bSuccess = bSuccess;
 	Result.bFailedMidway = !bSuccess;
+	Result.RouteTaken = RouteTaken;
 	Result.Ingredients = CollectedIngredients;
 	if (INightFeelBridge* Feel = GetFeel())
 	{
@@ -1101,7 +1480,15 @@ void UNightCourseDirector::DebugSkipToExit()
 	}
 	bWindowOpen = false;
 	bAdvancing = false;
+	bPendingBranchHop = false;
+	bKeySwapWarningActive = false;
+	bKeySwapSafetyActive = false;
+	bPendingOpenAfterKeySwap = false;
 	ActiveBeatIndex = INDEX_NONE;
+	if (ForkController)
+	{
+		ForkController->CancelFork();
+	}
 	ExitBufferEndTime = ElapsedSeconds + (Config ? Config->ExitBufferSeconds : 1.f);
 	SetPhase(ENightCoursePhase::ExitBuffer);
 }
