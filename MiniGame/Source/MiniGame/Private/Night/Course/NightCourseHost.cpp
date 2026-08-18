@@ -7,6 +7,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Night/Course/NightTrackGenerator.h"
@@ -87,6 +88,20 @@ ANightCourseHost::ANightCourseHost()
 	PreviewBridgeB = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewBridgeB"));
 	PreviewBridgeB->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PreviewBridgeB->SetHiddenInGame(true);
+	PreviewFoeM01 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM01"));
+	PreviewFoeM01->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewFoeM01->SetHiddenInGame(true);
+	PreviewFoeM02 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM02"));
+	PreviewFoeM02->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewFoeM02->SetHiddenInGame(true);
+	PreviewFoeM03 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM03"));
+	PreviewFoeM03->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewFoeM03->SetHiddenInGame(true);
+	PreviewKeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("PreviewKeyLight"));
+	PreviewKeyLight->SetRelativeRotation(FRotator(-35.f, -35.f, 0.f));
+	PreviewKeyLight->Intensity = 4.f;
+	PreviewKeyLight->LightColor = FColor(180, 210, 255);
+	PreviewKeyLight->SetHiddenInGame(true);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
@@ -118,6 +133,9 @@ void ANightCourseHost::RebuildEditorPreview()
 
 	PreviewBridgeA->ClearInstances();
 	PreviewBridgeB->ClearInstances();
+	PreviewFoeM01->ClearInstances();
+	PreviewFoeM02->ClearInstances();
+	PreviewFoeM03->ClearInstances();
 	if (!Config || !Config->ProcParams.bEnableProcGenerator)
 	{
 		return;
@@ -136,6 +154,51 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewBridgeA->SetStaticMesh(MeshA);
 	PreviewBridgeB->SetStaticMesh(MeshB);
 
+	UStaticMesh* FoeM01 = Config->FoeMeshM01.LoadSynchronous();
+	UStaticMesh* FoeM02 = Config->FoeMeshM02.LoadSynchronous();
+	UStaticMesh* FoeM03 = Config->FoeMeshM03.LoadSynchronous();
+	if (!FoeM01)
+	{
+		FoeM01 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/fish.fish"));
+	}
+	if (!FoeM02)
+	{
+		FoeM02 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box1.box1"));
+	}
+	if (!FoeM03)
+	{
+		FoeM03 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box2.box2"));
+	}
+	PreviewFoeM01->SetStaticMesh(FoeM01);
+	PreviewFoeM02->SetStaticMesh(FoeM02);
+	PreviewFoeM03->SetStaticMesh(FoeM03);
+
+	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	{
+		const auto ApplyPreviewMaterial = [NightMat](
+			UInstancedStaticMeshComponent* Component,
+			const FLinearColor& Color)
+		{
+			if (!Component || !Component->GetStaticMesh())
+			{
+				return;
+			}
+			Component->SetMaterial(0, NightMat);
+			if (UMaterialInstanceDynamic* MID =
+				Component->CreateAndSetMaterialInstanceDynamic(0))
+			{
+				MID->SetVectorParameterValue(TEXT("Color"), Color);
+			}
+		};
+		ApplyPreviewMaterial(PreviewBridgeA, FLinearColor(0.12f, 0.55f, 0.95f));
+		ApplyPreviewMaterial(PreviewBridgeB, FLinearColor(0.95f, 0.35f, 0.12f));
+		ApplyPreviewMaterial(PreviewFoeM01, FLinearColor(1.f, 0.18f, 0.12f));
+		ApplyPreviewMaterial(PreviewFoeM02, FLinearColor(1.f, 0.55f, 0.08f));
+		ApplyPreviewMaterial(PreviewFoeM03, FLinearColor(0.85f, 0.12f, 0.9f));
+	}
+
 	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
 		Config->ProcParams,
 		Config->TrackOrigin,
@@ -153,6 +216,31 @@ void ANightCourseHost::RebuildEditorPreview()
 		else if (MeshB)
 		{
 			PreviewBridgeB->AddInstance(InstanceTransform);
+		}
+	}
+	for (const FNightStoneSpec& Stone : Preview.Stones)
+	{
+		if (!Stone.bHasFoe)
+		{
+			continue;
+		}
+		UInstancedStaticMeshComponent* FoePreview = PreviewFoeM01;
+		if (Stone.FoeId == EFoeId::M02)
+		{
+			FoePreview = PreviewFoeM02;
+		}
+		else if (Stone.FoeId == EFoeId::M03
+			|| Stone.FoeId == EFoeId::M04
+			|| Stone.FoeId == EFoeId::M05)
+		{
+			FoePreview = PreviewFoeM03;
+		}
+		if (FoePreview && FoePreview->GetStaticMesh())
+		{
+			FoePreview->AddInstance(FTransform(
+				FRotator(0.f, Stone.YawDeg + 90.f, 0.f),
+				Stone.WorldLocation + FVector(0.f, 0.f, 70.f),
+				FVector(0.6f)));
 		}
 	}
 }

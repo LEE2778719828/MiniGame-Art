@@ -13,6 +13,7 @@ class UStaticMesh;
 class UMaterialInterface;
 class UExponentialHeightFogComponent;
 class UInstancedStaticMeshComponent;
+class UDirectionalLightComponent;
 
 #pragma region K2 moonyfli
 /**
@@ -49,6 +50,18 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
 	TObjectPtr<UInstancedStaticMeshComponent> PreviewBridgeB;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM01;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM02;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM03;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartCourse();
