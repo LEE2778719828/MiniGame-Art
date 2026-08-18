@@ -294,6 +294,19 @@ void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 	}
 
 	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
+	if (Beat.Action == ENightNodeKind::Enemy && StoneSpecs.IsValidIndex(Beat.ToStoneIndex))
+	{
+		FNightStoneSpec& TargetStone = StoneSpecs[Beat.ToStoneIndex];
+		if (!TargetStone.bHasFoe)
+		{
+			TargetStone.bHasFoe = true;
+			TargetStone.FoeId = EFoeId::M01;
+		}
+		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
+		{
+			SpawnedStones[Beat.ToStoneIndex]->ShowFoe();
+		}
+	}
 	FNightJudgeRequest Request;
 	Request.NodeIndex = BeatIndex;
 	Request.Kind = Beat.Action;

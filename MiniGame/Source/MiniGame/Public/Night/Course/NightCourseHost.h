@@ -11,6 +11,7 @@ class UNightG1CourseConfig;
 class ANightCoursePawn;
 class UStaticMesh;
 class UMaterialInterface;
+class UExponentialHeightFogComponent;
 
 #pragma region K2 moonyfli
 /**
@@ -38,6 +39,9 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")
 	FNightResult LastResult;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Presentation")
+	TObjectPtr<UExponentialHeightFogComponent> NightFog;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartCourse();

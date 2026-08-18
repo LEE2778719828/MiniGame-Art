@@ -55,10 +55,13 @@ ANightCoursePawn::ANightCoursePawn()
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (!bUsingHeroArt && UnlitMat.Succeeded())
+	if (UnlitMat.Succeeded())
 	{
 		BodyMesh->SetMaterial(0, UnlitMat.Object);
-		HeadMesh->SetMaterial(0, UnlitMat.Object);
+		if (!bUsingHeroArt)
+		{
+			HeadMesh->SetMaterial(0, UnlitMat.Object);
+		}
 	}
 
 	// 刃心-style: behind + above the runner, looking forward down the lane.
@@ -170,6 +173,17 @@ void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
 	BodyMesh->SetRelativeScale3D(FVector(0.75f));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
+	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
+		nullptr,
+		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	{
+		BodyMesh->SetMaterial(0, NightMat);
+		if (UMaterialInstanceDynamic* MID =
+			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, NightMat))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
+		}
+	}
 }
 
 void ANightCoursePawn::Tick(float DeltaSeconds)

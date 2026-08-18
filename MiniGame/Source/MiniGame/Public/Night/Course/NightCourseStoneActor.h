@@ -46,6 +46,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ApplyFoeMesh(UStaticMesh* Mesh);
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ShowFoe();
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation);
 

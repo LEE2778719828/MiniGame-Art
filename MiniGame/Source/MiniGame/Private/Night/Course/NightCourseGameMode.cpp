@@ -3,6 +3,10 @@
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseHUD.h"
 #include "Night/Course/NightG1CourseConfig.h"
+#include "GameFramework/WorldSettings.h"
+#include "Engine/SkyLight.h"
+#include "Components/SkyLightComponent.h"
+#include "EngineUtils.h"
 
 #pragma region K2 moonyfli
 ANightCourseGameMode::ANightCourseGameMode()
@@ -19,6 +23,15 @@ void ANightCourseGameMode::BeginPlay()
 	if (!World)
 	{
 		return;
+	}
+
+	for (TActorIterator<ASkyLight> It(World); It; ++It)
+	{
+		if (USkyLightComponent* SkyComponent = It->GetLightComponent())
+		{
+			SkyComponent->bRealTimeCapture = true;
+			SkyComponent->RecaptureSky();
+		}
 	}
 
 	UClass* ClassToSpawn = HostClass ? HostClass.Get() : ANightCourseHost::StaticClass();
