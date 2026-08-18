@@ -92,5 +92,6 @@ protected:
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;
 	float AdvanceSpeed = 1400.f;
 	bool bTrackAdvancing = false;
+	bool bUsingHeroArt = false;
 };
 #pragma endregion K2 moonyfli

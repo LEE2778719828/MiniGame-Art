@@ -37,14 +37,25 @@ ANightCoursePawn::ANightCoursePawn()
 	HeadMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.35f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> HeroMesh(
+		TEXT("/Game/Night/Course/Art/Hero/zhujue.zhujue"));
 	if (CubeMesh.Succeeded())
 	{
 		BodyMesh->SetStaticMesh(CubeMesh.Object);
 		HeadMesh->SetStaticMesh(CubeMesh.Object);
 	}
+	if (HeroMesh.Succeeded())
+	{
+		bUsingHeroArt = true;
+		BodyMesh->SetStaticMesh(HeroMesh.Object);
+		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+		BodyMesh->SetRelativeScale3D(FVector(0.35f));
+		HeadMesh->SetVisibility(false);
+		HeadMesh->SetHiddenInGame(true);
+	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (UnlitMat.Succeeded())
+	if (!bUsingHeroArt && UnlitMat.Succeeded())
 	{
 		BodyMesh->SetMaterial(0, UnlitMat.Object);
 		HeadMesh->SetMaterial(0, UnlitMat.Object);

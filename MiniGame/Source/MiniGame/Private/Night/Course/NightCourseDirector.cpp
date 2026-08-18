@@ -150,6 +150,34 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	}
 
 	Stone->SetupStone(Index, StoneSpecs[Index]);
+	if (StoneSpecs[Index].bHasFoe)
+	{
+		UStaticMesh* FoeMesh = nullptr;
+		if (Config)
+		{
+			switch (StoneSpecs[Index].FoeId)
+			{
+			case EFoeId::M01: FoeMesh = Config->FoeMeshM01.LoadSynchronous(); break;
+			case EFoeId::M02: FoeMesh = Config->FoeMeshM02.LoadSynchronous(); break;
+			case EFoeId::M03: FoeMesh = Config->FoeMeshM03.LoadSynchronous(); break;
+			default: break;
+			}
+		}
+		if (!FoeMesh)
+		{
+			const TCHAR* FoePath = TEXT("/Game/Night/Course/Art/Foe/fish.fish");
+			switch (StoneSpecs[Index].FoeId)
+			{
+			case EFoeId::M02: FoePath = TEXT("/Game/Night/Course/Art/Foe/box1.box1"); break;
+			case EFoeId::M03: FoePath = TEXT("/Game/Night/Course/Art/Foe/box2.box2"); break;
+			case EFoeId::M04: FoePath = TEXT("/Game/Night/Course/Art/Foe/box3.box3"); break;
+			case EFoeId::M05: FoePath = TEXT("/Game/Night/Course/Art/Foe/cantingguai.cantingguai"); break;
+			default: break;
+			}
+			FoeMesh = LoadObject<UStaticMesh>(nullptr, FoePath);
+		}
+		Stone->ApplyFoeMesh(FoeMesh);
+	}
 	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
 	SpawnedStones[Index] = Stone;
 }
