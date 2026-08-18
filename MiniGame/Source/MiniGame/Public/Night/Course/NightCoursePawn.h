@@ -85,7 +85,10 @@ public:
 	void ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void ApplyHeroMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride = nullptr);
+	void ApplyHeroMesh(
+		UStaticMesh* Mesh,
+		UMaterialInterface* MaterialOverride = nullptr,
+		const FVector& PivotOffsetCm = FVector::ZeroVector);
 
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);

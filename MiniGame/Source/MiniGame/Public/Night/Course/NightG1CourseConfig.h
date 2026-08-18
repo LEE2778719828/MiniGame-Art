@@ -126,6 +126,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
 	float FoeHeightOffsetCm = 70.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	FVector FoePivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Hero Transform")
+	FVector HeroPivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Transform")
+	FVector BridgePivotOffsetCm = FVector::ZeroVector;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
 

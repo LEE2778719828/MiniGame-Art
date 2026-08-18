@@ -196,7 +196,8 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 			Stone->SetFoeArtTransform(
 				Config->FoeYawOffsetDeg,
 				Config->FoeScale,
-				Config->FoeHeightOffsetCm);
+				Config->FoeHeightOffsetCm,
+				Config->FoePivotOffsetCm);
 		}
 	}
 	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
@@ -249,7 +250,11 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 			BridgeMaterial = Config->DefaultArtMaterial.LoadSynchronous();
 		}
 	}
-	Bridge->SetupBridge(BridgeSpecs[Index], Mesh, BridgeMaterial);
+	Bridge->SetupBridge(
+		BridgeSpecs[Index],
+		Mesh,
+		BridgeMaterial,
+		Config ? Config->BridgePivotOffsetCm : FVector::ZeroVector);
 	SpawnedBridges[Index] = Bridge;
 }
 

@@ -114,11 +114,13 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface*
 void ANightCourseStoneActor::SetFoeArtTransform(
 	float YawOffsetDeg,
 	float Scale,
-	float HeightOffsetCm)
+	float HeightOffsetCm,
+	const FVector& PivotOffsetCm)
 {
 	FoeYawOffsetDeg = YawOffsetDeg;
 	FoeScale = FMath::Max(0.01f, Scale);
 	FoeHeightOffsetCm = HeightOffsetCm;
+	FoePivotOffsetCm = PivotOffsetCm;
 	if (FoeCapsule)
 	{
 		FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
@@ -128,7 +130,7 @@ void ANightCourseStoneActor::SetFoeArtTransform(
 		const FRotator FoeRotation(0.f, FoeYawOffsetDeg, 0.f);
 		FoeCapsule->SetRelativeLocation(
 			FVector(0.f, 0.f, FoeHeightOffsetCm)
-			+ FoeRotation.RotateVector(-MeshCenter * FoeScale));
+			+ FoeRotation.RotateVector((FoePivotOffsetCm - MeshCenter) * FoeScale));
 		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	}
 }

@@ -57,7 +57,8 @@ void ANightBridgeSegmentActor::ApplyMesh(UStaticMesh* Mesh)
 void ANightBridgeSegmentActor::SetupBridge(
 	const FNightBridgeSpec& InSpec,
 	UStaticMesh* MeshOverride,
-	UMaterialInterface* MaterialOverride)
+	UMaterialInterface* MaterialOverride,
+	const FVector& PivotOffsetCm)
 {
 	Spec = InSpec;
 	if (MeshOverride)
@@ -77,7 +78,8 @@ void ANightBridgeSegmentActor::SetupBridge(
 			: FVector::ZeroVector;
 		const FVector MeshScale = BridgeMesh->GetRelativeScale3D();
 		BridgeMesh->SetRelativeLocation(
-			-BridgeMesh->GetRelativeRotation().RotateVector(MeshCenter * MeshScale));
+			BridgeMesh->GetRelativeRotation().RotateVector(
+				(PivotOffsetCm - MeshCenter) * MeshScale));
 		if (MaterialOverride)
 		{
 			for (int32 MaterialIndex = 0; MaterialIndex < BridgeMesh->GetNumMaterials(); ++MaterialIndex)

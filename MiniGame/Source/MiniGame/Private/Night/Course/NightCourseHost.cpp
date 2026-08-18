@@ -222,9 +222,11 @@ void ANightCourseHost::RebuildEditorPreview()
 			12.f,
 			FMath::Max(0.05f, Bridge.LengthScale),
 			4.f);
-		const FVector BridgeCenterOffset = BridgeMesh
-			? BridgeRotation.RotateVector(-BridgeMesh->GetBounds().Origin * BridgeScale)
+		const FVector BridgeMeshCenter = BridgeMesh
+			? BridgeMesh->GetBounds().Origin
 			: FVector::ZeroVector;
+		const FVector BridgeCenterOffset = BridgeRotation.RotateVector(
+			(Config->BridgePivotOffsetCm - BridgeMeshCenter) * BridgeScale);
 		const FTransform InstanceTransform(
 			BridgeRotation,
 			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f) + BridgeCenterOffset,
@@ -260,7 +262,8 @@ void ANightCourseHost::RebuildEditorPreview()
 			const float FoeScale = Config->FoeScale;
 			const FRotator FoeRotation(0.f, Stone.YawDeg + Config->FoeYawOffsetDeg, 0.f);
 			const FVector MeshCenter = FoePreview->GetStaticMesh()->GetBounds().Origin;
-			const FVector CenterOffset = FoeRotation.RotateVector(-MeshCenter * FoeScale);
+			const FVector CenterOffset = FoeRotation.RotateVector(
+				(Config->FoePivotOffsetCm - MeshCenter) * FoeScale);
 			FoePreview->AddInstance(FTransform(
 				FoeRotation,
 				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm) + CenterOffset,
@@ -328,7 +331,8 @@ void ANightCourseHost::WireFeelFromPlayer()
 			}
 			CoursePawn->ApplyHeroMesh(
 				Config->HeroMesh.LoadSynchronous(),
-				HeroMaterial);
+				HeroMaterial,
+				Config->HeroPivotOffsetCm);
 		}
 		if (Director)
 		{

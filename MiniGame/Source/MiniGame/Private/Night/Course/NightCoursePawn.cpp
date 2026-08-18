@@ -160,7 +160,10 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	bTrackAdvancing = true;
 }
 
-void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride)
+void ANightCoursePawn::ApplyHeroMesh(
+	UStaticMesh* Mesh,
+	UMaterialInterface* MaterialOverride,
+	const FVector& PivotOffsetCm)
 {
 	if (!BodyMesh || !Mesh)
 	{
@@ -171,7 +174,8 @@ void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh, UMaterialInterface* Mate
 	BodyMesh->SetStaticMesh(Mesh);
 	const FVector MeshCenter = Mesh->GetBounds().Origin;
 	const float HeroScale = 0.75f;
-	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f) - MeshCenter * HeroScale);
+	BodyMesh->SetRelativeLocation(
+		FVector(0.f, 0.f, 90.f) + (PivotOffsetCm - MeshCenter) * HeroScale);
 	BodyMesh->SetRelativeScale3D(FVector(HeroScale));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);

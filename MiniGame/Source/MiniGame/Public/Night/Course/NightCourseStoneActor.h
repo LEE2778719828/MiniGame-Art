@@ -50,6 +50,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
 	float FoeHeightOffsetCm = 70.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	FVector FoePivotOffsetCm = FVector::ZeroVector;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetupStone(int32 InIndex, const FNightStoneSpec& InSpec);
 
@@ -60,7 +63,11 @@ public:
 	void ShowFoe();
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void SetFoeArtTransform(float YawOffsetDeg, float Scale, float HeightOffsetCm);
+	void SetFoeArtTransform(
+		float YawOffsetDeg,
+		float Scale,
+		float HeightOffsetCm,
+		const FVector& PivotOffsetCm = FVector::ZeroVector);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation);
