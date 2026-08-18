@@ -26,6 +26,21 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> BridgeMesh;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	TObjectPtr<UStaticMesh> BridgeMeshOverride;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	TObjectPtr<UMaterialInterface> BridgeMaterialOverride;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge|Transform")
+	float BridgeScaleMultiplier = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge|Transform")
+	FVector BridgePivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge|Collision")
+	bool bBridgeCollisionEnabled = true;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	FNightBridgeSpec Spec;
 

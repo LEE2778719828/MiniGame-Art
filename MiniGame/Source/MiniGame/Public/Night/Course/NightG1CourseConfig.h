@@ -9,6 +9,7 @@
 
 class UStaticMesh;
 class UMaterialInterface;
+class ANightBridgeSegmentActor;
 
 #pragma region K2 moonyfli
 /**
@@ -84,6 +85,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> BridgeMeshB;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Classes")
+	TSubclassOf<ANightBridgeSegmentActor> BridgeClassA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Classes")
+	TSubclassOf<ANightBridgeSegmentActor> BridgeClassB;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> HeroMesh;
 
@@ -155,5 +162,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|G1")
 	void BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Night|G1|Editor")
+	void MarkPackageDirtyForEditor();
 };
 #pragma endregion K2 moonyfli

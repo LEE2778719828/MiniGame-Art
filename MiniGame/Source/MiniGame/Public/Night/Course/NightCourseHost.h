@@ -15,6 +15,7 @@ class UExponentialHeightFogComponent;
 class UInstancedStaticMeshComponent;
 class UDirectionalLightComponent;
 class AStaticMeshActor;
+class AActor;
 
 #pragma region K2 moonyfli
 /**
@@ -71,7 +72,7 @@ public:
 	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
 
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
-	TArray<TObjectPtr<AStaticMeshActor>> EditorPreviewMeshActors;
+	TArray<TObjectPtr<AActor>> EditorPreviewMeshActors;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
 	float RuntimeKeyLightIntensity = 5000.f;

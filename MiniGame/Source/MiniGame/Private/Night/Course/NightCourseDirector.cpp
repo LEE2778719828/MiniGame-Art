@@ -222,8 +222,32 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	UClass* BridgeClass = ANightBridgeSegmentActor::StaticClass();
+	if (Config)
+	{
+		UClass* ConfiguredClass =
+			BridgeSpecs[Index].MeshVariant == 0
+				? Config->BridgeClassA.Get()
+				: Config->BridgeClassB.Get();
+		if (ConfiguredClass)
+		{
+			BridgeClass = ConfiguredClass;
+		}
+		else
+		{
+			BridgeClass = LoadClass<ANightBridgeSegmentActor>(
+				nullptr,
+				BridgeSpecs[Index].MeshVariant == 0
+					? TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeA.BP_NightBridgeA_C")
+					: TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeB.BP_NightBridgeB_C"));
+			if (!BridgeClass)
+			{
+				BridgeClass = ANightBridgeSegmentActor::StaticClass();
+			}
+		}
+	}
 	ANightBridgeSegmentActor* Bridge = World->SpawnActor<ANightBridgeSegmentActor>(
-		ANightBridgeSegmentActor::StaticClass(),
+		BridgeClass,
 		BridgeSpecs[Index].WorldLocation,
 		FRotator(0.f, BridgeSpecs[Index].YawDeg, 0.f),
 		Params);

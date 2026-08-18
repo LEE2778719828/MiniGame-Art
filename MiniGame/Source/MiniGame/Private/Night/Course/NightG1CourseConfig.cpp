@@ -1,4 +1,5 @@
 #include "Night/Course/NightG1CourseConfig.h"
+#include "UObject/Package.h"
 
 #pragma region K2 moonyfli
 void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const
@@ -45,4 +46,14 @@ void UNightG1CourseConfig::BuildCourse(TArray<FNightStoneSpec>& OutStones, TArra
 		OutBeats.Add(BeatSpec);
 	}
 }
+
+void UNightG1CourseConfig::MarkPackageDirtyForEditor()
+{
+	Modify();
+	if (UPackage* Package = GetOutermost())
+	{
+		Package->SetDirtyFlag(true);
+	}
+}
+
 #pragma endregion K2 moonyfli

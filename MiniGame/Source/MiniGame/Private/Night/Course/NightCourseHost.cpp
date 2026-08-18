@@ -1,5 +1,6 @@
 #include "Night/Course/NightCourseHost.h"
 #include "Night/Course/NightCourseDirector.h"
+#include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightFeelStubComponent.h"
@@ -74,6 +75,45 @@ namespace NightCourseStage_Private
 				}
 			}
 		}
+		return Actor;
+	}
+
+	static ANightBridgeSegmentActor* SpawnEditorPreviewBridge(
+		UWorld* World,
+		UClass* BridgeClass,
+		const FNightBridgeSpec& Spec,
+		UStaticMesh* Mesh,
+		UMaterialInterface* Material,
+		const FVector& PivotOffsetCm,
+		float GlobalScaleMultiplier,
+		const FString& Label)
+	{
+		if (!World || !BridgeClass)
+		{
+			return nullptr;
+		}
+
+		ANightBridgeSegmentActor* Actor =
+			World->SpawnActorDeferred<ANightBridgeSegmentActor>(
+				BridgeClass,
+				FTransform::Identity,
+				nullptr,
+				nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Actor)
+		{
+			return nullptr;
+		}
+
+		Actor->SetFlags(RF_Transient);
+		Actor->FinishSpawning(FTransform::Identity);
+		Actor->SetActorLabel(Label);
+		Actor->SetupBridge(
+			Spec,
+			Mesh,
+			Material,
+			PivotOffsetCm,
+			GlobalScaleMultiplier);
 		return Actor;
 	}
 
@@ -196,7 +236,7 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewFoeM03->SetVisibility(false);
 	PreviewFoeM04->SetVisibility(false);
 	PreviewFoeM05->SetVisibility(false);
-	for (AStaticMeshActor* Actor : EditorPreviewMeshActors)
+	for (AActor* Actor : EditorPreviewMeshActors)
 	{
 		if (Actor)
 		{
@@ -298,38 +338,46 @@ void ANightCourseHost::RebuildEditorPreview()
 	{
 		UInstancedStaticMeshComponent* BridgePreview =
 			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
-		UStaticMesh* BridgeMesh = BridgePreview ? BridgePreview->GetStaticMesh() : nullptr;
-		const FRotator BridgeRotation(0.f, Bridge.YawDeg - 90.f, 0.f);
-		const float BridgeGlobalScale = FMath::Max(
-			0.05f,
-			Bridge.LengthScale * FMath::Max(0.01f, Config->BridgeGlobalScale));
-		const FVector BridgeScale(BridgeGlobalScale);
-		const FVector BridgeMeshCenter = BridgeMesh
-			? BridgeMesh->GetBounds().Origin
-			: FVector::ZeroVector;
-		const FVector BridgeCenterOffset = BridgeRotation.RotateVector(
-			(Config->BridgePivotOffsetCm - BridgeMeshCenter) * BridgeScale);
-		const FTransform InstanceTransform(
-			BridgeRotation,
-			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f) + BridgeCenterOffset,
-			BridgeScale);
-		UInstancedStaticMeshComponent* BridgePreviewComponent =
-			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
-		if (UStaticMesh* PreviewMesh = BridgePreviewComponent
-			? BridgePreviewComponent->GetStaticMesh()
+		if (UStaticMesh* PreviewMesh = BridgePreview
+			? BridgePreview->GetStaticMesh()
 			: nullptr)
 		{
 			UMaterialInterface* PreviewMaterial =
-				BridgePreviewComponent->GetMaterial(0);
+				BridgePreview->GetMaterial(0);
+			UClass* BridgeClass = ANightBridgeSegmentActor::StaticClass();
+			UClass* ConfiguredClass =
+				Bridge.MeshVariant == 0
+					? Config->BridgeClassA.Get()
+					: Config->BridgeClassB.Get();
+			if (ConfiguredClass)
+			{
+				BridgeClass = ConfiguredClass;
+			}
+			else
+			{
+				BridgeClass = LoadClass<ANightBridgeSegmentActor>(
+					nullptr,
+					Bridge.MeshVariant == 0
+						? TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeA.BP_NightBridgeA_C")
+						: TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeB.BP_NightBridgeB_C"));
+				if (!BridgeClass)
+				{
+					BridgeClass = ANightBridgeSegmentActor::StaticClass();
+				}
+			}
 			const FString Label = FString::Printf(
 				TEXT("EditorPreview_Bridge_%s_%d"),
 				Bridge.MeshVariant == 0 ? TEXT("A") : TEXT("B"),
 				Bridge.FromStoneIndex);
-			if (AStaticMeshActor* Actor = NightCourseStage_Private::SpawnEditorPreviewMesh(
+			if (ANightBridgeSegmentActor* Actor =
+				NightCourseStage_Private::SpawnEditorPreviewBridge(
 				GetWorld(),
+				BridgeClass,
+				Bridge,
 				PreviewMesh,
 				PreviewMaterial,
-				InstanceTransform,
+				Config->BridgePivotOffsetCm,
+				Config->BridgeGlobalScale,
 				Label))
 			{
 				EditorPreviewMeshActors.Add(Actor);

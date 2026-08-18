@@ -62,7 +62,11 @@ void ANightBridgeSegmentActor::SetupBridge(
 	float GlobalScaleMultiplier)
 {
 	Spec = InSpec;
-	if (MeshOverride)
+	if (BridgeMeshOverride)
+	{
+		ApplyMesh(BridgeMeshOverride);
+	}
+	else if (MeshOverride)
 	{
 		ApplyMesh(MeshOverride);
 	}
@@ -70,21 +74,28 @@ void ANightBridgeSegmentActor::SetupBridge(
 	if (BridgeMesh)
 	{
 		const float GlobalScale = FMath::Max(
-			0.05f,
-			Spec.LengthScale * FMath::Max(0.01f, GlobalScaleMultiplier));
+			0.01f,
+			FMath::Max(0.01f, GlobalScaleMultiplier)
+			* FMath::Max(0.01f, BridgeScaleMultiplier));
 		const FVector MeshScale(GlobalScale);
 		BridgeMesh->SetRelativeScale3D(MeshScale);
+		BridgeMesh->SetCollisionEnabled(
+			bBridgeCollisionEnabled
+				? ECollisionEnabled::QueryAndPhysics
+				: ECollisionEnabled::NoCollision);
 		const FVector MeshCenter = BridgeMesh->GetStaticMesh()
 			? BridgeMesh->GetStaticMesh()->GetBounds().Origin
 			: FVector::ZeroVector;
 		BridgeMesh->SetRelativeLocation(
 			BridgeMesh->GetRelativeRotation().RotateVector(
-				(PivotOffsetCm - MeshCenter) * MeshScale));
-		if (MaterialOverride)
+				(BridgePivotOffsetCm + PivotOffsetCm - MeshCenter) * MeshScale));
+		UMaterialInterface* EffectiveMaterial =
+			BridgeMaterialOverride.Get() ? BridgeMaterialOverride.Get() : MaterialOverride;
+		if (EffectiveMaterial)
 		{
 			for (int32 MaterialIndex = 0; MaterialIndex < BridgeMesh->GetNumMaterials(); ++MaterialIndex)
 			{
-				BridgeMesh->SetMaterial(MaterialIndex, MaterialOverride);
+				BridgeMesh->SetMaterial(MaterialIndex, EffectiveMaterial);
 			}
 		}
 		if (UMaterialInstanceDynamic* MID =
