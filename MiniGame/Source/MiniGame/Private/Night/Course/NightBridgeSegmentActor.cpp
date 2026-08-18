@@ -66,9 +66,9 @@ void ANightBridgeSegmentActor::SetupBridge(const FNightBridgeSpec& InSpec, UStat
 	{
 		const FVector Base = FVector::OneVector;
 		BridgeMesh->SetRelativeScale3D(FVector(
-			Base.X,
+			5.f * Base.X,
 			FMath::Max(0.05f, Spec.LengthScale) * Base.Y,
-			Base.Z));
+			2.5f * Base.Z));
 		if (UMaterialInstanceDynamic* MID =
 			BridgeMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, BridgeMesh->GetMaterial(0)))
 		{

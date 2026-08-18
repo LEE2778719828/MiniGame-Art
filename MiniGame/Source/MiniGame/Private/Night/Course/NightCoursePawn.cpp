@@ -38,7 +38,7 @@ ANightCoursePawn::ANightCoursePawn()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> HeroMesh(
-		TEXT("/Game/Night/Course/Art/Hero/zhujue.zhujue"));
+		TEXT("/Game/Night/Course/Art/Hero/kat.kat"));
 	if (CubeMesh.Succeeded())
 	{
 		BodyMesh->SetStaticMesh(CubeMesh.Object);
@@ -49,7 +49,7 @@ ANightCoursePawn::ANightCoursePawn()
 		bUsingHeroArt = true;
 		BodyMesh->SetStaticMesh(HeroMesh.Object);
 		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
-		BodyMesh->SetRelativeScale3D(FVector(0.35f));
+		BodyMesh->SetRelativeScale3D(FVector(0.75f));
 		HeadMesh->SetVisibility(false);
 		HeadMesh->SetHiddenInGame(true);
 	}
@@ -167,7 +167,7 @@ void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
 	bUsingHeroArt = true;
 	BodyMesh->SetStaticMesh(Mesh);
 	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
-	BodyMesh->SetRelativeScale3D(FVector(0.35f));
+	BodyMesh->SetRelativeScale3D(FVector(0.75f));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
 }
