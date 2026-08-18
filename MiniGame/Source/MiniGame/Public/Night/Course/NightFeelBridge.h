@@ -45,5 +45,12 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
 	void PlayFailFeedback(ENightJudgeOutcome Outcome, ENightNodeKind Kind);
+
+	/** R2 asks R1 to remap Jump/Attack physical mapping (G3 key swap). */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
+	void SetControlScheme(ENightControlScheme Scheme);
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
+	ENightControlScheme GetControlScheme() const;
 };
 #pragma endregion K2 moonyfli

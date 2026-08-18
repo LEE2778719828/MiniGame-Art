@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Night Course Designer — G3.5</title>
+<style>
+  :root {
+    --bg: #1a1f26;
+    --panel: #242b36;
+    --ink: #e8eef6;
+    --muted: #9aa8b8;
+    --accent: #3db8a0;
+    --jump: #4db8e8;
+    --attack: #e85a4d;
+    --fork: #c9a227;
+    --bridge: #6b7c8f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(1200px 600px at 20% 0%, #243044, var(--bg));
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #334155;
+  }
+  header h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.02em; }
+  header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 88px);
+  }
+  aside {
+    background: var(--panel);
+    border-right: 1px solid #334155;
+    padding: 1rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 88px);
+  }
+  label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin: 0.65rem 0 0.2rem;
+  }
+  input, select, button, textarea {
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #3d4b5c;
+    background: #1b222c;
+    color: var(--ink);
+    padding: 0.45rem 0.55rem;
+    font-size: 0.92rem;
+  }
+  .row2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  .stats {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #1b222c;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .bar {
+    height: 8px;
+    background: #334155;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 0.35rem;
+  }
+  .bar > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--jump), var(--attack));
+  }
+  .actions {
+    display: grid;
+    gap: 0.45rem;
+    margin-top: 1rem;
+  }
+  button {
+    cursor: pointer;
+    background: #2a3848;
+  }
+  button.primary {
+    background: var(--accent);
+    color: #0b1a16;
+    border-color: transparent;
+    font-weight: 600;
+  }
+  main {
+    position: relative;
+    padding: 0.75rem;
+  }
+  canvas {
+    width: 100%;
+    height: calc(100vh - 120px);
+    background: #12171e;
+    border-radius: 10px;
+    border: 1px solid #334155;
+  }
+  .legend {
+    position: absolute;
+    right: 1.5rem;
+    top: 1.5rem;
+    background: rgba(26, 31, 38, 0.9);
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Night Course Designer（G3.5）</h1>
+  <p>俯视预览密度 / 难度 / 岔路 · 导出 UE 可识别 JSON（与 FRandomStream LCG 对齐）</p>
+</header>
+<div class="layout">
+  <aside>
+    <label>总节点 TotalNodes</label>
+    <input id="totalNodes" type="number" min="4" step="1" value="12" />
+
+    <label>桥最大旋转角 MaxYawDeltaDeg（0.1°）</label>
+    <input id="maxYawDeltaDeg" type="number" min="0" max="45" step="0.1" value="8.0" />
+
+    <div class="row2">
+      <div>
+        <label>岔路区间 Min</label>
+        <input id="forkNodeMin" type="number" min="1" value="4" />
+      </div>
+      <div>
+        <label>Max</label>
+        <input id="forkNodeMax" type="number" min="1" value="8" />
+      </div>
+    </div>
+
+    <label>岔路环境类型 ForkEnv</label>
+    <select id="forkEnv">
+      <option value="ClearAB">ClearAB（清途 AB）</option>
+      <option value="FogAC">FogAC（瘴雾 AC）</option>
+      <option value="ReverseBC">ReverseBC（倒途 BC）</option>
+      <option value="Custom">Custom</option>
+    </select>
+
+    <label>自定义 ForkPair（Custom 时）</label>
+    <select id="forkPair">
+      <option value="AB">AB</option>
+      <option value="AC">AC</option>
+      <option value="BC">BC</option>
+    </select>
+
+    <label>种子 Seed（空 / 0 = 随机）</label>
+    <input id="seed" type="number" placeholder="0 = random" value="1001" />
+
+    <div class="row2">
+      <div>
+        <label>换键每 N 节点</label>
+        <input id="keySwapEveryNNodes" type="number" min="0" value="10" />
+      </div>
+      <div>
+        <label>每次换几次</label>
+        <input id="keySwapCountPerPeriod" type="number" min="0" value="1" />
+      </div>
+    </div>
+
+    <div class="row2">
+      <div>
+        <label>JumpGapCm</label>
+        <input id="jumpGapCm" type="number" step="1" value="420" />
+      </div>
+      <div>
+        <label>KillGapCm</label>
+        <input id="killGapCm" type="number" step="1" value="160" />
+      </div>
+    </div>
+
+    <label>AttackBias（0–1 怪密度）</label>
+    <input id="attackBias" type="number" min="0" max="1" step="0.01" value="0.45" />
+
+    <label>MaxSameActionStreak</label>
+    <input id="maxSameActionStreak" type="number" min="1" value="2" />
+
+    <div class="row2">
+      <div>
+        <label>BranchA</label>
+        <input id="branchANodes" type="number" min="1" value="4" />
+      </div>
+      <div>
+        <label>BranchB</label>
+        <input id="branchBNodes" type="number" min="1" value="5" />
+      </div>
+    </div>
+    <label>BranchCNodes</label>
+    <input id="branchCNodes" type="number" min="1" value="6" />
+
+    <label>预览分支（俯视分叉色）</label>
+    <select id="previewRoute">
+      <option value="A">A</option>
+      <option value="B">B</option>
+      <option value="C">C</option>
+    </select>
+
+    <div class="stats" id="stats"></div>
+    <div class="actions">
+      <button class="primary" id="btnRegen">重新生成预览</button>
+      <button id="btnExportParams">导出 Params JSON</button>
+      <button id="btnExportBaked">导出 Baked Course JSON</button>
+      <button id="btnCopy">复制到剪贴板</button>
+      <button id="btnImport">导入 JSON 文件</button>
+      <input id="fileImport" type="file" accept="application/json,.json" hidden />
+    </div>
+    <label>最近导出 / 导入</label>
+    <textarea id="jsonOut" rows="8" spellcheck="false"></textarea>
+  </aside>
+  <main>
+    <canvas id="view"></canvas>
+    <div class="legend">
+      <div><span class="dot" style="background:var(--jump)"></span>Jump 石</div>
+      <div><span class="dot" style="background:var(--attack)"></span>Attack 石（带怪）</div>
+      <div><span class="dot" style="background:var(--fork)"></span>岔口石</div>
+      <div><span class="dot" style="background:var(--bridge)"></span>桥段</div>
+    </div>
+  </main>
+</div>
+
+<script>
+/** UE FRandomStream-compatible LCG */
+class FRandomStream {
+  constructor(seed) {
+    this.seed = (seed | 0) || 1;
+  }
+  getUnsignedInt() {
+    // Match Unreal FRandomStream::GetUnsignedInt
+    this.seed = Math.imul(this.seed, 196314165) + 907633515;
+    return this.seed >>> 0;
+  }
+  fRand() {
+    return (this.getUnsignedInt() >>> 8) / 16777216;
+  }
+  fRandRange(min, max) {
+    return min + (max - min) * this.fRand();
+  }
+  randRange(min, max) {
+    // inclusive
+    const a = Math.min(min, max) | 0;
+    const b = Math.max(min, max) | 0;
+    return a + (this.getUnsignedInt() % (b - a + 1));
+  }
+}
+
+function quantizeYaw01(deg) {
+  return Math.round(deg * 10) / 10;
+}
+
+function forkEnvToPair(env, custom) {
+  if (env === "FogAC") return "AC";
+  if (env === "ReverseBC") return "BC";
+  if (env === "Custom") return custom;
+  return "AB";
+}
+
+function readParams() {
+  const seedRaw = document.getElementById("seed").value;
+  const seed = seedRaw === "" ? 0 : Number(seedRaw);
+  return {
+    totalNodes: Number(document.getElementById("totalNodes").value),
+    maxYawDeltaDeg: Number(document.getElementById("maxYawDeltaDeg").value),
+    forkNodeMin: Number(document.getElementById("forkNodeMin").value),
+    forkNodeMax: Number(document.getElementById("forkNodeMax").value),
+    forkEnv: document.getElementById("forkEnv").value,
+    forkPair: document.getElementById("forkPair").value,
+    seed: seed,
+    keySwapEveryNNodes: Number(document.getElementById("keySwapEveryNNodes").value),
+    keySwapCountPerPeriod: Number(document.getElementById("keySwapCountPerPeriod").value),
+    jumpGapCm: Number(document.getElementById("jumpGapCm").value),
+    killGapCm: Number(document.getElementById("killGapCm").value),
+    branchEntryGapCm: 280,
+    attackBias: Number(document.getElementById("attackBias").value),
+    maxSameActionStreak: Number(document.getElementById("maxSameActionStreak").value),
+    branchANodes: Number(document.getElementById("branchANodes").value),
+    branchBNodes: Number(document.getElementById("branchBNodes").value),
+    branchCNodes: Number(document.getElementById("branchCNodes").value),
+    forkTimeoutSeconds: 2.4,
+    keySwapWarningSeconds: 0.8,
+    keySwapSafetySeconds: 0.6,
+    bridgeMeshAWeight: 0.55,
+    startingSoul: 100,
+    wrongPenalty: 7,
+    enableProcGenerator: true,
+    previewOnly: false
+  };
+}
+
+function applyParams(p) {
+  const set = (id, v) => { if (v !== undefined && document.getElementById(id)) document.getElementById(id).value = v; };
+  set("totalNodes", p.totalNodes);
+  set("maxYawDeltaDeg", p.maxYawDeltaDeg);
+  set("forkNodeMin", p.forkNodeMin);
+  set("forkNodeMax", p.forkNodeMax);
+  set("forkEnv", p.forkEnv);
+  set("forkPair", p.forkPair);
+  set("seed", p.seed);
+  set("keySwapEveryNNodes", p.keySwapEveryNNodes);
+  set("keySwapCountPerPeriod", p.keySwapCountPerPeriod);
+  set("jumpGapCm", p.jumpGapCm);
+  set("killGapCm", p.killGapCm);
+  set("attackBias", p.attackBias);
+  set("maxSameActionStreak", p.maxSameActionStreak);
+  set("branchANodes", p.branchANodes);
+  set("branchBNodes", p.branchBNodes);
+  set("branchCNodes", p.branchCNodes);
+}
+
+function pickAction(rng, attackBias, last, streakState, maxStreak) {
+  let pick = rng.fRand() < Math.max(0, Math.min(1, attackBias)) ? "Attack" : "Jump";
+  if (pick === last && streakState.streak >= Math.max(1, maxStreak)) {
+    pick = last === "Attack" ? "Jump" : "Attack";
+  }
+  if (pick === last) streakState.streak += 1;
+  else streakState.streak = 1;
+  return pick;
+}
+
+function appendStep(out, rng, params, state) {
+  const action = pickAction(rng, params.attackBias, state.last, state, params.maxSameActionStreak);
+  state.last = action;
+  const gap = action === "Attack" ? params.killGapCm : params.jumpGapCm;
+  const dYaw = quantizeYaw01(rng.fRandRange(-params.maxYawDeltaDeg, params.maxYawDeltaDeg));
+  state.yaw = quantizeYaw01(state.yaw + dYaw);
+  const rad = state.yaw * Math.PI / 180;
+  const fx = Math.cos(rad), fy = Math.sin(rad);
+  const from = { x: state.x, y: state.y };
+  state.x += fx * gap;
+  state.y += fy * gap;
+  state.arc += gap;
+
+  const fromIndex = out.stones.length - 1;
+  out.stones.push({
+    trackDistance: state.arc,
+    useWorldPose: true,
+    yawDeg: state.yaw,
+    hasFoe: action === "Attack",
+    dropCount: 1,
+    x: state.x, y: state.y, z: 0
+  });
+  const toIndex = out.stones.length - 1;
+  out.beats.push({ from: fromIndex, to: toIndex, action });
+  out.bridges.push({
+    from: fromIndex, to: toIndex,
+    meshVariant: rng.fRand() < params.bridgeMeshAWeight ? 0 : 1,
+    yawDeg: state.yaw,
+    lengthScale: Math.max(0.2, gap / 200),
+    x: (from.x + state.x) * 0.5,
+    y: (from.y + state.y) * 0.5,
+    z: 0
+  });
+}
+
+function generateCourse(params, previewRoute) {
+  let seed = params.seed | 0;
+  if (!seed) seed = (Math.random() * 0x7fffffff) | 1;
+  const resolved = { ...params, seed, forkPair: forkEnvToPair(params.forkEnv, params.forkPair) };
+  const rng = new FRandomStream(seed);
+  const out = {
+    params: resolved,
+    stones: [],
+    beats: [],
+    bridges: [],
+    forkAfterStoneIndex: 0,
+    baseBeatCount: 0,
+    resolvedSeed: seed
+  };
+
+  let state = { x: 0, y: 0, yaw: 0, arc: 0, last: null, streak: 0 };
+  out.stones.push({ trackDistance: 0, useWorldPose: true, yawDeg: 0, hasFoe: false, dropCount: 1, x: 0, y: 0, z: 0 });
+
+  const total = Math.max(2, params.totalNodes | 0);
+  let forkMin = Math.max(1, Math.min(params.forkNodeMin | 0, total - 1));
+  let forkMax = Math.max(forkMin, Math.min(params.forkNodeMax | 0, total - 1));
+  const forkStone = rng.randRange(forkMin, forkMax);
+  out.forkAfterStoneIndex = forkStone;
+
+  for (let i = 1; i <= forkStone; i++) appendStep(out, rng, params, state);
+  out.baseBeatCount = out.beats.length;
+
+  // Preview branch
+  let branchNodes = params.branchANodes;
+  let yawKick = -Math.min(12, params.maxYawDeltaDeg);
+  if (previewRoute === "B") { branchNodes = params.branchBNodes; yawKick = Math.min(12, params.maxYawDeltaDeg); }
+  if (previewRoute === "C") { branchNodes = params.branchCNodes; yawKick = Math.min(6, params.maxYawDeltaDeg) * (rng.fRand() < 0.5 ? -1 : 1); }
+
+  const branchRng = new FRandomStream(seed ^ ((previewRoute === "A" ? 1 : previewRoute === "B" ? 2 : 3) * 9973));
+  state.yaw = quantizeYaw01(state.yaw + yawKick);
+  const rad = state.yaw * Math.PI / 180;
+  const last = out.stones[out.stones.length - 1];
+  const fromLast = out.stones.length - 1;
+  state.x = last.x + Math.cos(rad) * params.branchEntryGapCm;
+  state.y = last.y + Math.sin(rad) * params.branchEntryGapCm;
+  state.arc = last.trackDistance + params.branchEntryGapCm;
+  out.stones.push({ trackDistance: state.arc, useWorldPose: true, yawDeg: state.yaw, hasFoe: false, dropCount: 1, x: state.x, y: state.y, z: 0 });
+  const branchStart = out.stones.length - 1;
+  out.bridges.push({
+    from: fromLast, to: branchStart, meshVariant: 0, yawDeg: state.yaw,
+    lengthScale: Math.max(0.2, params.branchEntryGapCm / 200),
+    x: (last.x + state.x) * 0.5, y: (last.y + state.y) * 0.5, z: 0
+  });
+  state.last = null; state.streak = 0;
+  for (let i = 0; i < Math.max(1, branchNodes); i++) appendStep(out, branchRng, params, state);
+
+  return out;
+}
+
+function difficultyScore(course, params) {
+  const attacks = course.beats.filter(b => b.action === "Attack").length;
+  const jumps = course.beats.length - attacks;
+  const attackRatio = course.beats.length ? attacks / course.beats.length : 0;
+  const avgGap = course.beats.length
+    ? course.beats.reduce((s, b) => s + (b.action === "Attack" ? params.killGapCm : params.jumpGapCm), 0) / course.beats.length
+    : 0;
+  const swaps = params.keySwapEveryNNodes > 0
+    ? Math.floor(course.beats.length / params.keySwapEveryNNodes) * params.keySwapCountPerPeriod
+    : 0;
+  const forkT = course.forkAfterStoneIndex / Math.max(1, params.totalNodes);
+  const score = attackRatio * 40 + (1 - Math.min(1, avgGap / 500)) * 25 + swaps * 8 + Math.abs(forkT - 0.5) * 20 + params.maxYawDeltaDeg;
+  return { attacks, jumps, attackRatio, avgGap, swaps, score: Math.round(score) };
+}
+
+let lastCourse = null;
+let lastJson = "";
+
+function draw() {
+  const canvas = document.getElementById("view");
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const params = readParams();
+  const route = document.getElementById("previewRoute").value;
+  lastCourse = generateCourse(params, route);
+  document.getElementById("seed").value = lastCourse.resolvedSeed;
+
+  const stones = lastCourse.stones;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  stones.forEach(s => { minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x); minY = Math.min(minY, s.y); maxY = Math.max(maxY, s.y); });
+  const pad = 60;
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const scale = Math.min((w - pad * 2) / spanX, (h - pad * 2) / spanY);
+  const map = (s) => ({
+    x: pad + (s.x - minX) * scale,
+    y: h - (pad + (s.y - minY) * scale)
+  });
+
+  // bridges
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--bridge").trim() || "#6b7c8f";
+  lastCourse.bridges.forEach(b => {
+    const a = map(stones[b.from]);
+    const c = map(stones[b.to]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+  });
+
+  stones.forEach((s, i) => {
+    const p = map(s);
+    const isFork = i === lastCourse.forkAfterStoneIndex;
+    const beatInto = lastCourse.beats.find(b => b.to === i);
+    let color = "#88a";
+    if (isFork) color = "#c9a227";
+    else if (s.hasFoe) color = "#e85a4d";
+    else if (beatInto && beatInto.action === "Jump") color = "#4db8e8";
+    ctx.beginPath();
+    ctx.fillStyle = color;
+    ctx.arc(p.x, p.y, isFork ? 9 : 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#dfe7f2";
+    ctx.font = "11px sans-serif";
+    ctx.fillText(String(i), p.x + 10, p.y - 8);
+  });
+
+  const st = difficultyScore(lastCourse, lastCourse.params);
+  document.getElementById("stats").innerHTML = `
+    <div>Seed <b>${lastCourse.resolvedSeed}</b> · ForkPair <b>${lastCourse.params.forkPair}</b> · 岔口石 <b>#${lastCourse.forkAfterStoneIndex}</b></div>
+    <div>Jump ${st.jumps} / Attack ${st.attacks} · 攻击占比 ${(st.attackRatio * 100).toFixed(0)}%</div>
+    <div>平均间距 ${st.avgGap.toFixed(0)} cm · 预估换键 ${st.swaps} · 难度粗估 <b>${st.score}</b></div>
+    <div class="bar"><span style="width:${Math.min(100, st.attackRatio * 100)}%"></span></div>
+  `;
+}
+
+function exportParamsJson() {
+  const p = lastCourse ? lastCourse.params : readParams();
+  lastJson = JSON.stringify(p, null, 2);
+  document.getElementById("jsonOut").value = lastJson;
+  return lastJson;
+}
+
+function exportBakedJson() {
+  if (!lastCourse) draw();
+  const payload = {
+    ...lastCourse.params,
+    stones: lastCourse.stones,
+    beats: lastCourse.beats,
+    bridges: lastCourse.bridges,
+    forkAfterStoneIndex: lastCourse.forkAfterStoneIndex,
+    resolvedSeed: lastCourse.resolvedSeed
+  };
+  lastJson = JSON.stringify(payload, null, 2);
+  document.getElementById("jsonOut").value = lastJson;
+  return lastJson;
+}
+
+document.getElementById("btnRegen").onclick = draw;
+document.getElementById("btnExportParams").onclick = exportParamsJson;
+document.getElementById("btnExportBaked").onclick = exportBakedJson;
+document.getElementById("btnCopy").onclick = async () => {
+  if (!lastJson) exportParamsJson();
+  await navigator.clipboard.writeText(lastJson);
+};
+document.getElementById("btnImport").onclick = () => document.getElementById("fileImport").click();
+document.getElementById("fileImport").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const obj = JSON.parse(text);
+  applyParams(obj);
+  document.getElementById("jsonOut").value = text;
+  draw();
+};
+
+["totalNodes","maxYawDeltaDeg","forkNodeMin","forkNodeMax","forkEnv","forkPair","seed",
+ "keySwapEveryNNodes","keySwapCountPerPeriod","jumpGapCm","killGapCm","attackBias",
+ "maxSameActionStreak","branchANodes","branchBNodes","branchCNodes","previewRoute"
+].forEach(id => {
+  document.getElementById(id).addEventListener("change", draw);
+  document.getElementById(id).addEventListener("input", () => {
+    if (id === "seed") return; // avoid fighting resolved seed while typing
+    draw();
+  });
+});
+
+window.addEventListener("resize", draw);
+draw();
+</script>
+</body>
+</html>

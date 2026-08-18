@@ -18,10 +18,14 @@
 | `BP_SDayBoardPresenter` | 竖屏构图、相机、棋盘框、柜台和各锚点 | `DA_SDayBoardVisualConfig` |
 | `BP_SDayCellVisual` | 可玩孔位、点击碰撞、棋子挂点 | `CellMesh` / `PieceMesh` |
 | `BP_SDayIngredientBinVisual` | 底部五类食材箱；五箱及间隙共同构成高级食材分解区 | `IngredientBinMesh` |
-| `BP_SDayCharacterStandIn` | 厨师、顾客、NPC 的占位壳；顶部四个共享座位同时是交付目标 | `ChefMesh` / `CustomerMesh` / `NpcMesh` |
+| `BP_SDayCharacterStandIn` | 厨师、顾客、NPC 的占位壳；顶部共享座位（数量=`CustomerConcurrentMax`）同时是交付目标 | `ChefMesh` / `CustomerMesh` / `NpcMesh` |
 | `WBP_SDayHUD` | 顶部订单/交付、营业额与开店倒计时、库存、谢礼页签、流程按钮 | Widget Blueprint 外观 |
-| `DT_SDayBoardLayout` | 12 个逻辑格的世界位置与视觉半径 | 仅允许调 Transform/VisualRadius |
-| `DA_SDayBoardVisualConfig` | 全部软引用的集中替换表 | 美术交付后只改这里 |
+| `DT_SDayBoardLayout` | `/Game/Game/Day/Data/` | 12 个逻辑格的世界位置与视觉半径 | 仅允许调 Transform/VisualRadius |
+| `DT_GameStages` | `/Game/Shared/Data/` | 关卡时长/目标/`CustomerConcurrentMax`（真实座位数）/刷客间隔/NPC 规则 | Day/Night 共用 |
+| `DT_SDayBalance` | `/Game/Shared/Data/` | 结转单价、最高菜级、订单槽与等级权重、饕餮怪权重、座位上限 | 单行 `Default` |
+| `DT_Recipes` | `/Game/Shared/Data/` | 菜品售价 | Day/Night 共用 |
+| `DT_Ingredients` / `DT_SpecialNpcs` / `DT_Gifts` / `DT_CustomerNames` | `/Game/Shared/Data/` | 食材名；特殊 NPC 委托规则/对白/谢礼；谢礼文案与下局数值（`EffectTrigger`/`EffectValue`）；普通顾客名池 | Day/Night 共用配置 |
+| `DA_SDayBoardVisualConfig` | `/Game/Game/Day/Data/` | 全部软引用的集中替换表 | 美术交付后只改这里 |
 
 即使上述资产缺失，原生 C++ 会使用 Engine BasicShapes 生成可玩的白模。
 
@@ -33,8 +37,8 @@
 - 棋子模型建议直径 100 cm、高度 40–90 cm；等级尺寸由表现层统一缩放。
 - 食材箱建议 120×80×70 cm；母棋子点击仍依赖箱体碰撞，高级食材分解使用覆盖整个食材区的共享屏幕区域。
 - 角色占位建议原点在脚底，朝向 Y-；厨师与顾客/NPC 可分别替换 Mesh 和 AnimClass。
-- 顶部四个座位是共享席位，普通顾客与特殊 NPC 到店时按空位入座、订单完成后立即离店空出；Mesh 必须响应 `Visibility` Trace；厨师不接收交付。
-- 座位名牌是 `Label` TextRender，挂在角色下方（屏幕方向），最多三行：姓名 / 需求 / 等待状态或谢礼；空座只显示「空座」与下一位倒计时。
+- 顶部共享座位数量由 `DT_GameStages.CustomerConcurrentMax`（经 GI `GetServiceSeatCount`）驱动，普通顾客与特殊 NPC 到店时按空位入座、订单完成后立即离店空出；每个空座各自维护补客倒计时，归零后独立从统一订单队列补下一位，不等待其他座位完成。Mesh 必须响应 `Visibility` Trace；厨师不接收交付。
+- 座位名牌是 `Label` TextRender，挂在角色下方（屏幕方向），最多三行：姓名 / 需求 / 等待状态或谢礼；空座显示座位编号及该座独立补客倒计时。
 - 所有可交互组件必须响应 `Visibility` Trace；装饰孔位必须关闭碰撞。
 
 ### 世界标签字体

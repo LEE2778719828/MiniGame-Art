@@ -4,11 +4,15 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/SafeZone.h"
+#include "Components/ScrollBox.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/SizeBox.h"
 #include "Components/StaticMeshComponent.h"
@@ -26,15 +30,21 @@
 
 namespace
 {
-	const FName LingGuId(TEXT("LingGu"));
-	const FName YinShanJunId(TEXT("YinShanJun"));
-	const FName ChiYanJiaoId(TEXT("ChiYanJiao"));
-	const FName YueLinYuId(TEXT("YueLinYu"));
-	const FName XuanYuQinId(TEXT("XuanYuQin"));
-	const FName NpcALingId(TEXT("ALing"));
-	const FName NpcSangPoId(TEXT("SangPo"));
-	/** Seat owner key for the walk-in guest; NPC seats use their own id. */
-	const FName GuestSeatKey(TEXT("__WalkInGuest")); //add by K2
+	const FName SDayLingGuId(TEXT("LingGu"));
+	const FName SDayYinShanJunId(TEXT("YinShanJun"));
+	const FName SDayChiYanJiaoId(TEXT("ChiYanJiao"));
+	const FName SDayYueLinYuId(TEXT("YueLinYu"));
+	const FName SDayXuanYuQinId(TEXT("XuanYuQin"));
+	const FName SDayNpcALingId(TEXT("ALing"));
+	const FName SDayNpcSangPoId(TEXT("SangPo"));
+
+#define LingGuId SDayLingGuId
+#define YinShanJunId SDayYinShanJunId
+#define ChiYanJiaoId SDayChiYanJiaoId
+#define YueLinYuId SDayYueLinYuId
+#define XuanYuQinId SDayXuanYuQinId
+#define NpcALingId SDayNpcALingId
+#define NpcSangPoId SDayNpcSangPoId
 
 	UStaticMesh* LoadBasicShape(const TCHAR* Path)
 	{
@@ -51,14 +61,27 @@ namespace
 		return FLinearColor::White;
 	}
 
-	FString IngredientShortName(const FName IngredientId)
+	FString IngredientShortName(const UObject* WorldContext, const FName IngredientId)
 	{
-		if (IngredientId == LingGuId) return TEXT("灵谷");
-		if (IngredientId == YinShanJunId) return TEXT("阴山菌");
-		if (IngredientId == ChiYanJiaoId) return TEXT("赤焰椒");
-		if (IngredientId == YueLinYuId) return TEXT("月鳞鱼");
-		if (IngredientId == XuanYuQinId) return TEXT("玄羽禽");
-		return IngredientId.ToString();
+		if (WorldContext)
+		{
+			if (const USChefGameInstance* GameInstance = WorldContext->GetWorld()
+				? WorldContext->GetWorld()->GetGameInstance<USChefGameInstance>()
+				: nullptr)
+			{
+				const FString Resolved = GameInstance->ResolveIngredientShortName(IngredientId);
+				if (!Resolved.IsEmpty())
+				{
+					return Resolved;
+				}
+			}
+		}
+		if (IngredientId == LingGuId) return TEXT("灵");
+		if (IngredientId == YinShanJunId) return TEXT("阴");
+		if (IngredientId == ChiYanJiaoId) return TEXT("赤");
+		if (IngredientId == YueLinYuId) return TEXT("月");
+		if (IngredientId == XuanYuQinId) return TEXT("玄");
+		return IngredientId.ToString().Left(1);
 	}
 
 	void SetButtonText(UButton* Button, const FString& Text)
@@ -231,7 +254,7 @@ void ASDayCellVisual::RefreshVisual()
 	PieceLabel->SetText(FText::FromString(FString::Printf(
 		TEXT("%s%s Lv%d"),
 		bSelected ? TEXT("▲ ") : TEXT(""),
-		*IngredientShortName(Piece.IngredientId),
+		*IngredientShortName(this, Piece.IngredientId),
 		Piece.Level)));
 }
 
@@ -646,7 +669,7 @@ void ASDayBoardPresenter::BuildBins()
 			}
 		}
 		Bin->SetLabelFont(ResolveLabelFont());
-		Bin->Configure(Ids[Index], IngredientShortName(Ids[Index]));
+		Bin->Configure(Ids[Index], IngredientShortName(this, Ids[Index]));
 		IngredientBins.Add(Bin);
 	}
 }
@@ -666,19 +689,38 @@ void ASDayBoardPresenter::BuildCharacters()
 		CharacterClass = Config->CharacterStandInClass;
 	}
 #pragma region K2 moonyfli
-	// Four shared seats along the top plus the chef; occupants are assigned at refresh time.
-	const TArray<FString> Labels = {TEXT("空座"), TEXT("空座"), TEXT("空座"), TEXT("空座"), TEXT("厨师")};
-	const TArray<FVector> Locations =
+	// Shared seats along the top plus the chef; occupants are assigned at refresh time.
+	int32 DeliverySeatCount = 4;
+	if (const USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
-		{-315, 815, 105}, {-105, 815, 105}, {105, 815, 105}, {315, 815, 105}, {405, -365, 105}
-	};
-	const TArray<FLinearColor> Colors =
+		DeliverySeatCount = GameInstance->GetServiceSeatCount();
+	}
+	DeliverySeatCount = FMath::Clamp(DeliverySeatCount, 1, 6);
+
+	TArray<FString> Labels;
+	TArray<FVector> Locations;
+	TArray<FLinearColor> Colors;
+	Labels.Reserve(DeliverySeatCount + 1);
+	Locations.Reserve(DeliverySeatCount + 1);
+	Colors.Reserve(DeliverySeatCount + 1);
+
+	constexpr float SeatLeftX = -315.0f;
+	constexpr float SeatRightX = 315.0f;
+	constexpr float SeatY = 815.0f;
+	constexpr float SeatZ = 105.0f;
+	for (int32 SeatIndex = 0; SeatIndex < DeliverySeatCount; ++SeatIndex)
 	{
-		FLinearColor(0.95f, 0.75f, 0.65f), FLinearColor(0.95f, 0.75f, 0.65f),
-		FLinearColor(0.95f, 0.75f, 0.65f), FLinearColor(0.95f, 0.75f, 0.65f),
-		FLinearColor(0.92f, 0.92f, 0.88f)
-	};
-	const int32 ChefIndex = SeatCount;
+		const float Alpha = DeliverySeatCount == 1
+			? 0.5f
+			: static_cast<float>(SeatIndex) / static_cast<float>(DeliverySeatCount - 1);
+		Labels.Add(TEXT("空座"));
+		Locations.Add(FVector(FMath::Lerp(SeatLeftX, SeatRightX, Alpha), SeatY, SeatZ));
+		Colors.Add(FLinearColor(0.95f, 0.75f, 0.65f));
+	}
+	Labels.Add(TEXT("厨师"));
+	Locations.Add(FVector(405.0f, -365.0f, 105.0f));
+	Colors.Add(FLinearColor(0.92f, 0.92f, 0.88f));
+	const int32 ChefIndex = DeliverySeatCount;
 #pragma endregion K2 moonyfli
 
 	for (int32 Index = 0; Index < Labels.Num(); ++Index)
@@ -709,6 +751,8 @@ void ASDayBoardPresenter::BuildCharacters()
 			}
 		}
 		Character->NpcId = NAME_None;
+		Character->CustomerId.Reset();
+		Character->SeatIndex = Index < ChefIndex ? Index : INDEX_NONE;
 		Character->bOccupied = false;
 		Character->bDeliveryTarget = Index != ChefIndex;
 		Character->SetLabelFont(ResolveLabelFont());
@@ -716,7 +760,6 @@ void ASDayBoardPresenter::BuildCharacters()
 		CharacterStandIns.Add(Character);
 	}
 
-	SeatOccupants.Init(NAME_None, SeatCount); //add by K2
 	RefreshCharacters();
 }
 
@@ -750,103 +793,71 @@ void ASDayBoardPresenter::RefreshCharacters()
 	{
 		return;
 	}
-	if (SeatOccupants.Num() != Seats.Num())
-	{
-		SeatOccupants.Init(NAME_None, Seats.Num());
-	}
-
-	// Everyone waiting in the shop right now: the walk-in guest plus revealed NPCs that
-	// have not been served. Served characters leave at once and hand the seat back.
-	TArray<FName> Waiting;
-	if (CustomerDirector && CustomerDirector->HasActiveCustomer())
-	{
-		Waiting.Add(GuestSeatKey);
-	}
-	if (NpcDirector)
-	{
-		for (const FSSpecialNpcState& Npc : NpcDirector->GetNpcs())
-		{
-			if (Npc.bPresent && !Npc.bServed)
-			{
-				Waiting.Add(Npc.NpcId);
-			}
-		}
-	}
-
-	// Keep whoever is already seated in place so labels do not jump when a neighbour leaves.
-	for (FName& Occupant : SeatOccupants)
-	{
-		if (!Occupant.IsNone() && !Waiting.Contains(Occupant))
-		{
-			Occupant = NAME_None;
-		}
-	}
-	for (const FName& Key : Waiting)
-	{
-		if (SeatOccupants.Contains(Key))
-		{
-			continue;
-		}
-		const int32 FreeSeat = SeatOccupants.IndexOfByPredicate([](const FName Id) { return Id.IsNone(); });
-		if (FreeSeat != INDEX_NONE)
-		{
-			SeatOccupants[FreeSeat] = Key;
-		}
-	}
 
 	for (int32 SeatIndex = 0; SeatIndex < Seats.Num(); ++SeatIndex)
 	{
 		ASDayCharacterStandIn* Seat = Seats[SeatIndex];
-		const FName Occupant = SeatOccupants[SeatIndex];
+		Seat->SeatIndex = SeatIndex;
+		Seat->NpcId = NAME_None;
+		Seat->CustomerId.Reset();
+		Seat->bOccupied = false;
 
-		if (Occupant.IsNone())
+#pragma region K2 moonyfli
+		FSCustomerState Customer;
+		if (CustomerDirector && CustomerDirector->TryGetCustomerAtSeat(SeatIndex, Customer))
 		{
-			Seat->NpcId = NAME_None;
-			Seat->bOccupied = false;
-			ApplyTint(Seat->CharacterMesh, FLinearColor(0.55f, 0.53f, 0.50f));
-			const FString Headline = CustomerDirector && !CustomerDirector->HasActiveCustomer()
-				? FString::Printf(TEXT("空座\n下一位\n%.0fs"), CustomerDirector->GetSpawnCooldownRemaining())
-				: TEXT("空座");
-			Seat->SetHeadline(Headline, FLinearColor(0.62f, 0.58f, 0.54f));
-			continue;
-		}
-
-		// Seats sit ~210 units apart, so every line stays short enough not to collide
-		// with the neighbouring plate; the full wording lives on the HUD order bar.
-		if (Occupant == GuestSeatKey)
-		{
-			const FSCustomerState Customer = CustomerDirector->GetActiveCustomer();
-			Seat->NpcId = NAME_None;
+			Seat->CustomerId = Customer.CustomerId;
 			Seat->bOccupied = true;
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
 			Seat->SetHeadline(
 				FString::Printf(
 					TEXT("%s\n%sLv%d\n等待中"),
 					Customer.DisplayName.IsEmpty() ? *Customer.CustomerId : *Customer.DisplayName,
-					*IngredientShortName(Customer.Order.IngredientId),
+					*IngredientShortName(this, Customer.Order.IngredientId),
 					Customer.Order.Level),
 				FLinearColor(0.98f, 0.86f, 0.42f));
 			continue;
 		}
 
-		FSSpecialNpcState Npc;
-		if (!NpcDirector || !NpcDirector->TryGetNpc(Occupant, Npc))
+		FSSpecialNpcState SeatedNpc;
+		bool bHasNpc = false;
+		if (NpcDirector)
 		{
-			SeatOccupants[SeatIndex] = NAME_None;
+			for (const FSSpecialNpcState& Npc : NpcDirector->GetNpcs())
+			{
+				if (Npc.bPresent && !Npc.bServed && Npc.SeatIndex == SeatIndex)
+				{
+					SeatedNpc = Npc;
+					bHasNpc = true;
+					break;
+				}
+			}
+		}
+
+		if (bHasNpc)
+		{
+			Seat->NpcId = SeatedNpc.NpcId;
+			Seat->bOccupied = true;
+			ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
+			Seat->SetHeadline(
+				FString::Printf(
+					TEXT("%s\n%sLv%d\n→%s"),
+					*SeatedNpc.DisplayName,
+					*IngredientShortName(this, SeatedNpc.Order.IngredientId),
+					SeatedNpc.Order.Level,
+					*USChefGameInstance::GetGiftDisplayName(SeatedNpc.GiftId)),
+				FLinearColor(0.40f, 0.95f, 0.82f));
 			continue;
 		}
 
-		Seat->NpcId = Npc.NpcId;
-		Seat->bOccupied = true;
-		ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
+		ApplyTint(Seat->CharacterMesh, FLinearColor(0.55f, 0.53f, 0.50f));
+		const float Cooldown = CustomerDirector
+			? CustomerDirector->GetSeatCooldownRemaining(SeatIndex)
+			: 0.0f;
 		Seat->SetHeadline(
-			FString::Printf(
-				TEXT("%s\n%sLv%d\n→%s"),
-				*Npc.DisplayName,
-				*IngredientShortName(Npc.Order.IngredientId),
-				Npc.Order.Level,
-				*USChefGameInstance::GetGiftDisplayName(Npc.GiftId)),
-			FLinearColor(0.40f, 0.95f, 0.82f));
+			FString::Printf(TEXT("空座%d\n补客 %.0fs"), SeatIndex + 1, Cooldown),
+			FLinearColor(0.62f, 0.58f, 0.54f));
+#pragma endregion K2 moonyfli
 	}
 }
 
@@ -866,7 +877,9 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 	{
 		if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
 		{
-			Director->TryDeliverFromCell(Board->GetActiveDragCellIndex());
+			Director->TryDeliverFromCellToCustomer(
+				Board->GetActiveDragCellIndex(),
+				Character->CustomerId);
 			return true;
 		}
 		return false;
@@ -893,6 +906,27 @@ void ASDayBoardPresenter::RefreshFromLogic()
 			Visual->RefreshVisual();
 		}
 	}
+
+#pragma region K2 moonyfli
+	int32 DesiredSeats = 2;
+	if (const USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		DesiredSeats = GameInstance->GetServiceSeatCount();
+	}
+	DesiredSeats = FMath::Clamp(DesiredSeats, 1, 6);
+	if (GetDeliverySeatCount() != DesiredSeats)
+	{
+		for (ASDayCharacterStandIn* Character : CharacterStandIns)
+		{
+			if (Character)
+			{
+				Character->Destroy();
+			}
+		}
+		CharacterStandIns.Reset();
+		BuildCharacters();
+	}
+#pragma endregion K2 moonyfli
 
 	RefreshCharacters();
 }
@@ -1288,6 +1322,13 @@ void USDayHUD::BuildWidgetTree()
 	FlowButton = MakeButton(TEXT("DayFlowButton"), TEXT("入夜"));
 	Flow->AddChildToHorizontalBox(FlowButton)->SetPadding(FMargin(4.0f));
 	FlowButton->OnClicked.AddDynamic(this, &USDayHUD::HandleFlowButton);
+#pragma region K2 moonyfli
+#if !UE_BUILD_SHIPPING
+	CheatToggleButton = MakeButton(TEXT("DayCheatToggleButton"), TEXT("修改器"));
+	Flow->AddChildToHorizontalBox(CheatToggleButton)->SetPadding(FMargin(4.0f));
+	CheatToggleButton->OnClicked.AddDynamic(this, &USDayHUD::HandleToggleCheatPanel);
+#endif
+#pragma endregion K2 moonyfli
 }
 
 void USDayHUD::Refresh()
@@ -1331,16 +1372,21 @@ void USDayHUD::Refresh()
 		{
 			if (Director->HasActiveCustomer())
 			{
-				const FSCustomerState Customer = Director->GetActiveCustomer();
-				const FString Name = Customer.DisplayName.IsEmpty() ? Customer.CustomerId : Customer.DisplayName;
-				CustomerButtonText = FString::Printf(TEXT("交付给 %s"), *Name);
+				TArray<FString> GuestParts;
+				for (const FSCustomerState& Customer : Director->GetActiveCustomers())
+				{
+					const FString Name = Customer.DisplayName.IsEmpty() ? Customer.CustomerId : Customer.DisplayName;
+					GuestParts.Add(FString::Printf(
+						TEXT("座%d %s：%s Lv%d"),
+						Customer.SeatIndex + 1,
+						*Name,
+						*IngredientShortName(this, Customer.Order.IngredientId),
+						Customer.Order.Level));
+				}
+				CustomerButtonText = TEXT("交付匹配顾客");
 				OrderLine = FString::Printf(
-					TEXT("当前顾客：%s（%s）｜订单：%s Lv%d｜售价：%d｜可一直等待"),
-					*Name,
-					*Customer.CustomerId,
-					*IngredientShortName(Customer.Order.IngredientId),
-					Customer.Order.Level,
-					Customer.Order.SellValue);
+					TEXT("普通顾客（各座独立补客、无限等待）：%s"),
+					*FString::Join(GuestParts, TEXT("　｜　")));
 			}
 			else
 			{
@@ -1357,7 +1403,7 @@ void USDayHUD::Refresh()
 					: FString::Printf(
 						TEXT("%s 要 %s Lv%d → %s"),
 						*Npc.DisplayName,
-						*IngredientShortName(Npc.Order.IngredientId),
+						*IngredientShortName(this, Npc.Order.IngredientId),
 						Npc.Order.Level,
 						*USChefGameInstance::GetGiftDisplayName(Npc.GiftId)));
 			}
@@ -1446,4 +1492,711 @@ void USDayHUD::HandleFlowButton()
 	}
 }
 
+#pragma region K2 moonyfli
+void USDayHUD::HandleToggleCheatPanel()
+{
+#if UE_BUILD_SHIPPING
+	return;
+#else
+	if (!CheatPanel)
+	{
+		CheatPanel = CreateWidget<USDayCheatPanel>(this, USDayCheatPanel::StaticClass());
+		if (CheatPanel)
+		{
+			// Full-screen overlay; the movable frame is a canvas child inside it.
+			CheatPanel->AddToViewport(120);
+			CheatPanel->SetPanelVisible(true);
+			return;
+		}
+	}
+	if (CheatPanel)
+	{
+		const bool bShow = CheatPanel->GetVisibility() == ESlateVisibility::Collapsed;
+		CheatPanel->SetPanelVisible(bShow);
+	}
+#endif
+}
+
+void USDayCheatPanel::SetPanelVisible(const bool bVisible)
+{
+	SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	if (bVisible)
+	{
+		if (FrameSlot)
+		{
+			FrameSlot->SetPosition(FramePosition);
+		}
+		RefreshStatus();
+	}
+}
+
+TSharedRef<SWidget> USDayCheatPanel::RebuildWidget()
+{
+	if (!WidgetTree->RootWidget)
+	{
+		BuildWidgetTree();
+	}
+	return Super::RebuildWidget();
+}
+
+void USDayCheatPanel::NativeConstruct()
+{
+	Super::NativeConstruct();
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->OnSandboxStateChanged.AddUniqueDynamic(this, &USDayCheatPanel::RefreshStatus);
+	}
+	RefreshStatus();
+}
+
+void USDayCheatPanel::NativeDestruct()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->OnSandboxStateChanged.RemoveDynamic(this, &USDayCheatPanel::RefreshStatus);
+	}
+	Super::NativeDestruct();
+}
+
+void USDayCheatPanel::NativeTick(const FGeometry& MyGeometry, const float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	const FVector2D CanvasSize = FVector2D(MyGeometry.GetLocalSize());
+	if (!FrameSizeBox || CanvasSize.X < 1.0 || CanvasSize.Y < 1.0)
+	{
+		return;
+	}
+
+	// Portrait phone layouts leave little room, so size the frame from the space actually available.
+	const float TargetWidth = FMath::Clamp(static_cast<float>(CanvasSize.X) * 0.62f, 300.0f, 560.0f);
+	const float TargetHeight = FMath::Clamp(static_cast<float>(CanvasSize.Y - FramePosition.Y) - 80.0f, 120.0f, 560.0f);
+	if (!FMath::IsNearlyEqual(AppliedFrameWidth, TargetWidth, 1.0f))
+	{
+		AppliedFrameWidth = TargetWidth;
+		FrameSizeBox->SetWidthOverride(TargetWidth);
+	}
+	if (!FMath::IsNearlyEqual(AppliedFrameHeight, TargetHeight, 1.0f))
+	{
+		AppliedFrameHeight = TargetHeight;
+		ApplyBodyHeight();
+	}
+
+	if (!bDraggingPanel)
+	{
+		ApplyFramePosition(FramePosition, MyGeometry);
+	}
+}
+
+FReply USDayCheatPanel::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	const bool bLeftButton = InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
+	const bool bOnHandle = DragHandle && DragHandle->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition());
+	if (!bLeftButton || !bOnHandle)
+	{
+		return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+	}
+
+	bDraggingPanel = true;
+	const FVector2D LocalCursor = FVector2D(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()));
+	DragGrabOffset = LocalCursor - FramePosition;
+	return FReply::Handled().CaptureMouse(TakeWidget());
+}
+
+FReply USDayCheatPanel::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (!bDraggingPanel)
+	{
+		return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+	}
+
+	const FVector2D LocalCursor = FVector2D(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()));
+	ApplyFramePosition(LocalCursor - DragGrabOffset, InGeometry);
+	return FReply::Handled();
+}
+
+FReply USDayCheatPanel::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (!bDraggingPanel)
+	{
+		return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+	}
+
+	bDraggingPanel = false;
+	return FReply::Handled().ReleaseMouseCapture();
+}
+
+void USDayCheatPanel::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	bDraggingPanel = false;
+	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
+}
+
+void USDayCheatPanel::ApplyFramePosition(const FVector2D& DesiredPosition, const FGeometry& CanvasGeometry)
+{
+	const FVector2D CanvasSize = FVector2D(CanvasGeometry.GetLocalSize());
+	const FVector2D FrameSize = Frame ? FVector2D(Frame->GetCachedGeometry().GetLocalSize()) : FVector2D::ZeroVector;
+
+	FVector2D Clamped = DesiredPosition;
+	if (CanvasSize.X > 1.0 && CanvasSize.Y > 1.0)
+	{
+		// Keep a sliver of the drag handle on screen so the panel stays grabbable.
+		const double MinX = 80.0 - FMath::Max(FrameSize.X, 80.0);
+		Clamped.X = FMath::Clamp(Clamped.X, MinX, FMath::Max(MinX, CanvasSize.X - 80.0));
+		Clamped.Y = FMath::Clamp(Clamped.Y, 0.0, FMath::Max(0.0, CanvasSize.Y - 48.0));
+	}
+
+	if (FrameSlot && !Clamped.Equals(FramePosition, 0.5))
+	{
+		FrameSlot->SetPosition(Clamped);
+	}
+	FramePosition = Clamped;
+}
+
+void USDayCheatPanel::HandleToggleBody()
+{
+	if (!BodySizeBox)
+	{
+		return;
+	}
+	const bool bCollapse = BodySizeBox->GetVisibility() != ESlateVisibility::Collapsed;
+	BodySizeBox->SetVisibility(bCollapse ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (CollapseLabel)
+	{
+		CollapseLabel->SetText(FText::FromString(bCollapse ? TEXT("展开") : TEXT("收起")));
+	}
+}
+
+void USDayCheatPanel::ApplyBodyHeight()
+{
+	if (BodySizeBox && AppliedFrameHeight > 0.0f)
+	{
+		BodySizeBox->SetHeightOverride(AppliedFrameHeight);
+	}
+}
+
+USChefGameInstance* USDayCheatPanel::GetChef() const
+{
+	return GetGameInstance<USChefGameInstance>();
+}
+
+void USDayCheatPanel::BuildWidgetTree()
+{
+	UCanvasPanel* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("CheatCanvas"));
+	Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	WidgetTree->RootWidget = Canvas;
+
+	Frame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CheatFrame"));
+	Frame->SetBrushColor(FLinearColor(0.05f, 0.07f, 0.10f, 0.92f));
+	Frame->SetPadding(FMargin(10.0f));
+	FrameSlot = Canvas->AddChildToCanvas(Frame);
+	FrameSlot->SetAnchors(FAnchors(0.0f, 0.0f));
+	FrameSlot->SetAlignment(FVector2D::ZeroVector);
+	FrameSlot->SetAutoSize(true);
+	FrameSlot->SetPosition(FramePosition);
+
+	FrameSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CheatSize"));
+	FrameSizeBox->SetWidthOverride(520.0f);
+	Frame->AddChild(FrameSizeBox);
+
+	UVerticalBox* Outer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CheatOuter"));
+	FrameSizeBox->AddChild(Outer);
+
+	BodySizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CheatBodySize"));
+	BodyScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("CheatScroll"));
+	BodySizeBox->AddChild(BodyScroll);
+
+	UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CheatRoot"));
+	BodyScroll->AddChild(Root);
+
+	auto MakeText = [this](const TCHAR* Name, const int32 Size, const FLinearColor& Color)
+	{
+		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = Size;
+		Text->SetFont(Font);
+		Text->SetColorAndOpacity(FSlateColor(Color));
+		Text->SetAutoWrapText(true);
+		return Text;
+	};
+	auto MakeButton = [this, &MakeText](const TCHAR* Name, const TCHAR* Label)
+	{
+		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		UTextBlock* Text = MakeText(*FString::Printf(TEXT("%s_Label"), Name), 16, FLinearColor::White);
+		Text->SetText(FText::FromString(Label));
+		Text->SetJustification(ETextJustify::Center);
+		// Wrapping would let the wrap box squeeze labels into unreadable stacks.
+		Text->SetAutoWrapText(false);
+		Button->AddChild(Text);
+		return Button;
+	};
+	auto AddSection = [&](const TCHAR* Title)
+	{
+		UTextBlock* TitleText = MakeText(*FString::Printf(TEXT("Sec_%s"), Title), 18, FLinearColor(0.55f, 0.95f, 0.80f));
+		TitleText->SetText(FText::FromString(Title));
+		Root->AddChildToVerticalBox(TitleText)->SetPadding(FMargin(4.0f, 8.0f, 4.0f, 2.0f));
+	};
+	auto AddRow = [&]() -> UWrapBox*
+	{
+		UWrapBox* Row = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass());
+		Row->SetInnerSlotPadding(FVector2D(4.0f, 4.0f));
+		Root->AddChildToVerticalBox(Row)->SetPadding(FMargin(2.0f));
+		return Row;
+	};
+
+	DragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CheatDragHandle"));
+	DragHandle->SetBrushColor(FLinearColor(0.12f, 0.16f, 0.22f, 0.95f));
+	DragHandle->SetPadding(FMargin(6.0f, 4.0f));
+	DragHandle->SetVisibility(ESlateVisibility::Visible);
+	Outer->AddChildToVerticalBox(DragHandle);
+
+	UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("CheatHeader"));
+	DragHandle->AddChild(Header);
+	UTextBlock* Title = MakeText(TEXT("CheatTitle"), 22, FLinearColor(1.0f, 0.85f, 0.35f));
+	Title->SetText(FText::FromString(TEXT("白天修改器（拖动此标题栏）")));
+	Header->AddChildToHorizontalBox(Title)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	UButton* CollapseButton = MakeButton(TEXT("CheatCollapse"), TEXT("收起"));
+	CollapseLabel = Cast<UTextBlock>(CollapseButton->GetChildAt(0));
+	Header->AddChildToHorizontalBox(CollapseButton)->SetPadding(FMargin(4.0f, 0.0f));
+	CollapseButton->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleToggleBody);
+	UButton* CloseButton = MakeButton(TEXT("CheatClose"), TEXT("关闭"));
+	Header->AddChildToHorizontalBox(CloseButton);
+	CloseButton->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleClose);
+
+	Outer->AddChildToVerticalBox(BodySizeBox);
+
+	StatusText = MakeText(TEXT("CheatStatus"), 16, FLinearColor(0.90f, 0.90f, 0.90f));
+	Root->AddChildToVerticalBox(StatusText)->SetPadding(FMargin(4.0f, 4.0f));
+
+	AddSection(TEXT("食材（先选目标）"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* B0 = MakeButton(TEXT("CheatSelLing"), TEXT("灵谷"));
+		UButton* B1 = MakeButton(TEXT("CheatSelYin"), TEXT("阴山菌"));
+		UButton* B2 = MakeButton(TEXT("CheatSelChi"), TEXT("赤焰椒"));
+		UButton* B3 = MakeButton(TEXT("CheatSelYue"), TEXT("月鳞鱼"));
+		UButton* B4 = MakeButton(TEXT("CheatSelXuan"), TEXT("玄羽禽"));
+		Row->AddChildToWrapBox(B0);
+		Row->AddChildToWrapBox(B1);
+		Row->AddChildToWrapBox(B2);
+		Row->AddChildToWrapBox(B3);
+		Row->AddChildToWrapBox(B4);
+		B0->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSelectLingGu);
+		B1->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSelectYin);
+		B2->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSelectChi);
+		B3->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSelectYue);
+		B4->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSelectXuan);
+	}
+	{
+		UWrapBox* Row = AddRow();
+		UButton* P1 = MakeButton(TEXT("CheatPlus1"), TEXT("+1"));
+		UButton* P10 = MakeButton(TEXT("CheatPlus10"), TEXT("+10"));
+		UButton* Clr = MakeButton(TEXT("CheatClear"), TEXT("清零"));
+		Row->AddChildToWrapBox(P1);
+		Row->AddChildToWrapBox(P10);
+		Row->AddChildToWrapBox(Clr);
+		P1->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockPlus1);
+		P10->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockPlus10);
+		Clr->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockClear);
+	}
+	{
+		UWrapBox* Row = AddRow();
+		UButton* S0 = MakeButton(TEXT("CheatSet0"), TEXT("设0"));
+		UButton* S10 = MakeButton(TEXT("CheatSet10"), TEXT("设10"));
+		UButton* S20 = MakeButton(TEXT("CheatSet20"), TEXT("设20"));
+		UButton* S50 = MakeButton(TEXT("CheatSet50"), TEXT("设50"));
+		UButton* S99 = MakeButton(TEXT("CheatSet99"), TEXT("设99"));
+		Row->AddChildToWrapBox(S0);
+		Row->AddChildToWrapBox(S10);
+		Row->AddChildToWrapBox(S20);
+		Row->AddChildToWrapBox(S50);
+		Row->AddChildToWrapBox(S99);
+		S0->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockSet0);
+		S10->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockSet10);
+		S20->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockSet20);
+		S50->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockSet50);
+		S99->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleStockSet99);
+	}
+
+	AddSection(TEXT("客人"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* Next = MakeButton(TEXT("CheatNextGuest"), TEXT("下一位立刻到"));
+		Row->AddChildToWrapBox(Next);
+		Next->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleForceNextCustomer);
+	}
+
+	AddSection(TEXT("营业额 / 时间"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* R10 = MakeButton(TEXT("CheatRev10"), TEXT("额+10"));
+		UButton* R50 = MakeButton(TEXT("CheatRev50"), TEXT("额+50"));
+		UButton* RQ = MakeButton(TEXT("CheatRevQ"), TEXT("直接达标"));
+		Row->AddChildToWrapBox(R10);
+		Row->AddChildToWrapBox(R50);
+		Row->AddChildToWrapBox(RQ);
+		R10->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleRevenuePlus10);
+		R50->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleRevenuePlus50);
+		RQ->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleRevenueQualify);
+	}
+	{
+		UWrapBox* Row = AddRow();
+		UButton* T30 = MakeButton(TEXT("CheatTimeP30"), TEXT("时+30"));
+		UButton* Tm30 = MakeButton(TEXT("CheatTimeM30"), TEXT("时-30"));
+		UButton* T60 = MakeButton(TEXT("CheatTime60"), TEXT("时=60"));
+		UButton* T10 = MakeButton(TEXT("CheatTime10"), TEXT("时=10"));
+		Row->AddChildToWrapBox(T30);
+		Row->AddChildToWrapBox(Tm30);
+		Row->AddChildToWrapBox(T60);
+		Row->AddChildToWrapBox(T10);
+		T30->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleTimePlus30);
+		Tm30->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleTimeMinus30);
+		T60->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleTimeSet60);
+		T10->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleTimeSet10);
+	}
+
+	AddSection(TEXT("流程"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* Open = MakeButton(TEXT("CheatOpen"), TEXT("强制开店"));
+		UButton* Close = MakeButton(TEXT("CheatCloseShop"), TEXT("强制闭店"));
+		UButton* Fail = MakeButton(TEXT("CheatFailDay"), TEXT("日失败回档"));
+		Row->AddChildToWrapBox(Open);
+		Row->AddChildToWrapBox(Close);
+		Row->AddChildToWrapBox(Fail);
+		Open->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleOpenShop);
+		Close->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleForceClose);
+		Fail->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleFailDay);
+	}
+
+	AddSection(TEXT("谢礼"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* G0 = MakeButton(TEXT("CheatGiftKite"), TEXT("纸鸢"));
+		UButton* G1 = MakeButton(TEXT("CheatGiftLamp"), TEXT("纸灯"));
+		UButton* G2 = MakeButton(TEXT("CheatGiftCoin"), TEXT("铜钱"));
+		UButton* G3 = MakeButton(TEXT("CheatGiftBox"), TEXT("食盒"));
+		UButton* GC = MakeButton(TEXT("CheatGiftClear"), TEXT("清空谢礼"));
+		Row->AddChildToWrapBox(G0);
+		Row->AddChildToWrapBox(G1);
+		Row->AddChildToWrapBox(G2);
+		Row->AddChildToWrapBox(G3);
+		Row->AddChildToWrapBox(GC);
+		G0->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleGiftKite);
+		G1->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleGiftLamp);
+		G2->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleGiftCoin);
+		G3->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleGiftBox);
+		GC->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleClearGifts);
+	}
+
+	AddSection(TEXT("跳关"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* J0 = MakeButton(TEXT("CheatJumpT0"), TEXT("T0"));
+		UButton* J1 = MakeButton(TEXT("CheatJumpL1"), TEXT("L1"));
+		UButton* J2 = MakeButton(TEXT("CheatJumpL2"), TEXT("L2"));
+		UButton* J3 = MakeButton(TEXT("CheatJumpL3"), TEXT("L3"));
+		Row->AddChildToWrapBox(J0);
+		Row->AddChildToWrapBox(J1);
+		Row->AddChildToWrapBox(J2);
+		Row->AddChildToWrapBox(J3);
+		J0->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleJumpT0);
+		J1->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleJumpL1);
+		J2->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleJumpL2);
+		J3->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleJumpL3);
+	}
+
+	AddSection(TEXT("订单队列"));
+	OrderQueueText = MakeText(TEXT("CheatOrderQueue"), 15, FLinearColor(0.95f, 0.88f, 0.55f));
+	Root->AddChildToVerticalBox(OrderQueueText)->SetPadding(FMargin(4.0f, 2.0f));
+
+	AddSection(TEXT("存档"));
+	{
+		UWrapBox* Row = AddRow();
+		UButton* Save = MakeButton(TEXT("CheatSave"), TEXT("存档"));
+		UButton* Load = MakeButton(TEXT("CheatLoad"), TEXT("读档"));
+		UButton* Del = MakeButton(TEXT("CheatDel"), TEXT("删档"));
+		UButton* Bad = MakeButton(TEXT("CheatCorrupt"), TEXT("坏档"));
+		Row->AddChildToWrapBox(Save);
+		Row->AddChildToWrapBox(Load);
+		Row->AddChildToWrapBox(Del);
+		Row->AddChildToWrapBox(Bad);
+		Save->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleSave);
+		Load->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleLoad);
+		Del->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleDeleteSave);
+		Bad->OnClicked.AddDynamic(this, &USDayCheatPanel::HandleCorruptSave);
+	}
+}
+
+void USDayCheatPanel::RefreshStatus()
+{
+	USChefGameInstance* GameInstance = GetChef();
+	if (!GameInstance)
+	{
+		return;
+	}
+	if (StatusText)
+	{
+		StatusText->SetText(FText::FromString(FString::Printf(
+			TEXT("%s | %s | 额 %d/%d | 时 %.1fs | 选中 %s=%d\n%s\n%s"),
+			*GameInstance->GetPhaseDisplayName(),
+			*GameInstance->StageId.ToString(),
+			GameInstance->Revenue,
+			GameInstance->RevenueTarget,
+			GameInstance->GetDayTimeRemaining(),
+			*GameInstance->ResolveIngredientDisplayName(SelectedIngredientId),
+			GameInstance->GetQuantity(SelectedIngredientId),
+			*GameInstance->LastBoardFeedback,
+			*GameInstance->LastSaveFeedback)));
+	}
+	if (OrderQueueText)
+	{
+		OrderQueueText->SetText(FText::FromString(GameInstance->GetPlannedOrderSummary()));
+	}
+}
+
+void USDayCheatPanel::SetSelectedIngredient(const FName IngredientId)
+{
+	SelectedIngredientId = IngredientId;
+	RefreshStatus();
+}
+
+void USDayCheatPanel::AdjustStock(const int32 Delta)
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		if (Delta >= 0)
+		{
+			GameInstance->GrantPermanentStock(SelectedIngredientId, Delta);
+		}
+		else
+		{
+			GameInstance->SetInventoryQuantityForDebug(
+				SelectedIngredientId,
+				FMath::Max(0, GameInstance->GetQuantity(SelectedIngredientId) + Delta));
+		}
+	}
+}
+
+void USDayCheatPanel::SetStock(const int32 Quantity)
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SetInventoryQuantityForDebug(SelectedIngredientId, Quantity);
+	}
+}
+
+void USDayCheatPanel::HandleClose() { SetPanelVisible(false); }
+void USDayCheatPanel::HandleSelectLingGu() { SetSelectedIngredient(LingGuId); }
+void USDayCheatPanel::HandleSelectYin() { SetSelectedIngredient(YinShanJunId); }
+void USDayCheatPanel::HandleSelectChi() { SetSelectedIngredient(ChiYanJiaoId); }
+void USDayCheatPanel::HandleSelectYue() { SetSelectedIngredient(YueLinYuId); }
+void USDayCheatPanel::HandleSelectXuan() { SetSelectedIngredient(XuanYuQinId); }
+void USDayCheatPanel::HandleStockPlus1() { AdjustStock(1); }
+void USDayCheatPanel::HandleStockPlus10() { AdjustStock(10); }
+void USDayCheatPanel::HandleStockClear() { SetStock(0); }
+void USDayCheatPanel::HandleStockSet0() { SetStock(0); }
+void USDayCheatPanel::HandleStockSet10() { SetStock(10); }
+void USDayCheatPanel::HandleStockSet20() { SetStock(20); }
+void USDayCheatPanel::HandleStockSet50() { SetStock(50); }
+void USDayCheatPanel::HandleStockSet99() { SetStock(99); }
+
+void USDayCheatPanel::HandleForceNextCustomer()
+{
+	if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+	{
+		Director->ForceNextCustomersNow();
+	}
+}
+
+void USDayCheatPanel::HandleRevenuePlus10()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->AddRevenue(10);
+	}
+}
+
+void USDayCheatPanel::HandleRevenuePlus50()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->AddRevenue(50);
+	}
+}
+
+void USDayCheatPanel::HandleRevenueQualify()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->ForceQualifyRevenueForDebug();
+	}
+}
+
+void USDayCheatPanel::HandleTimePlus30()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SetDayTimeRemainingForDebug(GameInstance->GetDayTimeRemaining() + 30.0f);
+	}
+}
+
+void USDayCheatPanel::HandleTimeMinus30()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SetDayTimeRemainingForDebug(GameInstance->GetDayTimeRemaining() - 30.0f);
+	}
+}
+
+void USDayCheatPanel::HandleTimeSet60()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SetDayTimeRemainingForDebug(60.0f);
+	}
+}
+
+void USDayCheatPanel::HandleTimeSet10()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SetDayTimeRemainingForDebug(10.0f);
+	}
+}
+
+void USDayCheatPanel::HandleOpenShop()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->OpenShopForDebug();
+	}
+}
+
+void USDayCheatPanel::HandleForceClose()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->ForceCloseShopForDebug();
+	}
+}
+
+void USDayCheatPanel::HandleFailDay()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->FailDayForDebug();
+	}
+}
+
+void USDayCheatPanel::HandleGiftKite()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->GrantGift(TEXT("GuideKite"));
+	}
+}
+
+void USDayCheatPanel::HandleGiftLamp()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->GrantGift(TEXT("LifeLamp"));
+	}
+}
+
+void USDayCheatPanel::HandleGiftCoin()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->GrantGift(TEXT("BeatCoin"));
+	}
+}
+
+void USDayCheatPanel::HandleGiftBox()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->GrantGift(TEXT("GluttonBox"));
+	}
+}
+
+void USDayCheatPanel::HandleClearGifts()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->ClearActiveGiftsForDebug();
+	}
+}
+
+void USDayCheatPanel::HandleJumpT0()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->JumpToStageForDebug(TEXT("T0"));
+	}
+}
+
+void USDayCheatPanel::HandleJumpL1()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->JumpToStageForDebug(TEXT("L1"));
+	}
+}
+
+void USDayCheatPanel::HandleJumpL2()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->JumpToStageForDebug(TEXT("L2"));
+	}
+}
+
+void USDayCheatPanel::HandleJumpL3()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->JumpToStageForDebug(TEXT("L3"));
+	}
+}
+
+void USDayCheatPanel::HandleSave()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SaveChefProfile();
+	}
+}
+
+void USDayCheatPanel::HandleLoad()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->LoadChefProfile();
+	}
+}
+
+void USDayCheatPanel::HandleDeleteSave()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->DeleteChefProfile();
+	}
+}
+
+void USDayCheatPanel::HandleCorruptSave()
+{
+	if (USChefGameInstance* GameInstance = GetChef())
+	{
+		GameInstance->SimulateCorruptSaveForDebug();
+	}
+}
+#undef LingGuId
+#undef YinShanJunId
+#undef ChiYanJiaoId
+#undef YueLinYuId
+#undef XuanYuQinId
+#undef NpcALingId
+#undef NpcSangPoId
 #pragma endregion K2 moonyfli

@@ -7,6 +7,8 @@
 
 class UStaticMeshComponent;
 class USceneComponent;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
 #pragma region K2 moonyfli
 /** Single stepping stone; optional foe capsule on top (刃心 whitebox). */
@@ -52,6 +54,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void ClearFoe(bool bAnimate);
 
+	/** Swap to translucent fade material (Color/Opacity/FadeAlpha) when provided. */
+	UFUNCTION(BlueprintCallable, Category = "Night|Fade")
+	void ConfigureDistanceFadeMaterial(UMaterialInterface* FadeMaterial, const FNightDistanceFadeSettings& Settings);
+
+	/** Apply computed opacity (0..1). Updates MIDs and optional hide. */
+	UFUNCTION(BlueprintCallable, Category = "Night|Fade")
+	void ApplyDistanceFade(float Opacity01, const FNightDistanceFadeSettings& Settings);
+
+	UFUNCTION(BlueprintPure, Category = "Night|Fade")
+	float GetCurrentFadeOpacity() const { return CurrentFadeOpacity; }
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Night|Art")
 	void PlayFoeClearedVFX();
 
@@ -66,8 +79,23 @@ public:
 protected:
 	void ApplyColors();
 	void TintMesh(UStaticMeshComponent* Mesh, const FLinearColor& Color);
+	void EnsureMeshMids();
+	void PushFadeToMid(UMaterialInstanceDynamic* Mid, float Opacity01, const FNightDistanceFadeSettings& Settings);
 
 	float FoeClearAlpha = 1.f;
 	bool bClearingFoe = false;
+	float CurrentFadeOpacity = 1.f;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> FadeMaterialParent;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> PlatformMid;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> FoeMid;
+
+	FNightDistanceFadeSettings CachedFadeSettings;
+	bool bFadeMaterialConfigured = false;
 };
 #pragma endregion K2 moonyfli

@@ -67,6 +67,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel|Debug")
 	ENightJudgeOutcome LastOutcome = ENightJudgeOutcome::None;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
+	ENightControlScheme ControlScheme = ENightControlScheme::Normal;
+
 	// add by K2 (R1) —— 空档期（策划案表 3-6；裁定 R-006：过期不再是失误，只开始呼吸扣血）
 	/**
 	 * 落地后的「空档期」宽限（ms）：这段时间内不行动不受罚。
@@ -162,11 +165,15 @@ public:
 	virtual void ApplySoulPenalty_Implementation(float Amount, ENightJudgeOutcome Reason) override;
 	virtual void PlaySuccessFeedback_Implementation(ENightNodeKind Kind) override;
 	virtual void PlayFailFeedback_Implementation(ENightJudgeOutcome Outcome, ENightNodeKind Kind) override;
+	virtual void SetControlScheme_Implementation(ENightControlScheme Scheme) override;
+	virtual ENightControlScheme GetControlScheme_Implementation() const override;
 
 	void HandleJump(const FInputActionValue& Value);
 	void HandleAttack(const FInputActionValue& Value);
 
 protected:
+	ENightFeelInput RemapInput(ENightFeelInput Input) const;
+
 	// add by K2 (R1)
 	struct FNightFeelBufferedInput
 	{
@@ -194,6 +201,9 @@ protected:
 
 	/** 屏显 + 日志同一份文字，便于回溯屏上一闪而过的提示。 */
 	void PushHudLine(int32 Key, float Duration, const FColor& Color, const FString& Msg) const;
+
+	/** 屏显里该提示哪个键，随换键状态变化，避免换键后屏显撒谎。 */
+	const TCHAR* GetInputHintText(bool bAttack) const;
 
 	TArray<FNightFeelBufferedInput> BufferedInputs;
 	float WindowOpenWorldTime = 0.f;

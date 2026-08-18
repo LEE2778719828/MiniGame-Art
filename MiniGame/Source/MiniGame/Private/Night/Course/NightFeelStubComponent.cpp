@@ -126,6 +126,15 @@ void UNightFeelStubComponent::ClearJudgeRequest_Implementation(int32 NodeIndex)
 	}
 }
 
+ENightFeelInput UNightFeelStubComponent::RemapInput(ENightFeelInput Input) const
+{
+	if (ControlScheme != ENightControlScheme::Swapped)
+	{
+		return Input;
+	}
+	return (Input == ENightFeelInput::Jump) ? ENightFeelInput::Attack : ENightFeelInput::Jump;
+}
+
 ENightJudgeOutcome UNightFeelStubComponent::TryResolveInput_Implementation(ENightFeelInput Input)
 {
 	// 裁定 R-002/R-006：窗口永不关闭，按对随时算命中；按错只扣魂、不锁输入（僵直已取消）
@@ -175,11 +184,13 @@ bool UNightFeelStubComponent::BufferInput(ENightFeelInput Input, bool bAllowCatc
 // 裁定 R-002：只有按对才广播（推进）；按错在本地结算，原地等玩家改口
 ENightJudgeOutcome UNightFeelStubComponent::JudgeInput(ENightFeelInput Input)
 {
+	// 换键只在判定这一处映射：缓存里存原始输入，避免入队和出队各映射一次
+	const ENightFeelInput Effective = RemapInput(Input);
 	const bool bExpectAttack = (ActiveRequest.Kind == ENightNodeKind::Enemy);
 	const bool bExpectJump = (ActiveRequest.Kind == ENightNodeKind::Hazard);
 	const bool bCorrect =
-		(bExpectAttack && Input == ENightFeelInput::Attack) ||
-		(bExpectJump && Input == ENightFeelInput::Jump);
+		(bExpectAttack && Effective == ENightFeelInput::Attack) ||
+		(bExpectJump && Effective == ENightFeelInput::Jump);
 
 	LastOutcome = bCorrect ? ENightJudgeOutcome::Success : ENightJudgeOutcome::WrongButton;
 	const int32 ResolvedIndex = ActiveRequest.NodeIndex;
@@ -225,7 +236,7 @@ void UNightFeelStubComponent::BeginBreathing()
 	PushHudLine(9911, 999.f, FColor::Yellow, FString::Printf(
 		TEXT("BREATHING (-%.2f/s): still need %s  (idx=%d)"),
 		BreathDecayPerSecond,
-		bAttack ? TEXT("ATTACK (E / LMB)") : TEXT("JUMP (Q)"),
+		GetInputHintText(bAttack),
 		ActiveRequest.NodeIndex));
 }
 
@@ -339,10 +350,21 @@ void UNightFeelStubComponent::ShowWindowDebug(ENightNodeKind Kind, float WindowS
 	const bool bAttack = (Kind == ENightNodeKind::Enemy);
 	const FString Msg = FString::Printf(
 		TEXT("WINDOW: %s  %.0fms  (idx=%d)"),
-		bAttack ? TEXT("ATTACK (E / LMB)") : TEXT("JUMP (Q)"),
+		GetInputHintText(bAttack),
 		WindowSeconds * 1000.f,
 		ActiveRequest.NodeIndex);
 	PushHudLine(9911, 999.f, bAttack ? FColor::Red : FColor::Cyan, Msg);
+}
+
+// add by K2 (R1)
+const TCHAR* UNightFeelStubComponent::GetInputHintText(bool bAttack) const
+{
+	const bool bSwapped = (ControlScheme == ENightControlScheme::Swapped);
+	if (bAttack)
+	{
+		return bSwapped ? TEXT("ATTACK (Q)") : TEXT("ATTACK (E / LMB)");
+	}
+	return bSwapped ? TEXT("JUMP (E)") : TEXT("JUMP (Q)");
 }
 
 // add by K2 (R1)
@@ -383,6 +405,26 @@ void UNightFeelStubComponent::PlayFailFeedback_Implementation(ENightJudgeOutcome
 		? TEXT("WRONG BUTTON")
 		: TEXT("MISS");
 	PushHudLine(9912, 1.2f, FColor::Orange, Msg);
+}
+
+void UNightFeelStubComponent::SetControlScheme_Implementation(ENightControlScheme Scheme)
+{
+	ControlScheme = Scheme;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			9913,
+			2.0f,
+			FColor::Magenta,
+			ControlScheme == ENightControlScheme::Swapped
+				? TEXT("KEYS SWAPPED: Q=ATTACK  E=JUMP")
+				: TEXT("KEYS NORMAL: Q=JUMP  E=ATTACK"));
+	}
+}
+
+ENightControlScheme UNightFeelStubComponent::GetControlScheme_Implementation() const
+{
+	return ControlScheme;
 }
 
 void UNightFeelStubComponent::HandleJump(const FInputActionValue& Value)
