@@ -157,6 +157,21 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	bTrackAdvancing = true;
 }
 
+void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
+{
+	if (!BodyMesh || !Mesh)
+	{
+		return;
+	}
+
+	bUsingHeroArt = true;
+	BodyMesh->SetStaticMesh(Mesh);
+	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+	BodyMesh->SetRelativeScale3D(FVector(0.35f));
+	HeadMesh->SetVisibility(false);
+	HeadMesh->SetHiddenInGame(true);
+}
+
 void ANightCoursePawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
