@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
+#include "Night/Course/NightCourseDirector.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -234,16 +235,47 @@ void ANightCoursePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 }
 
+// add by K2 (R1): 加速未走完的这一段石间移动，供负反应缓存命中时追赶时间轴
+void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds)
+{
+	if (!bTrackAdvancing || RateMultiplier <= 1.f || AdvanceSpeed <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float Remaining = FVector::Dist(GetActorLocation(), AdvanceTargetLocation);
+	if (Remaining <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float BaseTime = Remaining / AdvanceSpeed;
+	float TargetTime = BaseTime / RateMultiplier;
+	if (MaxCompressSeconds > 0.f)
+	{
+		TargetTime = FMath::Max(TargetTime, BaseTime - MaxCompressSeconds);
+	}
+	if (TargetTime <= KINDA_SMALL_NUMBER || TargetTime >= BaseTime)
+	{
+		return;
+	}
+
+	// 只影响剩余这一段；下次 BeginTrackAdvance 会用配置速度重置
+	AdvanceSpeed = Remaining / TargetTime;
+}
+
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	if (bTrackAdvancing)
+	// 岔路选择优先于判定（R2）：岔路开着时 Q = 走左
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
 	{
+		CourseDirector->ChooseForkLeft();
 		return;
 	}
 	if (FeelStub)
 	{
-		//add by K2
+		// add by K2 (R1): 移动中的输入不再丢弃，由 Feel 决定缓存 / 忽略 / 判定
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Jump);
 	}
 }
@@ -251,13 +283,14 @@ void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	if (bTrackAdvancing)
+	// 裁定 R-006：不再拦 bTrackAdvancing，移动中的输入要交给 Feel 缓存并加速衔接
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
 	{
+		CourseDirector->ChooseForkRight();
 		return;
 	}
 	if (FeelStub)
 	{
-		//add by K2
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Attack);
 	}
 }

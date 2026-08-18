@@ -75,6 +75,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsTrackAdvancing() const { return bTrackAdvancing; }
 
+	/**
+	 * add by K2 (R1): 加速未走完的这一段石间移动（负反应缓存命中时用）。
+	 * 压缩量上限 MaxCompressSeconds，只影响当前这一段。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Night|Course")
+	void ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds);
+
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
