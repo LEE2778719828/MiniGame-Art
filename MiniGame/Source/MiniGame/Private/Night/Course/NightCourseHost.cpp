@@ -34,6 +34,49 @@ namespace NightCourseStage_Private
 		}
 	}
 
+	static AStaticMeshActor* SpawnEditorPreviewMesh(
+		UWorld* World,
+		UStaticMesh* Mesh,
+		UMaterialInterface* Material,
+		const FTransform& Transform,
+		const FString& Label)
+	{
+		if (!World || !Mesh)
+		{
+			return nullptr;
+		}
+
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(
+			AStaticMeshActor::StaticClass(),
+			Transform,
+			Params);
+		if (!Actor)
+		{
+			return nullptr;
+		}
+
+		Actor->SetActorLabel(Label);
+		Actor->SetIsTemporarilyHiddenInEditor(false);
+		if (UStaticMeshComponent* MeshComponent = Actor->GetStaticMeshComponent())
+		{
+			MeshComponent->SetStaticMesh(Mesh);
+			MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			if (Material)
+			{
+				for (int32 MaterialIndex = 0;
+					MaterialIndex < MeshComponent->GetNumMaterials();
+					++MaterialIndex)
+				{
+					MeshComponent->SetMaterial(MaterialIndex, Material);
+				}
+			}
+		}
+		return Actor;
+	}
+
 	static AStaticMeshActor* SpawnBox(
 		UWorld* World,
 		UStaticMesh* Cube,
@@ -146,6 +189,21 @@ void ANightCourseHost::RebuildEditorPreview()
 	PreviewFoeM03->ClearInstances();
 	PreviewFoeM04->ClearInstances();
 	PreviewFoeM05->ClearInstances();
+	PreviewBridgeA->SetVisibility(false);
+	PreviewBridgeB->SetVisibility(false);
+	PreviewFoeM01->SetVisibility(false);
+	PreviewFoeM02->SetVisibility(false);
+	PreviewFoeM03->SetVisibility(false);
+	PreviewFoeM04->SetVisibility(false);
+	PreviewFoeM05->SetVisibility(false);
+	for (AStaticMeshActor* Actor : EditorPreviewMeshActors)
+	{
+		if (Actor)
+		{
+			Actor->Destroy();
+		}
+	}
+	EditorPreviewMeshActors.Reset();
 	if (!Config || !Config->ProcParams.bEnableProcGenerator)
 	{
 		return;
@@ -255,17 +313,32 @@ void ANightCourseHost::RebuildEditorPreview()
 			BridgeRotation,
 			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f) + BridgeCenterOffset,
 			BridgeScale);
-		if (Bridge.MeshVariant == 0 && MeshA)
+		UInstancedStaticMeshComponent* BridgePreviewComponent =
+			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
+		if (UStaticMesh* PreviewMesh = BridgePreviewComponent
+			? BridgePreviewComponent->GetStaticMesh()
+			: nullptr)
 		{
-			PreviewBridgeA->AddInstance(InstanceTransform);
-		}
-		else if (MeshB)
-		{
-			PreviewBridgeB->AddInstance(InstanceTransform);
+			UMaterialInterface* PreviewMaterial =
+				BridgePreviewComponent->GetMaterial(0);
+			const FString Label = FString::Printf(
+				TEXT("EditorPreview_Bridge_%s_%d"),
+				Bridge.MeshVariant == 0 ? TEXT("A") : TEXT("B"),
+				Bridge.FromStoneIndex);
+			if (AStaticMeshActor* Actor = NightCourseStage_Private::SpawnEditorPreviewMesh(
+				GetWorld(),
+				PreviewMesh,
+				PreviewMaterial,
+				InstanceTransform,
+				Label))
+			{
+				EditorPreviewMeshActors.Add(Actor);
+			}
 		}
 	}
-	for (const FNightStoneSpec& Stone : Preview.Stones)
+	for (int32 StoneIndex = 0; StoneIndex < Preview.Stones.Num(); ++StoneIndex)
 	{
+		const FNightStoneSpec& Stone = Preview.Stones[StoneIndex];
 		if (!Stone.bHasFoe)
 		{
 			continue;
@@ -294,13 +367,26 @@ void ANightCourseHost::RebuildEditorPreview()
 			const FVector MeshCenter = FoePreview->GetStaticMesh()->GetBounds().Origin;
 			const FVector CenterOffset = FoeRotation.RotateVector(
 				(Config->FoePivotOffsetCm - MeshCenter) * FoeScale);
-			FoePreview->AddInstance(FTransform(
+			const FTransform FoeTransform(
 				FoeRotation,
 				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm) + CenterOffset,
 				FVector(
 					FoeScale,
 					FoeScale,
-					FoeScale)));
+					FoeScale));
+			const FString Label = FString::Printf(
+				TEXT("EditorPreview_Foe_M%02d_%d"),
+				static_cast<int32>(Stone.FoeId),
+				StoneIndex);
+			if (AStaticMeshActor* Actor = NightCourseStage_Private::SpawnEditorPreviewMesh(
+				GetWorld(),
+				FoePreview->GetStaticMesh(),
+				FoePreview->GetMaterial(0),
+				FoeTransform,
+				Label))
+			{
+				EditorPreviewMeshActors.Add(Actor);
+			}
 		}
 	}
 }
