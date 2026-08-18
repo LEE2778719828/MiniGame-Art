@@ -5,6 +5,7 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
@@ -71,6 +72,12 @@ ANightCourseHost::ANightCourseHost()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	Director = CreateDefaultSubobject<UNightCourseDirector>(TEXT("Director"));
+	NightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("NightFog"));
+	NightFog->FogDensity = 0.012f;
+	NightFog->FogHeightFalloff = 0.18f;
+	NightFog->FogInscatteringLuminance = FLinearColor(0.03f, 0.07f, 0.18f);
+	NightFog->DirectionalInscatteringExponent = 4.f;
+	NightFog->DirectionalInscatteringStartDistance = 0.f;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
