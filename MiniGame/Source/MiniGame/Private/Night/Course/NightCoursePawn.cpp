@@ -267,12 +267,6 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	// 岔路选择优先于判定（R2）：岔路开着时 Q = 走左
-	if (CourseDirector && CourseDirector->IsForkChoiceActive())
-	{
-		CourseDirector->ChooseForkLeft();
-		return;
-	}
 	if (FeelStub)
 	{
 		// add by K2 (R1): 移动中的输入不再丢弃，由 Feel 决定缓存 / 忽略 / 判定
@@ -284,11 +278,6 @@ void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
 	// 裁定 R-006：不再拦 bTrackAdvancing，移动中的输入要交给 Feel 缓存并加速衔接
-	if (CourseDirector && CourseDirector->IsForkChoiceActive())
-	{
-		CourseDirector->ChooseForkRight();
-		return;
-	}
 	if (FeelStub)
 	{
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Attack);

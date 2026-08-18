@@ -7,6 +7,8 @@
 #include "Night/Shared/NightSharedTypes.h"
 #include "NightG1CourseConfig.generated.h"
 
+class UStaticMesh;
+
 #pragma region K2 moonyfli
 /**
  * Builds a 刃心 stone chain: stones + beats (Jump across gap / Attack into foe stone).
@@ -65,6 +67,33 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Classes")
 	TSubclassOf<AActor> StoneClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5")
+	FNightProcCourseParams ProcParams;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5")
+	bool bUseProcGenerator = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5")
+	bool bEnableFork = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> BridgeMeshA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> BridgeMeshB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> HeroMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM01;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM02;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;

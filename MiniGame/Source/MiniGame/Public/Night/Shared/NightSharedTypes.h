@@ -31,6 +31,22 @@ enum class ENightForkPair : uint8
 };
 
 UENUM(BlueprintType)
+enum class ENightControlScheme : uint8
+{
+	Normal UMETA(DisplayName = "Normal"),
+	Swapped UMETA(DisplayName = "Swapped")
+};
+
+UENUM(BlueprintType)
+enum class ENightForkEnv : uint8
+{
+	ClearAB UMETA(DisplayName = "Clear AB"),
+	FogAC UMETA(DisplayName = "Fog AC"),
+	ReverseBC UMETA(DisplayName = "Reverse BC"),
+	Custom UMETA(DisplayName = "Custom")
+};
+
+UENUM(BlueprintType)
 enum class EIngredientId : uint8
 {
 	None UMETA(DisplayName = "None"),
@@ -124,5 +140,26 @@ struct FNightResult
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
 	float SoulLeft = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FNightKeySwapCue
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 TriggerAfterBranchBeats = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float WarningSeconds = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float SafetyHoldSeconds = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	bool bToggle = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	ENightControlScheme TargetScheme = ENightControlScheme::Swapped;
 };
 #pragma endregion K2 moonyfli

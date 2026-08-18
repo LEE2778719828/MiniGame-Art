@@ -20,17 +20,23 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	PlatformMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PlatformMesh->SetRelativeLocation(FVector(0.f, 0.f, 18.f));
 	PlatformMesh->SetRelativeScale3D(FVector(1.8f, 1.8f, 0.35f));
+	// Course footholds are rendered by bridge segments; this component remains
+	// only as a compatibility hook for old stone-chain layouts.
+	PlatformMesh->SetHiddenInGame(true);
+	PlatformMesh->SetVisibility(false);
 
 	FoeCapsule = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FoeCapsule"));
 	FoeCapsule->SetupAttachment(PlatformMesh);
 	FoeCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 95.f));
-	FoeCapsule->SetRelativeScale3D(FVector(0.55f, 0.55f, 1.35f));
+	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
 	FoeCapsule->SetHiddenInGame(true);
 	FoeCapsule->SetVisibility(false);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CapsuleMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> FishMesh(
+		TEXT("/Game/Night/Course/Art/Foe/fish.fish"));
 	if (CubeMesh.Succeeded())
 	{
 		PlatformMesh->SetStaticMesh(CubeMesh.Object);
@@ -38,6 +44,12 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	if (CapsuleMesh.Succeeded())
 	{
 		FoeCapsule->SetStaticMesh(CapsuleMesh.Object);
+	}
+	if (FishMesh.Succeeded())
+	{
+		FoeCapsule->SetStaticMesh(FishMesh.Object);
+		FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
+		FoeCapsule->SetRelativeScale3D(FVector(0.35f));
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
@@ -58,7 +70,7 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	const bool bShowFoe = Spec.bHasFoe;
 	FoeCapsule->SetHiddenInGame(!bShowFoe);
 	FoeCapsule->SetVisibility(bShowFoe);
-	FoeCapsule->SetRelativeScale3D(FVector(0.55f, 0.55f, 1.35f));
+	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
 	ApplyColors();
 }
 
@@ -110,7 +122,7 @@ void ANightCourseStoneActor::Tick(float DeltaSeconds)
 
 	FoeClearAlpha -= DeltaSeconds * 2.5f;
 	const float Alpha = FMath::Clamp(FoeClearAlpha, 0.f, 1.f);
-	FoeCapsule->SetRelativeScale3D(FVector(0.55f, 0.55f, 1.35f) * Alpha);
+		FoeCapsule->SetRelativeScale3D(FVector(0.35f) * Alpha);
 	FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
 
 	if (Alpha <= 0.01f)

@@ -1,10 +1,13 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseStoneActor.h"
+#include "Night/Course/NightBridgeSegmentActor.h"
+#include "Night/Course/NightTrackGenerator.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "Engine/StaticMesh.h"
 
 #pragma region K2 moonyfli
 UNightCourseDirector::UNightCourseDirector()
@@ -68,13 +71,27 @@ FVector UNightCourseDirector::GetTrackLocation(float Distance) const
 	return Origin + Forward * Distance;
 }
 
+FVector UNightCourseDirector::GetStoneWorldLocation(int32 StoneIndex) const
+{
+	if (StoneSpecs.IsValidIndex(StoneIndex) && StoneSpecs[StoneIndex].bUseWorldPose)
+	{
+		return StoneSpecs[StoneIndex].WorldLocation;
+	}
+	return StoneSpecs.IsValidIndex(StoneIndex)
+		? GetTrackLocation(StoneSpecs[StoneIndex].TrackDistance)
+		: FVector::ZeroVector;
+}
+
 void UNightCourseDirector::SyncPawnToProgress(bool bInstant)
 {
 	if (!RunnerPawn || !Config)
 	{
 		return;
 	}
-	const FVector Loc = GetTrackLocation(ProgressDistance);
+	const int32 TargetStone = FMath::Clamp(CurrentStoneIndex, 0, StoneSpecs.Num() - 1);
+	const FVector Loc = StoneSpecs.IsValidIndex(TargetStone)
+		? GetStoneWorldLocation(TargetStone)
+		: GetTrackLocation(ProgressDistance);
 	const FRotator Rot = Config->TrackForward.Rotation();
 	if (bInstant)
 	{
@@ -90,7 +107,18 @@ void UNightCourseDirector::EnsureCourse()
 {
 	StoneSpecs.Reset();
 	BeatSpecs.Reset();
-	if (Config)
+	BridgeSpecs.Reset();
+	if (Config && Config->ProcParams.bEnableProcGenerator)
+	{
+		const FNightGeneratedCourse Generated = UNightTrackGenerator::GenerateBaseOnly(
+			Config->ProcParams,
+			Config->TrackOrigin,
+			Config->TrackForward);
+		StoneSpecs = Generated.Stones;
+		BeatSpecs = Generated.Beats;
+		BridgeSpecs = Generated.Bridges;
+	}
+	else if (Config)
 	{
 		Config->BuildCourse(StoneSpecs, BeatSpecs);
 	}
@@ -113,7 +141,7 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	const FRotator Facing = Config ? Config->TrackForward.Rotation() : FRotator::ZeroRotator;
 	ANightCourseStoneActor* Stone = World->SpawnActor<ANightCourseStoneActor>(
 		SpawnClass,
-		GetTrackLocation(StoneSpecs[Index].TrackDistance),
+		GetStoneWorldLocation(Index),
 		Facing,
 		Params);
 	if (!Stone)
@@ -122,8 +150,47 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	}
 
 	Stone->SetupStone(Index, StoneSpecs[Index]);
-	Stone->SetTrackPose(GetTrackLocation(StoneSpecs[Index].TrackDistance), Facing);
+	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
 	SpawnedStones[Index] = Stone;
+}
+
+void UNightCourseDirector::SpawnBridgeActor(int32 Index)
+{
+	UWorld* World = GetWorld();
+	if (!World || !BridgeSpecs.IsValidIndex(Index))
+	{
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ANightBridgeSegmentActor* Bridge = World->SpawnActor<ANightBridgeSegmentActor>(
+		ANightBridgeSegmentActor::StaticClass(),
+		BridgeSpecs[Index].WorldLocation,
+		FRotator(0.f, BridgeSpecs[Index].YawDeg, 0.f),
+		Params);
+	if (!Bridge)
+	{
+		return;
+	}
+
+	UStaticMesh* Mesh = nullptr;
+	if (Config)
+	{
+		const TSoftObjectPtr<UStaticMesh>& SoftMesh =
+			BridgeSpecs[Index].MeshVariant == 0 ? Config->BridgeMeshA : Config->BridgeMeshB;
+		Mesh = SoftMesh.LoadSynchronous();
+	}
+	if (!Mesh)
+	{
+		Mesh = LoadObject<UStaticMesh>(
+			nullptr,
+			BridgeSpecs[Index].MeshVariant == 0
+				? TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1")
+				: TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
+	}
+	Bridge->SetupBridge(BridgeSpecs[Index], Mesh);
+	SpawnedBridges[Index] = Bridge;
 }
 
 void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
@@ -149,7 +216,12 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	EnsureCourse();
 	BeatConsumed.Init(0, BeatSpecs.Num());
 	SpawnedStones.Init(nullptr, StoneSpecs.Num());
+	SpawnedBridges.Init(nullptr, BridgeSpecs.Num());
 
+	for (int32 Index = 0; Index < BridgeSpecs.Num(); ++Index)
+	{
+		SpawnBridgeActor(Index);
+	}
 	for (int32 Index = 0; Index < StoneSpecs.Num(); ++Index)
 	{
 		SpawnStoneActor(Index);
@@ -311,7 +383,7 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 	if (RunnerPawn)
 	{
 		RunnerPawn->BeginTrackAdvance(
-			GetTrackLocation(AdvanceTargetDistance),
+			GetStoneWorldLocation(StoneIndex),
 			Config->TrackForward.Rotation(),
 			Config->AdvanceSpeed);
 	}
@@ -355,7 +427,7 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		for (const FNightStoneSpec& Stone : StoneSpecs)
 		{
-			DrawDebugSphere(GetWorld(), GetTrackLocation(Stone.TrackDistance), 25.f, 8,
+			DrawDebugSphere(GetWorld(), Stone.bUseWorldPose ? Stone.WorldLocation : GetTrackLocation(Stone.TrackDistance), 25.f, 8,
 				Stone.bHasFoe ? FColor::Red : FColor::Cyan, false, -1.f, 0, 1.f);
 		}
 	}

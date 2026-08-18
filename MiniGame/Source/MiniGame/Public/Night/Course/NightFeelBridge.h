@@ -35,6 +35,12 @@ public:
 	ENightJudgeOutcome TryResolveInput(ENightFeelInput Input);
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
+	void SetControlScheme(ENightControlScheme Scheme);
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
+	ENightControlScheme GetControlScheme() const;
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
 	float GetSoul() const;
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
