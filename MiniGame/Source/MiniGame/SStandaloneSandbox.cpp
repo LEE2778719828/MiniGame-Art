@@ -3898,7 +3898,7 @@ void ASFakeNightGateway::BeginPlay()
 
 			UClass* DayHUDClass = LoadClass<USDayHUD>(
 				nullptr,
-				TEXT("/Game/Game/Day/UI/WBP_SDayHUD.WBP_SDayHUD_C"));
+				TEXT("/Game/Day/UI/WBP_SDayHUD.WBP_SDayHUD_C"));
 			if (!DayHUDClass)
 			{
 				DayHUDClass = USDayHUD::StaticClass();
@@ -3916,7 +3916,7 @@ void ASFakeNightGateway::BeginPlay()
 		{
 			UClass* PanelClass = LoadClass<USDebugPanel>(
 				nullptr,
-				TEXT("/Game/Game/Day/UI/WBP_SDebugPanel.WBP_SDebugPanel_C"));
+				TEXT("/Game/Day/UI/WBP_SDebugPanel.WBP_SDebugPanel_C"));
 			if (!PanelClass)
 			{
 				PanelClass = USDebugPanel::StaticClass();
@@ -5508,7 +5508,7 @@ void ASChefGameMode::BeginPlay()
 
 	UClass* GatewayClass = LoadClass<ASFakeNightGateway>(
 		nullptr,
-		TEXT("/Game/Game/Day/Test/BP_FakeNightGateway.BP_FakeNightGateway_C"));
+		TEXT("/Game/Day/Test/BP_FakeNightGateway.BP_FakeNightGateway_C"));
 	if (!GatewayClass)
 	{
 		GatewayClass = ASFakeNightGateway::StaticClass();
@@ -5532,7 +5532,7 @@ void ASDayWhiteboxGameMode::BeginPlay()
 	{
 		UClass* PresenterClass = LoadClass<ASDayBoardPresenter>(
 			nullptr,
-			TEXT("/Game/Game/Day/Board/BP_SDayBoardPresenter.BP_SDayBoardPresenter_C"));
+			TEXT("/Game/Day/Board/BP_SDayBoardPresenter.BP_SDayBoardPresenter_C"));
 		if (!PresenterClass)
 		{
 			PresenterClass = ASDayBoardPresenter::StaticClass();
