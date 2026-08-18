@@ -16,16 +16,58 @@ class UUniformGridPanel;
 class ASMergeBoard;
 class USDebugPanel;
 
+#pragma region K2 moonyfli
+/**
+ * Night → Day → NextStage loop. PrepareDay / DaySettlement / PrepareNextStage are
+ * transient: they run their edge work and hand off inside the same call.
+ */
 UENUM(BlueprintType)
 enum class ESGamePhase : uint8
 {
 	Boot,
 	PrepareNight,
+	NightRunning,
 	NightSettlement,
-	DayOpening,
+	PrepareDay,
 	DayRunning,
-	GiftSelect,
+	DayQualified,
+	DaySettlement,
+	PrepareNextStage,
 	Ending
+};
+
+/** Why the shop closed; only TimeUp carries leftover stock into the next stage. */
+UENUM(BlueprintType)
+enum class ESDayEndReason : uint8
+{
+	None,
+	TimeUp,
+	OutOfIngredients
+};
+
+/** Slot in the pre-generated day order queue. */
+UENUM(BlueprintType)
+enum class ESOrderSlotKind : uint8
+{
+	Guest,
+	Npc
+};
+#pragma endregion K2 moonyfli
+
+/** DT_Recipes 行：菜品售价由表驱动。 */
+USTRUCT(BlueprintType)
+struct FSRecipeRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName IngredientId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 Level = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1"))
+	int32 SellValue = 10;
 };
 
 /** DT_GameStages 行：T0–L3 表驱动，不在多个 Widget 写死数值。 */
@@ -59,9 +101,6 @@ struct FSGameStageRow : public FTableRowBase
 	float CustomerSpawnInterval = 7.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float CustomerPatience = 32.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName CustomerConfigId = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -76,6 +115,158 @@ struct FSGameStageRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString DisplayName;
 };
+
+#pragma region K2 moonyfli
+/** DT_SDayBalance 单行 Default：白天全局可调数值。 */
+USTRUCT(BlueprintType)
+struct FSDayBalanceRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0"))
+	int32 CarryOverTargetBonusPerUnit = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 MaxDishLevel = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1"))
+	int32 MinPlannedOrderSlots = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float OrderMidLevelWeight = 1.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float OrderEdgeLevelWeight = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float T0LowLevelBias = 1.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float T0HighLevelBias = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float LaterMidLevelBias = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01"))
+	float LaterEdgeLevelBias = 0.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0"))
+	float GluttonBoxFoeWeight = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "6"))
+	int32 MaxServiceSeats = 6;
+};
+
+/** DT_Ingredients 行：食材显示与短名。 */
+USTRUCT(BlueprintType)
+struct FSIngredientDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName IngredientId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString ShortName;
+};
+
+/** DT_SpecialNpcs 行：特殊顾客委托规则、谢礼与对白。 */
+USTRUCT(BlueprintType)
+struct FSSpecialNpcDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName NpcId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName DefaultIngredientId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 DefaultLevel = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName GiftId = NAME_None;
+
+	/** Designer-facing commission rule (mirrors design sheet). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString CommissionSummary;
+
+	/** Preferred distinct ingredient-chain count for the commission (e.g. NPC A = 2). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "5"))
+	int32 RequiredChainCount = 1;
+
+	/** Minimum dish level for the preferred commission. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "4"))
+	int32 MinLevel = 0;
+
+	/** Fallback Lv0 portion count when the preferred dish cannot be cooked. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "8"))
+	int32 FallbackLv0Count = 1;
+
+	/** Optional seal tag filter: None / Reverse / Double / Miasma. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName SealRequirement = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString AppearanceNote;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString Dialogue;
+};
+
+/** DT_Gifts 行：谢礼显示、Buff 开关与下局自动效果数值。 */
+USTRUCT(BlueprintType)
+struct FSGiftDefRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName GiftId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString EffectText;
+
+	/** When the night buff applies: BeforeFork / EnterMatch / AfterFork / NearDeath. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName EffectTrigger = NAME_None;
+
+	/** Numeric magnitude from the design sheet (0.3 rhythm, 2.5s dash, 40 HP, …). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float EffectValue = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bGuideKite = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bLifeLamp = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bBeatCoin = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bGluttonBox = false;
+};
+
+/** DT_CustomerNames 行：普通顾客显示名池。 */
+USTRUCT(BlueprintType)
+struct FSCustomerNameRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+};
+#pragma endregion K2 moonyfli
 
 USTRUCT(BlueprintType)
 struct FSIngredientStack
@@ -175,6 +366,24 @@ struct FSOrderRequest
 	int32 SellValue = 0;
 };
 
+#pragma region K2 moonyfli
+/** One entry in the day order appearance queue (guest or special NPC). */
+USTRUCT(BlueprintType)
+struct FSPlannedOrder
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ESOrderSlotKind Kind = ESOrderSlotKind::Guest;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName NpcId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FSOrderRequest Order;
+};
+#pragma endregion K2 moonyfli
+
 USTRUCT(BlueprintType)
 struct FSCustomerState
 {
@@ -183,14 +392,17 @@ struct FSCustomerState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString CustomerId;
 
+#pragma region K2 moonyfli
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString DisplayName;
+
+	/** Shared service seat occupied by this customer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 SeatIndex = INDEX_NONE;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FSOrderRequest Order;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float PatienceRemaining = 0.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float PatienceMax = 32.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bActive = false;
@@ -214,6 +426,18 @@ struct FSGiftBuffState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bGluttonBox = false;
 
+	/** Pre-fork gather rhythm bonus (e.g. 0.3 = +30%). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PreForkGatherRhythmBonus = 0.0f;
+
+	/** Invulnerable dash seconds after entering a fork. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PostForkInvulnDashSeconds = 0.0f;
+
+	/** HP restored when near death. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float NearDeathHeal = 0.0f;
+
 	FString ToDebugString() const
 	{
 		TArray<FString> Parts;
@@ -221,6 +445,18 @@ struct FSGiftBuffState
 		if (bLifeLamp) Parts.Add(TEXT("LifeLamp"));
 		if (bBeatCoin) Parts.Add(TEXT("BeatCoin"));
 		if (bGluttonBox) Parts.Add(TEXT("GluttonBox"));
+		if (PreForkGatherRhythmBonus > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("PreForkRhythm+%.0f%%"), PreForkGatherRhythmBonus * 100.0f));
+		}
+		if (PostForkInvulnDashSeconds > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("PostForkDash%.1fs"), PostForkInvulnDashSeconds));
+		}
+		if (NearDeathHeal > 0.0f)
+		{
+			Parts.Add(FString::Printf(TEXT("NearDeath+%.0f"), NearDeathHeal));
+		}
 		return Parts.IsEmpty() ? TEXT("None") : FString::Join(Parts, TEXT(", "));
 	}
 };
@@ -258,6 +494,42 @@ struct FSNightBootstrap
 	}
 };
 
+#pragma region K2 moonyfli
+/** 夜初/日初快照：失败回档到本阶段开始时的库存、营业额与谢礼。 */
+USTRUCT(BlueprintType)
+struct FSRunSnapshot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bValid = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	FName StageId = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TMap<FName, int32> Inventory;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 Revenue = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 RevenueTarget = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TArray<FName> GiftIds;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	FSGiftBuffState GiftBuffState;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TArray<FSPlannedOrder> PlannedDayOrders;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 NextPlannedOrderIndex = 0;
+};
+#pragma endregion K2 moonyfli
+
 /** 最小存档 SG_ChefProfile：强退后可恢复库存/缺口/谢礼/关卡与 Result 去重。 */
 UCLASS()
 class MINIGAME_API USChefSaveGame : public USaveGame
@@ -265,7 +537,8 @@ class MINIGAME_API USChefSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 1;
+	// v3: day order queue + cursor for mid-day load / day-start rollback.
+	static constexpr int32 CurrentSaveVersion = 3;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 SaveVersion = CurrentSaveVersion;
@@ -277,13 +550,34 @@ public:
 	TMap<FName, int32> Inventory;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
-	TMap<FName, int32> TemporaryBasket;
-
-	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 RevenueProgress = 0;
 
+#pragma region K2 moonyfli
+	/** 本日已获得且已生效的谢礼；无背包、无勾选。 */
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
-	TArray<FName> SelectedGiftIds;
+	TArray<FName> ActiveGiftIds;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	float DayTimeRemaining = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 CarryOverTargetBonus = 0;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	ESDayEndReason LastDayEndReason = ESDayEndReason::None;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FSRunSnapshot NightStartSnapshot;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	FSRunSnapshot DayStartSnapshot;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	TArray<FSPlannedOrder> PlannedDayOrders;
+
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 NextPlannedOrderIndex = 0;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	FSNightBootstrap PendingNightBootstrap;
@@ -327,6 +621,12 @@ struct FSSpecialNpcState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName GiftId = NAME_None;
 
+#pragma region K2 moonyfli
+	/** Shared service seat occupied while this NPC is present. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 SeatIndex = INDEX_NONE;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bPresent = false;
 
@@ -350,6 +650,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Inventory")
 	bool AddIngredient(FName IngredientId, int32 Quantity);
 
+#pragma region K2 moonyfli
+	/**
+	 * 永久入库：除了当前库存，还要补进夜初/日初快照。快照是回档与中途读档的唯一
+	 * 依据，只写 Inventory 的话，存档后读回来这笔入库就会被回档丢掉。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "S Inventory")
+	bool GrantPermanentStock(FName IngredientId, int32 Quantity);
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintPure, Category = "S Inventory")
 	int32 GetQuantity(FName IngredientId) const;
 
@@ -363,46 +672,135 @@ public:
 	int32 GetInventoryQuantity(FName IngredientId) const;
 
 	UFUNCTION(BlueprintPure, Category = "S Sandbox")
-	int32 GetTemporaryQuantity(FName IngredientId) const;
-
-	UFUNCTION(BlueprintPure, Category = "S Sandbox")
 	FString GetPhaseDisplayName() const;
 
 	UFUNCTION(BlueprintCallable, Category = "S Revenue")
 	void AddRevenue(int32 Amount);
 
 	UFUNCTION(BlueprintPure, Category = "S Revenue")
-	static int32 GetRecipeSellValue(FName RecipeId);
+	int32 GetRecipeSellValue(FName RecipeId) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Revenue")
+	static int32 GetBuiltInRecipeSellValue(int32 Level);
 
 	UFUNCTION(BlueprintPure, Category = "S Revenue")
 	static FName MakeRecipeId(FName IngredientId, int32 Level);
 
-	UFUNCTION(BlueprintCallable, Category = "S Gifts")
-	bool AddObtainedGift(FName GiftId);
+#pragma region K2 moonyfli
+	/** 开店前预生成当日订单出现顺序（含特殊 NPC 槽）。 */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	bool BuildPlannedDayOrders();
 
-	UFUNCTION(BlueprintCallable, Category = "S Gifts")
-	bool TogglePendingGiftSelection(FName GiftId);
+	UFUNCTION(BlueprintPure, Category = "S Orders")
+	TArray<FSPlannedOrder> GetPlannedDayOrders() const { return PlannedDayOrders; }
 
-	UFUNCTION(BlueprintCallable, Category = "S Gifts")
-	bool ConfirmGiftSelection();
+	UFUNCTION(BlueprintPure, Category = "S Orders")
+	int32 GetNextPlannedOrderIndex() const { return NextPlannedOrderIndex; }
 
-	UFUNCTION(BlueprintCallable, Category = "S Gifts")
-	bool TryEnterGiftSelect(const FString& Reason);
+	UFUNCTION(BlueprintPure, Category = "S Orders")
+	int32 GetPlannedOrderTotalValue() const;
 
+	UFUNCTION(BlueprintPure, Category = "S Orders")
+	FString GetPlannedOrderSummary() const;
+
+#pragma region K2 moonyfli
+	/** Take the next appearance slot and advance the queue cursor immediately. */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	bool TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder);
+#pragma endregion K2 moonyfli
+
+	/** Reveal leading NPC slots, then return the next guest order without advancing past it. */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	bool TryPrepareNextGuestOrder(FSOrderRequest& OutOrder);
+
+	/** Advance past the current guest slot after a successful delivery. */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	void AdvancePastCurrentGuestOrder();
+
+	/** Reveal every NPC slot still sitting at the front of the cursor. */
+	UFUNCTION(BlueprintCallable, Category = "S Orders")
+	void RevealLeadingNpcOrders();
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
+	/** 完成订单即发放并立即生效；没有选礼、没有谢礼背包。 */
 	UFUNCTION(BlueprintCallable, Category = "S Gifts")
+	bool GrantGift(FName GiftId);
+
+	UFUNCTION(BlueprintPure, Category = "S Gifts")
+	TArray<FName> GetActiveGiftIds() const { return ActiveGiftIds; }
+
+	/** 入夜前礼品卡页签文案（只读展示，不可操作）。 */
+	UFUNCTION(BlueprintPure, Category = "S Gifts")
+	FString GetGiftTabSummary() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Gifts")
+	static FString GetGiftEffectText(FName GiftId);
+
+	/** PrepareNight → NightRunning：建立夜初快照。 */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool StartNight();
+
+	/** 白天时钟由 ASCustomerDirector::Tick 驱动，DayRunning/DayQualified 都要走。 */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void TickDayClock(float DeltaSeconds);
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	float GetDayTimeRemaining() const { return DayTimeRemaining; }
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	bool IsShopOpen() const { return Phase == ESGamePhase::DayRunning || Phase == ESGamePhase::DayQualified; }
+
+	/** 立即闭店：达标走日结，未达标回档日初。 */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool CloseShopNow(ESDayEndReason Reason);
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool ForceCloseShopForDebug();
+
+	/** 调试直接开店：补上倒计时与日初快照，避免时钟一上来就闭店。 */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void OpenShopForDebug();
+
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	bool CanFulfillOrder(const FSOrderRequest& Order) const;
+
+	/** 当前订单可完成，或仍有食材可做菜；两者皆无即「食材耗尽」。 */
+	UFUNCTION(BlueprintPure, Category = "S Flow")
+	bool HasCompletableOrder() const;
+#pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintPure, Category = "S Gifts")
 	FSGiftBuffState GetGiftBuffState() const { return GiftBuffState; }
 
 	UFUNCTION(BlueprintPure, Category = "S Gifts")
-	TArray<FName> GetObtainedGiftIds() const { return ObtainedGiftIds; }
-
-	UFUNCTION(BlueprintPure, Category = "S Gifts")
-	TArray<FName> GetPendingGiftIds() const { return PendingGiftIds; }
-
-	UFUNCTION(BlueprintPure, Category = "S Gifts")
 	static FString GetGiftDisplayName(FName GiftId);
+
+#pragma region K2 moonyfli
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FSDayBalanceRow GetDayBalance() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	int32 GetConfiguredMaxDishLevel() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	int32 GetServiceSeatCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FString ResolveIngredientDisplayName(FName IngredientId) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	FString ResolveIngredientShortName(FName IngredientId) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	bool TryGetSpecialNpcDef(FName NpcId, FSSpecialNpcDefRow& OutRow) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	bool TryGetGiftDef(FName GiftId, FSGiftDefRow& OutRow) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	TArray<FString> GetCustomerNamePool() const;
+#pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool ApplyStage(FName InStageId);
@@ -425,8 +823,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Revenue")
 	int32 GetRevenueGap() const;
 
+#pragma region K2 moonyfli
+	/** 调试：白天判失败，回档日初快照并重开当日。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
-	bool CloseDayKeepGapForDebug();
+	bool FailDayForDebug();
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
+	/** Dev modifier: set absolute pantry count for one ingredient. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	bool SetInventoryQuantityForDebug(FName IngredientId, int32 Quantity);
+
+	/** Dev modifier: clear all earned gifts for the current run. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void ClearActiveGiftsForDebug();
+
+	/** Dev modifier: rewrite the open-shop countdown. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void SetDayTimeRemainingForDebug(float Seconds);
+
+	/** Dev modifier: bump revenue to the stage target if the shop is open. */
+	UFUNCTION(BlueprintCallable, Category = "S Cheat")
+	void ForceQualifyRevenueForDebug();
+#pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Save")
 	bool SaveChefProfile();
@@ -471,9 +890,6 @@ public:
 	float CustomerSpawnIntervalSeconds = 7.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
-	float CustomerPatienceSeconds = 32.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	int32 CustomerConcurrentMax = 2;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
@@ -482,17 +898,39 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 RevenueTarget = 90;
 
-	/** 本局营业已获得的谢礼卡（闭店候选）。 */
+#pragma region K2 moonyfli
+	/** 本日完成订单拿到的谢礼：即时生效，直接带进下一夜。 */
 	UPROPERTY(BlueprintReadOnly, Category = "S Gifts")
-	TArray<FName> ObtainedGiftIds;
+	TArray<FName> ActiveGiftIds;
 
-	/** 闭店选礼时的临时勾选（最多 2）。 */
-	UPROPERTY(BlueprintReadOnly, Category = "S Gifts")
-	TArray<FName> PendingGiftIds;
+	/** 开店剩余时长；归零即闭店。 */
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float DayTimeRemaining = 0.0f;
 
-	/** 已确认并带入下一夜的两件谢礼。 */
-	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
-	TArray<FName> SelectedGiftIds;
+	/** 时间结束闭店时，按剩余食材折算并加到下一关营业额目标上。 */
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	int32 CarryOverTargetBonus = 0;
+
+	/** 结转食材每份折算多少营业额目标；Lv0 售价 10，取半价避免囤货直接抵消目标。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Flow")
+	int32 CarryOverTargetBonusPerUnit = 5;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	ESDayEndReason LastDayEndReason = ESDayEndReason::None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	FSRunSnapshot NightStartSnapshot;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	FSRunSnapshot DayStartSnapshot;
+
+	/** 当日预生成订单队列（含 NPC 槽）；日初快照也会备份一份。 */
+	UPROPERTY(BlueprintReadOnly, Category = "S Orders")
+	TArray<FSPlannedOrder> PlannedDayOrders;
+
+	UPROPERTY(BlueprintReadOnly, Category = "S Orders")
+	int32 NextPlannedOrderIndex = 0;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Gifts")
 	FSGiftBuffState GiftBuffState;
@@ -505,6 +943,26 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Flow")
 	TSoftObjectPtr<UDataTable> StageTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Flow")
+	TSoftObjectPtr<UDataTable> RecipeTable;
+
+#pragma region K2 moonyfli
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> DayBalanceTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> IngredientTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> SpecialNpcTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> GiftTable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "S Config")
+	TSoftObjectPtr<UDataTable> CustomerNameTable;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	FString LastConsumedNightResultId = TEXT("None");
@@ -530,21 +988,35 @@ private:
 	TMap<FName, int32> Inventory;
 
 	UPROPERTY()
-	TMap<FName, int32> TemporaryBasket;
-
-	UPROPERTY()
 	TSet<FString> ConsumedResultIds;
 
 	bool IsKnownIngredient(FName IngredientId) const;
 	void InitializeIngredientMaps();
 	void NotifyStateChanged();
 	void RebuildGiftBuffState();
-	void BeginNewDayGiftPool();
 	bool TryGetStageRow(FName InStageId, FSGameStageRow& OutRow) const;
 	static FSGameStageRow MakeBuiltInStageRow(FName InStageId);
-	bool AdvanceAfterGiftConfirm();
-	void MergeTemporaryBasketIntoInventory();
 	int32 ReclaimBoardPiecesOnClose();
+
+#pragma region K2 moonyfli
+	FSRunSnapshot CaptureSnapshot() const;
+	void RestoreSnapshot(const FSRunSnapshot& Snapshot);
+	/** PrepareDay 边：清空谢礼、营业额归零、建立日初快照，然后直接开店。 */
+	void EnterPrepareDay(const FString& Reason);
+	void FailDay(ESDayEndReason Reason);
+	void EnterDaySettlement(ESDayEndReason Reason);
+	void AdvanceToNextStage();
+	void ResetDayDirectors(bool bStartService);
+	int32 CountPantryUnits() const;
+	int32 CountChainUnitsAvailable(FName IngredientId) const;
+	bool HasDayResourcesLeft() const;
+	static const TCHAR* DayEndReasonText(ESDayEndReason Reason);
+
+	float DayStuckCheckAccum = 0.0f;
+	/** 只有本日曾经有过食材，才允许用「食材耗尽」结束当天，避免空档 0.5s 循环回档。 */
+	bool bDayHadResources = false;
+#pragma endregion K2 moonyfli
+
 	static FString FormatReclaimSuffix(int32 ReclaimedUnits);
 	void CaptureProfileToSave(USChefSaveGame& SaveObject) const;
 	bool ApplyProfileFromSave(const USChefSaveGame& SaveObject);
@@ -595,6 +1067,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	int32 FindFirstEmptyCell() const;
 
+#pragma region K2 moonyfli
+	/** Picks uniformly among enabled empty cells; INDEX_NONE when the board is full. */
+	UFUNCTION(BlueprintPure, Category = "S Merge")
+	int32 FindRandomEmptyCell() const;
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	bool IsFull() const;
 
@@ -616,13 +1094,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Merge")
 	int32 GetHighestLevel(FName IngredientId) const;
 
-	/** 先找空格，再扣永久库存，再生成 Lv0；任一步失败都不改库存与棋盘。 */
+	/** 在空格中随机落点，再扣永久库存，再生成 Lv0；任一步失败都不改库存与棋盘。 */
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	bool TrySpawnFromMotherPiece(FName IngredientId);
 
 	/** 拖放到目标格：空格则移动；同链同级则合成；否则回弹且棋盘不变。 */
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	bool TryDropPiece(int32 FromCellIndex, int32 ToCellIndex);
+
+	/** 将高级食材拖回食材区：撤销全部合成并按付费基础单位退回对应库存。 */
+	UFUNCTION(BlueprintCallable, Category = "S Merge")
+	bool TryDecomposePieceToInventory(int32 CellIndex);
 
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	bool BeginPieceDrag(int32 CellIndex, int32 PointerId);
@@ -695,7 +1177,7 @@ private:
 	int32 FindPairForMerge(FName IngredientId, int32 Level, int32 PreferKeepIndex) const;
 };
 
-/** 第四步：固定订单顾客与交付。 */
+	/** 第四步：按预生成队列刷客与交付。 */
 UCLASS(Blueprintable)
 class MINIGAME_API ASCustomerDirector : public AActor
 {
@@ -713,7 +1195,7 @@ public:
 	void NotifyDayStarted();
 
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
-	bool SpawnFixedCustomer();
+	bool SpawnNextPlannedCustomer();
 
 	/** 用当前选中棋子尝试交付；配方不对则回弹，不扣棋子/营业额。 */
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
@@ -722,40 +1204,65 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
 	bool TryDeliverFromCell(int32 CellIndex);
 
-	UFUNCTION(BlueprintPure, Category = "S Customers")
-	bool HasActiveCustomer() const { return ActiveCustomer.bActive; }
+#pragma region K2 moonyfli
+	/** Deliver to the exact walk-in customer occupying the clicked seat. */
+	UFUNCTION(BlueprintCallable, Category = "S Customers")
+	bool TryDeliverFromCellToCustomer(int32 CellIndex, const FString& CustomerId);
+
+	/** Called by the NPC director when a special customer leaves a seat. */
+	void NotifySeatVacated(int32 SeatIndex);
 
 	UFUNCTION(BlueprintPure, Category = "S Customers")
-	FSCustomerState GetActiveCustomer() const { return ActiveCustomer; }
+	TArray<FSCustomerState> GetActiveCustomers() const { return ActiveCustomers; }
 
 	UFUNCTION(BlueprintPure, Category = "S Customers")
-	float GetSpawnCooldownRemaining() const { return SpawnCooldownRemaining; }
+	bool TryGetCustomerAtSeat(int32 SeatIndex, FSCustomerState& OutCustomer) const;
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	float GetSeatCooldownRemaining(int32 SeatIndex) const;
+
+	/** Dev modifier: clear empty-seat cooldowns and try to seat the next queued guests now. */
+	UFUNCTION(BlueprintCallable, Category = "S Customers")
+	int32 ForceNextCustomersNow();
+#pragma endregion K2 moonyfli
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	bool HasActiveCustomer() const { return !ActiveCustomers.IsEmpty(); }
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	FSCustomerState GetActiveCustomer() const { return ActiveCustomers.IsEmpty() ? FSCustomerState() : ActiveCustomers[0]; }
+
+	UFUNCTION(BlueprintPure, Category = "S Customers")
+	float GetSpawnCooldownRemaining() const;
 
 	UFUNCTION(BlueprintCallable, Category = "S Customers")
 	static ASCustomerDirector* FindDirector(const UObject* WorldContextObject);
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "S Customers")
-	FSCustomerState ActiveCustomer;
-
-	UPROPERTY(EditAnywhere, Category = "S Customers")
-	float FixedPatienceSeconds = 32.0f;
+	TArray<FSCustomerState> ActiveCustomers;
 
 	UPROPERTY(EditAnywhere, Category = "S Customers")
 	float SpawnIntervalSeconds = 7.0f;
 
-	float SpawnCooldownRemaining = 0.0f;
+#pragma region K2 moonyfli
+	TArray<float> SeatCooldowns;
+	bool bOrderQueueExhausted = false;
+#pragma endregion K2 moonyfli
 	bool bDayServiceActive = false;
 	int32 NextCustomerNumber = 1;
-	float HudRefreshAccum = 0.0f;
 
 	USChefGameInstance* GetChefGameInstance() const;
 	void SetFeedback(const FString& Message);
-	void ClearActiveCustomer(const FString& Reason);
-	FSOrderRequest MakeFixedOrder() const;
+#pragma region K2 moonyfli
+	int32 GetConfiguredSeatCount() const;
+	bool TryFillSeat(int32 SeatIndex);
+	bool IsSeatOccupied(int32 SeatIndex) const;
+	void ClearCustomer(const FString& CustomerId, const FString& Reason);
+#pragma endregion K2 moonyfli
 };
 
-/** 第五步：两名保底特殊 NPC；服务成功留下谢礼卡，无耐心倒计时。 */
+/** 第五步：特殊 NPC 按订单队列揭示；服务成功留下谢礼卡。 */
 UCLASS(Blueprintable)
 class MINIGAME_API ASSpecialNpcDirector : public AActor
 {
@@ -773,6 +1280,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "S NPC")
 	bool TryDeliverToNpc(FName NpcId);
+
+	UFUNCTION(BlueprintCallable, Category = "S NPC")
+	bool RevealNpc(FName NpcId, int32 SeatIndex);
 
 	UFUNCTION(BlueprintPure, Category = "S NPC")
 	TArray<FSSpecialNpcState> GetNpcs() const { return Npcs; }
@@ -794,7 +1304,7 @@ private:
 
 	USChefGameInstance* GetChefGameInstance() const;
 	void SetFeedback(const FString& Message);
-	void BuildGuaranteedNpcs();
+	void BuildNpcsFromPlan();
 	FSOrderRequest MakeOrder(FName IngredientId, int32 Level) const;
 };
 
@@ -834,6 +1344,12 @@ public:
 	ASFakeNightGateway();
 	virtual void BeginPlay() override;
 
+#pragma region K2 moonyfli
+	/** Keep the old diagnostic panel available without covering the playable day presentation by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Presentation")
+	bool bShowDebugPanel = false;
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	void SubmitNewSuccessResult();
 
@@ -868,7 +1384,13 @@ public:
 	void DebugPrintBootstrap();
 
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
-	void DebugCloseDayKeepGap();
+	void DebugFailDay();
+
+#pragma region K2 moonyfli
+	/** 单键推进主流程：入夜 → 模拟夜成功 → 闭店结算。 */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	void AdvanceFlow();
+#pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Save")
 	void DebugSaveProfile();
@@ -882,6 +1404,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Save")
 	void DebugDeleteSave();
 
+#pragma region K2 moonyfli
+	/** Also reachable in PIE via the S.Day.RunSmoke console command. */
+	UFUNCTION(BlueprintCallable, Category = "S Debug")
+	void RunDayWhiteboxSmokeTest();
+#pragma endregion K2 moonyfli
+
 private:
 	UPROPERTY()
 	FSNightResult LastGeneratedResult;
@@ -889,9 +1417,25 @@ private:
 	UPROPERTY()
 	TObjectPtr<class USDebugPanel> DebugPanel;
 
+#pragma region K2 moonyfli
+	UPROPERTY()
+	TObjectPtr<class USDayHUD> DayHUD;
+
+	UPROPERTY()
+	TObjectPtr<class ASDayBoardPresenter> DayBoardPresenter;
+#pragma endregion K2 moonyfli
+
 	int32 NextResultNumber = 1;
 	FSNightResult MakeResult(bool bSuccess);
 	void Submit(const FSNightResult& Result);
+
+#pragma region K2 moonyfli
+	void FinishDayWhiteboxSmokeTest();
+	void CleanupNightPresentation();
+	bool bDayWhiteboxSmokePassed = false;
+	int32 NightCleanupPassesRemaining = 0;
+	FTimerHandle NightCleanupTimerHandle;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -1002,13 +1546,13 @@ private:
 	void HandleForceCloseShop();
 
 	UFUNCTION()
-	void HandleToggleGiftGuideKite();
+	void HandleGrantGiftGuideKite();
 
 	UFUNCTION()
-	void HandleToggleGiftLifeLamp();
+	void HandleGrantGiftLifeLamp();
 
 	UFUNCTION()
-	void HandleConfirmGifts();
+	void HandleAdvanceFlow();
 
 	UFUNCTION()
 	void HandleJumpT0();
@@ -1026,7 +1570,7 @@ private:
 	void HandlePrintBootstrap();
 
 	UFUNCTION()
-	void HandleCloseDayKeepGap();
+	void HandleFailDay();
 
 	UFUNCTION()
 	void HandleSaveProfile();
@@ -1055,8 +1599,11 @@ private:
 	void RefreshNpcVisual();
 	void RefreshGiftVisual();
 	void DeliverToNpc(FName NpcId);
-	void ToggleGift(FName GiftId);
+	void GrantGift(FName GiftId);
 	void JumpStage(FName InStageId);
+
+	/** 开店倒计时不发状态广播，用定时器轮询刷新面板。 */
+	FTimerHandle RefreshTimerHandle; //add by K2
 };
 
 UCLASS()
@@ -1070,3 +1617,18 @@ public:
 protected:
 	virtual void BeginPlay() override;
 };
+
+#pragma region K2 moonyfli
+/**
+ * Day whitebox entry: same actors as the debug sandbox plus the 3D board presenter.
+ * Set as a level's GameMode override so the legacy debug sandbox level stays untouched.
+ */
+UCLASS()
+class MINIGAME_API ASDayWhiteboxGameMode : public ASChefGameMode
+{
+	GENERATED_BODY()
+
+protected:
+	virtual void BeginPlay() override;
+};
+#pragma endregion K2 moonyfli

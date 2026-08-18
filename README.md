@@ -1,8 +1,8 @@
-# MiniGame-Art（美术提交仓）
+# MiniGame（UE + GitHub / UGit 模板）
 
-UE 5.8 夜跑白模工程。美术**只往 `ArtSubmit/` 交源文件**，不要改 `MiniGame/Source/`。
+本目录已初始化为 **Unreal Engine 项目用的 Git 仓库模板**（含 `.gitignore`、Git LFS `.gitattributes`）。
 
-## 你要交到哪里（看这一张表）
+本地 Git 客户端请使用 **UGit**（当前机器路径）：
 
 | 你做的东西 | 丢进这个文件夹 | 程序最终接到 |
 |---|---|---|
@@ -16,17 +16,24 @@ UE 5.8 夜跑白模工程。美术**只往 `ArtSubmit/` 交源文件**，不要�
 | **还没分类** | `ArtSubmit/_incoming/` | 程序再分拣 |
 | **本批已归档白模** | `ArtSubmit/Character/`、`ArtSubmit/Stones/Bridge/`、`ArtSubmit/Foes/`、`ArtSubmit/Environment/` | 导入 `/Game/Night/Course/Art/**`，见 `ArtSubmit/README.md` |
 
-文件名建议：`角色_夜_Idle.fbx`、`石头_落脚_01.fbx`、`怪_M01.fbx`。源文件（fbx / png / psd）直接放对应子目录即可。
+---
 
 玩法提醒：关卡是一串**落脚石**（空档=跳，下一石带怪=砍），不是一对对装饰平台。错键不前进。
 
 策划可用浏览器打开 `MiniGame/Tools/NightCourseDesigner.html` 俯视调参并导出 JSON；PIE：`Night.Course.ImportParams <json>`。
 
-## 打开工程（可选，给要进编辑器的人）
+### 1. 用 Epic Games Launcher 创建项目到本目录
 
-1. 用带 **Git LFS** 的客户端拉仓（UGit 即可）。
-2. UE **5.8** 打开 `MiniGame/MiniGame.uproject`。
-3. 默认关卡：`/Game/Night/Course/Maps/L_Night_G1`
-4. 不要提交 `Binaries/`、`Intermediate/`、`Saved/`、`DerivedDataCache/`。
+1. 打开 **Epic Games Launcher** → **Unreal Engine** → **库** → 启动你要用的引擎版本（建议团队统一，例如 5.4 / 5.5）。
+2. 选 **游戏** → 模板（入门可用 **空白** / **第三人称**，蓝图即可）。
+3. 项目设置：
+   - **项目位置**：选 `C:\Users\moonyfli\Desktop`
+   - **项目名称**：填 `MiniGame`（必须与现有文件夹名一致）
+   - 若提示文件夹非空：选择 **使用现有文件夹** / 继续（保留已有的 `.git`、`.gitignore`、`.gitattributes`、`README.md`）
+4. 创建完成后，本目录应出现：
+   - `MiniGame.uproject`
+   - `Content/`
+   - `Config/`
+   - （C++ 项目还会有 `Source/`）
 
 更细的玩法说明在 `MiniGame/Docs/`（G1 石链 / G2 岔口 / G3 换键 / G3.5 程序化）。

@@ -1,0 +1,2 @@
+---,CarryOverTargetBonusPerUnit,MaxDishLevel,MinPlannedOrderSlots,OrderMidLevelWeight,OrderEdgeLevelWeight,T0LowLevelBias,T0HighLevelBias,LaterMidLevelBias,LaterEdgeLevelBias,GluttonBoxFoeWeight,MaxServiceSeats
+Default,5,4,6,1.35,0.55,1.4,0.45,1.25,0.7,1.25,6

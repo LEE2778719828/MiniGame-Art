@@ -52,9 +52,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel|Debug")
 	ENightJudgeOutcome LastOutcome = ENightJudgeOutcome::None;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
-	ENightControlScheme ControlScheme = ENightControlScheme::Normal;
-
 	virtual void BeginPlay() override;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Feel")
@@ -67,13 +64,11 @@ public:
 	virtual void ApplySoulPenalty_Implementation(float Amount, ENightJudgeOutcome Reason) override;
 	virtual void PlaySuccessFeedback_Implementation(ENightNodeKind Kind) override;
 	virtual void PlayFailFeedback_Implementation(ENightJudgeOutcome Outcome, ENightNodeKind Kind) override;
-	virtual void SetControlScheme_Implementation(ENightControlScheme Scheme) override;
-	virtual ENightControlScheme GetControlScheme_Implementation() const override;
 
 	void HandleJump(const FInputActionValue& Value);
 	void HandleAttack(const FInputActionValue& Value);
 
 protected:
-	ENightFeelInput RemapInput(ENightFeelInput Input) const;
+	// kept for future R1 override hooks
 };
 #pragma endregion K2 moonyfli

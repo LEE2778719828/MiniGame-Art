@@ -13,8 +13,7 @@ class UStaticMesh;
 
 #pragma region K2 moonyfli
 /**
- * Fully tunable night course: base stone chain + fork + A/B/C branch layouts + key-swap table.
- * BeatCount = base beats. Stones_base = BeatCount + 1.
+ * Builds a 刃心 stone chain: stones + beats (Jump across gap / Attack into foe stone).
  */
 UCLASS(BlueprintType)
 class MINIGAME_API UNightG1CourseConfig : public UPrimaryDataAsset
@@ -22,9 +21,9 @@ class MINIGAME_API UNightG1CourseConfig : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	/** Number of base-segment actions (beats). Stones = BeatCount + 1. */
+	/** Number of actions (beats). Stones = BeatCount + 1. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
-	int32 BeatCount = 4;
+	int32 BeatCount = 8;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
 	float FirstStoneDistance = 0.f;
@@ -43,10 +42,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout")
 	float ExitBufferSeconds = 1.2f;
 
-	/** Feel window length written into FNightJudgeRequest (stub keeps long open). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout", meta = (ClampMin = "0.1"))
-	float JudgeWindowSeconds = 3600.f;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Space")
 	FVector TrackOrigin = FVector::ZeroVector;
 
@@ -62,7 +57,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")
 	float StartingSoul = 100.f;
 
-	/** Override base beat actions; empty = Jump, Attack, Jump, Attack... */
+	/** Override beat actions; empty = Jump, Attack, Jump, Attack... */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Pattern")
 	TArray<ENightNodeKind> PatternOverride;
 
@@ -190,47 +185,5 @@ public:
 	/** Builds base segment only (alias kept for G1 callers). */
 	UFUNCTION(BlueprintCallable, Category = "Night|G1")
 	void BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Night|G2")
-	void BuildBaseCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const;
-
-	/**
-	 * Append-ready branch chain. Stone indices start at StoneIndexOffset.
-	 * First stone distance = StartDistance (auto-hop target after fork).
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Night|G2")
-	void BuildBranchCourse(
-		ENightRouteId RouteId,
-		float StartDistance,
-		int32 StoneIndexOffset,
-		TArray<FNightStoneSpec>& OutStones,
-		TArray<FNightBeatSpec>& OutBeats) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Night|G3")
-	FNightLevelCourseSettings GetLevelSettings(ENightLevelId LevelId) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Night|G3")
-	static FNightLevelCourseSettings MakeDefaultLevelSettings(ENightLevelId LevelId);
-
-	UFUNCTION(BlueprintCallable, Category = "Night|G3")
-	void ApplyLevelDefaultsToBootstrap(FNightBootstrap& InOutBootstrap) const;
-
-	UFUNCTION(BlueprintPure, Category = "Night|G2")
-	FNightBranchLayoutSettings ResolveBranchLayout(ENightRouteId RouteId) const;
-
-protected:
-	void BuildSegment(
-		int32 InBeatCount,
-		const TArray<ENightNodeKind>& Pattern,
-		float StartDistance,
-		int32 StoneIndexOffset,
-		bool bIncludeStartStone,
-		bool bDefaultPreferAttack,
-		float InJumpGapCm,
-		float InKillGapCm,
-		EIngredientId InDropId,
-		int32 InDropCount,
-		TArray<FNightStoneSpec>& OutStones,
-		TArray<FNightBeatSpec>& OutBeats) const;
 };
 #pragma endregion K2 moonyfli

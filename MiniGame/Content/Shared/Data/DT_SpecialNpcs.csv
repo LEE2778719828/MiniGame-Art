@@ -1,0 +1,7 @@
+---,NpcId,DisplayName,DefaultIngredientId,DefaultLevel,GiftId,CommissionSummary,RequiredChainCount,MinLevel,FallbackLv0Count,SealRequirement,AppearanceNote,Dialogue
+NpcA,NpcA,NPC A,LingGu,0,WindfallWealth,两条不同食材链的任意料理；保底委托可降为1份Lv0,2,0,1,None,偏良子大胃袋形象,哦—西啊哦—西！少年，收下这笔横财给我做更美味的食物吧！
+NpcB,NpcB,NPC B,YinShanJun,1,BlessedAmulet,任意Lv1+料理；若不可做，改要同链2份Lv0,1,1,2,None,古怪慈祥老头（老奶）形象,这可是我去神庙求来的护身符，看在你菜这么好吃的分上就赠送给你了吧！什么你说路边5块就能买到？该死的奸商坑我10块，咳咳...没那回事
+NpcC,NpcC,NPC C,ChiYanJiao,1,BossPie,任意逆印Lv1+料理；双印也可,1,1,1,Reverse,老板形象（可男可女）,哦我刚来你这店是有很高的定级评价的，但是....总之我还是很看好你的，加油吧
+NpcD,NpcD,NPC D,YueLinYu,1,WildMilk,任意瘅印Lv1+，或任意Lv2料理,1,1,1,Miasma,腾讯牛马员工形象,（早饭拿多了没喝完的牛奶）额，同事又改需求了我要回去改方案，谢谢你的饭，送你瓶牛奶拿着喝吧
+ALing,ALing,阿翎,LingGu,0,WindfallWealth,两条不同食材链的任意料理；保底委托可降为1份Lv0,2,0,1,None,偏良子大胃袋形象,哦—西啊哦—西！少年，收下这笔横财给我做更美味的食物吧！
+SangPo,SangPo,桑婆,YinShanJun,1,BlessedAmulet,任意Lv1+料理；若不可做，改要同链2份Lv0,1,1,2,None,古怪慈祥老头（老奶）形象,这可是我去神庙求来的护身符，看在你菜这么好吃的分上就赠送给你了吧！

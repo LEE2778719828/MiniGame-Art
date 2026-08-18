@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "Night/Shared/NightSharedTypes.h"
-#include "Night/Course/NightRouteRules.h"
 #include "NightCourseDirector.generated.h"
 
 class UNightG1CourseConfig;
@@ -23,8 +22,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseDebugTick, float, Elap
 
 #pragma region K2 moonyfli
 /**
- * 刃心 stone-chain director with G2 unique fork + A/B branch rules.
- * Idle = frozen; action advances runner to ToStone (except fork auto-hop).
+ * 刃心 stone-chain director: stand on stone, Jump/Attack to next stone.
+ * Idle = frozen; action advances runner to ToStone.
  */
 UCLASS(ClassGroup = (Night), meta = (BlueprintSpawnableComponent))
 class MINIGAME_API UNightCourseDirector : public UActorComponent
@@ -71,15 +70,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void NotifyFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome);
 
-	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
-	void ChooseForkLeft();
-
-	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
-	void ChooseForkRight();
-
-	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
-	void DebugSkipFork();
-
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugForceFinish(bool bSuccess);
 
@@ -91,9 +81,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsAwaitingInput() const { return bRunning && bWindowOpen && !bAdvancing; }
-
-	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	bool IsForkChoiceActive() const;
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	ENightCoursePhase GetPhase() const { return Phase; }
@@ -109,12 +96,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	int32 GetCurrentStoneIndex() const { return CurrentStoneIndex; }
-
-	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	ENightRouteId GetRouteTaken() const { return RouteTaken; }
-
-	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	UNightForkController* GetForkController() const { return ForkController; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
@@ -188,26 +169,11 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|G2")
-	ENightRouteId RouteTaken = ENightRouteId::None;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|G2")
-	FNightRouteRuleRow ActiveRouteRule;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|G3")
-	ENightControlScheme ActiveControlScheme = ENightControlScheme::Normal;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|G3")
-	FNightLevelCourseSettings ActiveLevelSettings;
-
 	UPROPERTY()
 	TObjectPtr<UObject> FeelBridgeObject;
 
 	UPROPERTY()
 	TObjectPtr<ANightCoursePawn> RunnerPawn;
-
-	UPROPERTY()
-	TObjectPtr<UNightForkController> ForkController;
 
 	TArray<uint8> BeatConsumed;
 	int32 BaseBeatCount = 0;
@@ -222,22 +188,15 @@ protected:
 	FNightProcCourseParams ActiveProcParams; //add by K2
 	TArray<FIngredientStack> BranchCollectedIngredients;
 	float ExitBufferEndTime = 0.f;
-	float BranchEnterBufferEndTime = 0.f;
 	float AdvanceTargetDistance = 0.f;
-	float KeySwapPhaseEndTime = 0.f;
 	bool bWindowOpen = false;
 	bool bAdvancing = false;
-	bool bPendingBranchHop = false;
-	bool bKeySwapWarningActive = false;
-	bool bKeySwapSafetyActive = false;
-	bool bPendingOpenAfterKeySwap = false;
-	FNightKeySwapCue PendingKeySwapCue;
 
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
 	void SetPhase(ENightCoursePhase NewPhase);
 	void FinishNight(const FNightResult& Result);
-	void EnsureBaseCourse();
+	void EnsureCourse();
 	void SpawnStoneActor(int32 Index);
 	void SpawnBridgeActor(int32 BridgeIndex); //add by K2
 	void ClearSpawnedActors(); //add by K2
@@ -246,17 +205,8 @@ protected:
 	void BeginAdvanceToStone(int32 StoneIndex);
 	void OnAdvanceArrived();
 	void OpenNextBeatOrExit();
-	void BeginForkChoice();
-	void HandleForkResolved(ENightRouteId ChosenRoute, bool bTimedOut);
-	void AppendBranchCourse(ENightRouteId ChosenRoute);
-	void BeginBranchEnterBuffer();
-	void EnterBranchSegment();
 	void SyncPawnToProgress(bool bInstant);
-	void AddDrop(EIngredientId Id, int32 Count, bool bCountAsBranch);
-	void ApplyCarryOutBonus();
-	void RefreshStoneVisibility();
-	float ComputeStoneFadeOpacity(int32 StoneIndex, const FVector& AnchorWS, float AnchorTrackDist) const;
-	FNightRouteRuleRow ResolveRouteRule(ENightRouteId RouteId) const;
+	void AddDrop(EIngredientId Id, int32 Count);
 	FVector GetTrackLocation(float Distance) const;
 	FVector GetStoneWorldLocation(int32 StoneIndex) const; //add by K2
 	FRotator GetStoneWorldRotation(int32 StoneIndex) const; //add by K2
@@ -264,14 +214,5 @@ protected:
 	UStaticMesh* ResolveFoeMesh(EFoeId FoeId) const; //add by K2
 	void ApplyHeroArtMesh(); //add by K2
 	INightFeelBridge* GetFeel() const;
-	bool ShouldRunKeySwaps() const;
-	bool TryBeginPendingKeySwap();
-	void BeginKeySwapWarning(const FNightKeySwapCue& Cue);
-	void ApplyPendingKeySwapScheme();
-	void EndKeySwapSafetyAndResume();
-	void ApplyControlScheme(ENightControlScheme Scheme);
-
-	UFUNCTION()
-	void OnForkControllerResolved(ENightRouteId ChosenRoute, bool bTimedOut);
 };
 #pragma endregion K2 moonyfli

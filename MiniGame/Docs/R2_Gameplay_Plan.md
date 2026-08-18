@@ -97,26 +97,22 @@ Content 根：`/Game/Night/Course/`
 用法：`Docs/G1_Course_Usage.md`  
 规则记忆：`.cursor/rules/blade-heart-stone-chain.mdc`  
 
-### Phase G2 — 唯一岔口 + A/B 规则（3–4 天）✅ 已落地（石链 + AB）
+### Phase G2 — 唯一岔口 + A/B 规则（3–4 天）
 
-- [x] Fork：左右牌（HUD Canvas）、左键左路右键右路、2.4s 超时保底  
-- [x] 进入分支后不再二次岔口；1.2s 纯跑缓冲（自动跳上分支首石）  
-- [x] A 清途 vs B 瘴途：可见块、扣血倍率、蚀火 DoT、进分支掉 1 份料、+20% 带出  
-- [x] 雾：只改 VisibleBlockCount，不改速度/窗  
-- [x] `FNightResult.RouteTaken` 填 A/B；控制台 `ChooseLeft|ChooseRight|SkipFork`  
+- [ ] Fork：左右牌、左键左路右键右路、2.4s 超时保底  
+- [ ] 进入分支后不再二次岔口；1.2s 纯跑缓冲  
+- [ ] A 清途 vs B 瘴途：可见块、扣血差、蚀火 DoT、掉 1 份料、掉落节奏、+20% 带出  
+- [ ] 雾：只改 VisibleBlockCount，不改速度/窗  
 
-**完成标准：** T0/L1 风格 AB 可玩；走 B 掉料与带出肉眼有别于 A。  
-用法：`Docs/G2_Course_Usage.md`  
+**完成标准：** T0/L1 风格 AB 可玩；走 B 掉料与带出肉眼有别于 A。
 
-### Phase G3 — C 倒途 + 换键编排（2–3 天）✅ 已落地
+### Phase G3 — C 倒途 + 换键编排（2–3 天）
 
-- [x] C 规则：逆火（前进中 DoT）、掉 2 份、掉落循环、+30% 带出  
-- [x] 换键时点表（L2 两次、L3 三次）；安全窗停开拍；调用 R1 `SetControlScheme`  
-- [x] AC / BC 组合按 `LevelRows`；关卡布局/规则全面可调  
-- [x] KeyCoin 跳过首次换键钩子；`Night.Course.ForceKeySwap`  
+- [ ] C 规则：逆火、掉 2 份、掉落循环、+30% 带出  
+- [ ] 换键**时点表**（L2 两次、L3 三次）；安全窗停生成；调用 R1 `SetControlScheme`  
+- [ ] AC / BC 组合按关卡行  
 
-**完成标准：** L2 推荐 C 路径可演示完整换键；与 R1 联调 Feel remap。  
-用法：`Docs/G3_Course_Usage.md`  
+**完成标准：** L2 推荐 C 路径可演示完整换键；与 R1 联调一次通过。
 
 ### Phase G3.5 — 桥段程序化 + HTML 设计器（插入；先于 G4）✅ 已落地
 

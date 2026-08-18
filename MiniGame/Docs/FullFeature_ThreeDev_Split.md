@@ -17,11 +17,12 @@
 |---|---|---|---|---|
 | **跑酷·手感** | **R1** | **≈ 3C**（Character / Camera / Control）+ 判定与角色侧手感 | 双键手感、判定、灶魂、主角夜、换键输入、相机 | `/Game/Night/Feel/` |
 | **跑酷·关卡** | **R2** | **≈ Gameplay / 关卡内容** | 轨道生成、岔路 A/B/C、怪障掉落、雾、夜关卡执行、夜向 Buff 生效 | `/Game/Night/Course/` |
-| **订单·食肆** | **S** | **≈ 经营 / 订单 / 进度**（非 3C、非夜玩法 Gameplay） | 白天整局 + 原中台：库存/营业额/菜表/客与谢礼/Flow 切关/存档/组下夜包 | `/Game/Day/` |
+| **订单·食肆** | **S** | **≈ 经营 / 订单 / 进度**（非 3C、非夜玩法 Gameplay） | 白天整局 + 原中台：库存/营业额/菜表/客与谢礼/Flow 切关/存档/组下夜包 | `/Game/Game/Day/` |
+| **共用配置** | **Shared** | Day/Night 共用 DataTable | 关卡阶段、菜谱、食材、NPC、谢礼、顾客名等；后续 Night 表也放这里 | `/Game/Shared/Data/` |
 
 ```text
 S 组装 NightBootstrap ──一次──► R2 开夜（内部调 R1）
-R2 回传 NightResult   ──一次──► S 入库 / 开店 / 选礼 / 写存档
+R2 回传 NightResult   ──一次──► S 入库 / 开店 / 日结 / 写存档
 ```
 
 **禁止再出现** `Meta.Get*` / `Meta.Commit*` 中转层。R1↔R2 同属夜关，用模块引用，不经 S。
@@ -111,7 +112,7 @@ R2 负责「何时该判、窗从哪来」；R1 负责「这一下跳/劈算不�
 
 ### R2 不做
 
-- 不开白天店、不 Merge、不选礼 UI  
+- 不开白天店、不 Merge、不做谢礼页签 UI  
 - 不实现跳劈判定窗公式（归 R1），只喂「判定线时刻」  
 
 ### 对 S / R1
@@ -134,12 +135,12 @@ R2 -> R1 提供判定线与事件；R1 回传命中/失误
 | 策划点 | S 交付 |
 |---|---|
 | 开店时长、营业额目标、达标仍跑完时长 | 日 GameMode |
-| 母棋子、不规则棋盘、同链同级 Merge→Lv4、拖菜交付 | Merge 全套 |
-| 普通客皮套潮、耐心、订单算法（可读可做、重抽回退） | 客潮 |
-| 四特殊 NPC、保底/入场时刻/等候位、对白 | NPC |
-| 闭店选 2 谢礼、8 秒自动评分、展示下夜岔签 | 选礼 UI + **评分逻辑（原 C）** |
-| 25 菜链/价/耗材、客潮等级权重 | `DT_Recipes` 等（原 C） |
-| 库存、失败 50%、临时食篮、已入库/营业额不回退、缺口补跑 | **进度与库存（原 C）** |
+| 母棋子、不规则棋盘、同链同级 Merge→Lv4、高级食材拖回整个食材区撤销合成并退库、拖菜交付 | Merge 全套 |
+| 普通客皮套潮、无限等待（无耐心值）、`CustomerConcurrentMax` 驱动的共享座位（各自独立补客倒计时；任一空座归零即从统一队列补客，不等整批完成）、完成订单即离店（含特殊 NPC）、开店前预生成订单队列（库存硬可行、总价≥目标、等级混搭）、特殊 NPC 按队列前半段揭示 | 客潮 |
+| 四特殊 NPC、保底规则由表决定、对白 | NPC |
+| 谢礼**完成订单即得即用**、无选礼无背包、入夜前只读页签展示 | 谢礼即时生效 + 页签 |
+| 25 菜链/价/耗材、客潮等级权重、结转单价、座位上限、食材/NPC/谢礼/顾客名 | `/Game/Shared/Data/`：`DT_Recipes`、`DT_GameStages`、`DT_SDayBalance`、`DT_Ingredients`、`DT_SpecialNpcs`、`DT_Gifts`、`DT_CustomerNames`（Day/Night 共用；后续 Night 表也放此目录） |
+| 库存、夜/日失败各自回档本阶段起点、时间到闭店结转剩余食材并抬高下一关目标 | **进度与库存（原 C）** |
 | T0–L3 总流程、15 分钟结构、评审 Seed/配对牌袋、存档 | **Flow + Save（原 C）** |
 | 组装 `FNightBootstrap`、消费 `FNightResult` | **唯一昼夜胶水** |
 | 主角日形、菜品表现、谢礼卡面 | 日人物与 UI |
@@ -149,6 +150,43 @@ R2 -> R1 提供判定线与事件；R1 回传命中/失误
 
 - 不实现双键判定、轨道刷怪、灶魂衰减曲线  
 - 夜关内不跑；只 `StartNight` / 等结果  
+
+### 状态机（`ESGamePhase`，唯一权威）
+
+```mermaid
+stateDiagram-v2
+    [*] --> PrepareNight
+
+    PrepareNight --> NightRunning: 创建夜初快照
+    NightRunning --> PrepareNight: 夜败(时间耗尽或死亡) / 清除本次收获
+    NightRunning --> NightSettlement: 到达终点
+
+    NightSettlement --> PrepareDay: 提交夜间食材
+    PrepareDay --> DayRunning: 创建日初快照 / 营业额为 0
+
+    DayRunning --> PrepareDay: 时间结束且未达标 / 恢复日初快照
+    DayRunning --> PrepareDay: 未达标且无可完成订单 / 恢复日初快照
+    DayRunning --> DayQualified: 营业额达到目标
+
+    DayQualified --> DaySettlement: 经营时间结束
+    DayQualified --> DaySettlement: 无可完成订单
+
+    DaySettlement --> PrepareNextStage: 保留剩余库存 / 计算下一关营业额
+    PrepareNextStage --> PrepareNight: 进入下一关夜晚
+    PrepareNextStage --> Ending: 最终关完成
+    Ending --> [*]
+```
+
+规则：
+
+- `PrepareDay` / `DaySettlement` / `PrepareNextStage` 是**过渡态**：在同一次调用里做完边上的事就交棒，UI 不会停在这三个态。
+- **回档粒度**：夜败回夜初快照，日败回日初快照；快照含库存、营业额、营业额目标与谢礼，棋盘不入档（棋子按付费单位折回库存后清盘）。中途读档同样按「回到本阶段起点」处理。
+- **永久入库**：阶段中途发放的永久库存（含调试「五类各+10」）走 `GrantPermanentStock`，同时补进夜初/日初快照，否则存档读回时会被回档吃掉；正常消耗只改当前库存，仍按回档退回。
+- **订单预生成**：`EnterPrepareDay` 根据日初库存与营业额目标生成 `PlannedDayOrders`（客单 + 特殊 NPC 槽）；总售价≥目标且 `Cost(Lv)=2^Lv` 硬可行；NPC 槽落在前半段；售价读 `DT_Recipes`。顾客/NPC 按队列出现，日初快照携带队列保证回档一致。
+- **谢礼**：完成 NPC 委托当场进 `ActiveGiftIds` 并写入 `GiftBuffState`，立刻可用；在 `PrepareDay` 清空（上一日谢礼已被刚过去的夜晚消耗）。没有勾选、没有背包。
+- **闭店条件**：开店倒计时归零，或库存与棋盘都做不出任何一道菜（`HasCompletableOrder()==false`）。倒计时由 `ASCustomerDirector::Tick` → `TickDayClock` 驱动。
+- **结转**：仅「时间结束」的日结把剩余食材留到下一关，并按 `CarryOverTargetBonusPerUnit`（默认 5 = Lv0 半价）抬高下一关营业额目标；「食材耗尽」不结转。
+- 存档 `SG_ChefProfile` 版本 **3**：含订单队列与游标；v2 及更旧档判为不兼容并回退默认档。
 
 ---
 
@@ -173,9 +211,9 @@ R2 -> R1 提供判定线与事件；R1 回传命中/失误
 | §3.2 灶魂 | **R1**（表现可 TA） |
 | §3.3 岔路与 A/B/C、换键时点 | **R2**（换键输入 **R1**） |
 | §3.4–3.6 怪料、关卡参数、生成约束 | **R2** 执行；权重/期望表可与 S 共享只读 |
-| §3.7 失败库存保护 | **S** 规则；**R2** 上报失败 |
+| §3.7 失败回档（夜败回夜初、日败回日初） | **S** 规则；**R2** 上报失败 |
 | §4–5 经营与 25 菜 | **S** |
-| §6 NPC 与谢礼 | **S** 选与规则；**R2** 夜生效 |
+| §6 NPC 与谢礼 | **S** 发放与规则（即得即用）；**R2** 夜生效 |
 | §7 四关脚本 | **S** 总表；夜事件 **R2** 执行、日事件 **S** 执行 |
 
 ---
@@ -194,7 +232,7 @@ R2 -> R1 提供判定线与事件；R1 回传命中/失误
 | **P1** | 客皮套换色 MI、Merge/菜升级材质 | S |
 | **P2** | 谢礼卡纸质 Shader、移动端合批体检 | S / 跨线 |
 
-**不必 TA：** 判定窗、生成算法、Merge 规则、选礼评分、存档。
+**不必 TA：** 判定窗、生成算法、Merge 规则、谢礼发放、存档。
 
 ---
 
@@ -210,7 +248,7 @@ R2 -> R1 提供判定线与事件；R1 回传命中/失误
 
 - **R1↔R2**：真判定线对接；换键联调（仅二人）  
 - **R2↔S**：只对接 Bootstrap/Result；谢礼夜生效  
-- **S**：特殊 NPC、选礼、T0 夜→日→夜 Flow  
+- **S**：特殊 NPC、谢礼即时生效、T0 夜→日→夜 Flow  
 - **TA**：纸灯 + 命中特效（白模可玩后）
 
 ### 联调契约

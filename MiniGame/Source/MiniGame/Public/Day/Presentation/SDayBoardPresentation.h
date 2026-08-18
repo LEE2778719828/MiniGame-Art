@@ -1,0 +1,490 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
+#include "Engine/DataAsset.h"
+#include "Engine/DataTable.h"
+#include "GameFramework/Actor.h"
+#include "SDayBoardPresentation.generated.h"
+
+class ASMergeBoard;
+class UBorder;
+class UButton;
+class UCanvasPanelSlot;
+class UCameraComponent;
+class UDirectionalLightComponent;
+class UMaterialInterface;
+class USkyLightComponent;
+class UFont;
+class UStaticMesh;
+class UStaticMeshComponent;
+class UTextBlock;
+class UTextRenderComponent;
+class USChefGameInstance;
+class UScrollBox;
+class USizeBox;
+
+#pragma region K2 moonyfli
+
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayBoardLayoutRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	int32 CellIndex = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FTransform Transform;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	float VisualRadius = 85.0f;
+};
+
+UCLASS(BlueprintType)
+class MINIGAME_API USDayBoardVisualConfig : public UPrimaryDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> BoardFrameMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> CellMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> PieceMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> IngredientBinMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> ChefMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> CustomerMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Meshes")
+	TSoftObjectPtr<UStaticMesh> NpcMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+	TSoftObjectPtr<UMaterialInterface> BoardMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+	TSoftObjectPtr<UMaterialInterface> CellMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+	TSoftObjectPtr<UMaterialInterface> PieceMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout")
+	TSoftObjectPtr<UDataTable> CellLayout;
+
+	/**
+	 * Offline font used by every world-space label. TextRenderComponent cannot use runtime
+	 * fonts, so the engine default only ships ASCII glyphs and renders CJK as boxes.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Text")
+	TSoftObjectPtr<UFont> LabelFont;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
+	TSubclassOf<class ASDayCellVisual> CellVisualClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
+	TSubclassOf<class ASDayIngredientBinVisual> IngredientBinClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
+	TSubclassOf<class ASDayCharacterStandIn> CharacterStandInClass;
+};
+
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayCellVisual : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASDayCellVisual();
+
+	void Configure(int32 InCellIndex, float InRadius, ASMergeBoard* InBoard);
+
+	void SetLabelFont(UFont* InFont);
+
+	UFUNCTION(BlueprintCallable, Category = "S Day Board")
+	void RefreshVisual();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	int32 CellIndex = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> CellMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> PieceMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UTextRenderComponent> PieceLabel;
+
+private:
+	TWeakObjectPtr<ASMergeBoard> Board;
+	float VisualRadius = 85.0f;
+};
+
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayIngredientBinVisual : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASDayIngredientBinVisual();
+
+	void Configure(FName InIngredientId, const FString& InDisplayName);
+
+	void SetLabelFont(UFont* InFont);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FName IngredientId = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> BinMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UTextRenderComponent> Label;
+};
+
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayCharacterStandIn : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASDayCharacterStandIn();
+
+	void Configure(const FString& InLabel, const FLinearColor& InColor);
+
+	/** Rewrites the floating name/order text without touching the mesh tint. */
+	void SetHeadline(const FString& InText, const FLinearColor& InColor);
+
+	void SetLabelFont(UFont* InFont);
+
+	/** None while empty or taken by a walk-in guest; set to ALing/SangPo when an NPC sits down. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FName NpcId = NAME_None;
+
+#pragma region K2 moonyfli
+	/** Walk-in customer occupying this seat; empty for NPC and vacant seats. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	FString CustomerId;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	int32 SeatIndex = INDEX_NONE;
+#pragma endregion K2 moonyfli
+
+	/** Seats accept a dragged piece; the chef stand-in does not. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	bool bDeliveryTarget = false;
+
+	/** Seats are shared: a guest or NPC takes one on arrival and frees it once served. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	bool bOccupied = false; //add by K2
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> CharacterMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UTextRenderComponent> Label;
+};
+
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayBoardPresenter : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASDayBoardPresenter();
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Tick(float DeltaSeconds) override;
+
+	UFUNCTION(BlueprintCallable, Category = "S Day Board")
+	void RefreshFromLogic();
+
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	ASMergeBoard* GetLogicBoard() const { return LogicBoard.Get(); }
+
+	/** Feeds a synthetic screen position through the same handlers the pointer tick uses. */
+	UFUNCTION(BlueprintCallable, Category = "S Day Board")
+	void SimulatePointerEvent(FVector2D ScreenPosition, bool bPressed);
+
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	ASDayCellVisual* GetCellVisual(int32 CellIndex) const;
+
+	/** NAME_None returns the seat the walk-in guest currently occupies. */
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	ASDayCharacterStandIn* GetSeat(FName InNpcId) const;
+
+	/** Shared seats in the top row; the chef stand-in is not one of them. Count comes from GI. */
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	int32 GetDeliverySeatCount() const; //add by K2
+
+	UFUNCTION(BlueprintPure, Category = "S Day Board")
+	ASDayIngredientBinVisual* GetIngredientBin(FName IngredientId) const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TSoftObjectPtr<USDayBoardVisualConfig> VisualConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	bool bTakeCameraOnBeginPlay = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	float PortraitOrthoWidth = 1100.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UCameraComponent> Camera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> BoardFrame;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> Counter;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UDirectionalLightComponent> WhiteboxKeyLight;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<USkyLightComponent> WhiteboxFillLight;
+
+private:
+	void BuildWhitebox();
+	void BuildCells();
+	void BuildBins();
+	void BuildCharacters();
+	void RefreshCharacters();
+	UFont* ResolveLabelFont() const;
+	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+	bool IsInIngredientDropZone(const FVector2D& ScreenPosition) const;
+	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
+	void HandlePointerPressed(const FVector2D& ScreenPosition);
+	void HandlePointerReleased(const FVector2D& ScreenPosition);
+	bool GetPointerState(FVector2D& OutScreenPosition) const;
+	AActor* HitTest(const FVector2D& ScreenPosition) const;
+	TArray<FSDayBoardLayoutRow> GetLayoutRows() const;
+
+	TWeakObjectPtr<ASMergeBoard> LogicBoard;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ASDayCellVisual>> CellVisuals;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ASDayIngredientBinVisual>> IngredientBins;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
+
+	bool bPointerWasDown = false;
+	bool bDropHandledOnPress = false;
+	float SeatRefreshCountdown = 0.0f;
+	FVector2D LastPointerPosition = FVector2D::ZeroVector;
+};
+
+UCLASS(Blueprintable)
+class MINIGAME_API USDayHUD : public UUserWidget
+{
+	GENERATED_BODY()
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+
+private:
+	void BuildWidgetTree();
+
+	UFUNCTION()
+	void Refresh();
+
+	UFUNCTION()
+	void HandleCustomer();
+
+	UFUNCTION()
+	void HandleALing();
+
+	UFUNCTION()
+	void HandleSangPo();
+
+	UFUNCTION()
+	void HandleLingGu();
+
+	UFUNCTION()
+	void HandleYinShanJun();
+
+	UFUNCTION()
+	void HandleChiYanJiao();
+
+	UFUNCTION()
+	void HandleYueLinYu();
+
+	UFUNCTION()
+	void HandleXuanYuQin();
+
+	UFUNCTION()
+	void HandleFlowButton();
+
+	void SpawnIngredient(FName IngredientId);
+	void DeliverNpc(FName NpcId);
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> PhaseText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> InventoryText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> OrderText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> FeedbackText;
+
+	UPROPERTY()
+	TObjectPtr<UButton> CustomerButton;
+
+	UPROPERTY()
+	TObjectPtr<UButton> ALingButton;
+
+	UPROPERTY()
+	TObjectPtr<UButton> SangPoButton;
+
+	/** 入夜前礼品卡页签：只读展示，谢礼拿到即生效，玩家不需要挑选。 */
+	UPROPERTY()
+	TObjectPtr<UTextBlock> GiftTabText;
+
+	UPROPERTY()
+	TObjectPtr<UButton> FlowButton;
+
+	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
+	FTimerHandle RefreshTimerHandle; //add by K2
+
+#pragma region K2 moonyfli
+	UFUNCTION()
+	void HandleToggleCheatPanel();
+
+	UPROPERTY()
+	TObjectPtr<UButton> CheatToggleButton;
+
+	UPROPERTY()
+	TObjectPtr<class USDayCheatPanel> CheatPanel;
+#pragma endregion K2 moonyfli
+};
+
+/** Dev-only daytime modifier overlay; HUD entry is omitted in Shipping builds. */
+UCLASS()
+class MINIGAME_API USDayCheatPanel : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void SetPanelVisible(bool bVisible);
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+	/** Keeps the frame inside the viewport across resolutions and UI scales. */
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+	/** Title bar acts as the drag handle; body clicks stay with the buttons. */
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
+
+private:
+	void BuildWidgetTree();
+	UFUNCTION()
+	void RefreshStatus();
+	USChefGameInstance* GetChef() const;
+	void SetSelectedIngredient(FName IngredientId);
+	void AdjustStock(int32 Delta);
+	void SetStock(int32 Quantity);
+	/** Frame lives in a full-screen canvas, so all placement math stays in widget-local space. */
+	void ApplyFramePosition(const FVector2D& DesiredPosition, const FGeometry& CanvasGeometry);
+	/** Scroll body needs a definite height; collapsed body falls back to auto height. */
+	void ApplyBodyHeight();
+
+	UFUNCTION() void HandleToggleBody();
+	UFUNCTION() void HandleClose();
+	UFUNCTION() void HandleSelectLingGu();
+	UFUNCTION() void HandleSelectYin();
+	UFUNCTION() void HandleSelectChi();
+	UFUNCTION() void HandleSelectYue();
+	UFUNCTION() void HandleSelectXuan();
+	UFUNCTION() void HandleStockPlus1();
+	UFUNCTION() void HandleStockPlus10();
+	UFUNCTION() void HandleStockClear();
+	UFUNCTION() void HandleStockSet0();
+	UFUNCTION() void HandleStockSet10();
+	UFUNCTION() void HandleStockSet20();
+	UFUNCTION() void HandleStockSet50();
+	UFUNCTION() void HandleStockSet99();
+	UFUNCTION() void HandleForceNextCustomer();
+	UFUNCTION() void HandleRevenuePlus10();
+	UFUNCTION() void HandleRevenuePlus50();
+	UFUNCTION() void HandleRevenueQualify();
+	UFUNCTION() void HandleTimePlus30();
+	UFUNCTION() void HandleTimeMinus30();
+	UFUNCTION() void HandleTimeSet60();
+	UFUNCTION() void HandleTimeSet10();
+	UFUNCTION() void HandleOpenShop();
+	UFUNCTION() void HandleForceClose();
+	UFUNCTION() void HandleFailDay();
+	UFUNCTION() void HandleGiftKite();
+	UFUNCTION() void HandleGiftLamp();
+	UFUNCTION() void HandleGiftCoin();
+	UFUNCTION() void HandleGiftBox();
+	UFUNCTION() void HandleClearGifts();
+	UFUNCTION() void HandleJumpT0();
+	UFUNCTION() void HandleJumpL1();
+	UFUNCTION() void HandleJumpL2();
+	UFUNCTION() void HandleJumpL3();
+	UFUNCTION() void HandleSave();
+	UFUNCTION() void HandleLoad();
+	UFUNCTION() void HandleDeleteSave();
+	UFUNCTION() void HandleCorruptSave();
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> StatusText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> OrderQueueText;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> DragHandle;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> Frame;
+
+	UPROPERTY()
+	TObjectPtr<UCanvasPanelSlot> FrameSlot;
+
+	UPROPERTY()
+	TObjectPtr<USizeBox> FrameSizeBox;
+
+	UPROPERTY()
+	TObjectPtr<USizeBox> BodySizeBox;
+
+	UPROPERTY()
+	TObjectPtr<UScrollBox> BodyScroll;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> CollapseLabel;
+
+	FName SelectedIngredientId = TEXT("LingGu");
+
+	FVector2D FramePosition = FVector2D(24.0f, 140.0f);
+	/** Cursor offset inside the drag handle when the grab started. */
+	FVector2D DragGrabOffset = FVector2D::ZeroVector;
+	float AppliedFrameWidth = 0.0f;
+	float AppliedFrameHeight = 0.0f;
+	bool bDraggingPanel = false;
+};
+
+#pragma endregion K2 moonyfli
