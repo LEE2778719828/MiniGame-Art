@@ -63,6 +63,15 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
 	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	float RuntimeKeyLightIntensity = 5000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	FLinearColor RuntimeKeyLightColor = FLinearColor(0.72f, 0.82f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	float RuntimeFogDensity = 0.003f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
 	TSoftObjectPtr<UMaterialInterface> EditorPreviewMaterial;
 

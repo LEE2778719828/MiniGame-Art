@@ -76,9 +76,9 @@ ANightCourseHost::ANightCourseHost()
 	PrimaryActorTick.bCanEverTick = false;
 	Director = CreateDefaultSubobject<UNightCourseDirector>(TEXT("Director"));
 	NightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("NightFog"));
-	NightFog->FogDensity = 0.012f;
+	NightFog->FogDensity = 0.003f;
 	NightFog->FogHeightFalloff = 0.18f;
-	NightFog->FogInscatteringLuminance = FLinearColor(0.03f, 0.07f, 0.18f);
+	NightFog->FogInscatteringLuminance = FLinearColor(0.08f, 0.14f, 0.3f);
 	NightFog->DirectionalInscatteringExponent = 4.f;
 	NightFog->DirectionalInscatteringStartDistance = 0.f;
 
@@ -99,9 +99,9 @@ ANightCourseHost::ANightCourseHost()
 	PreviewFoeM03->SetHiddenInGame(true);
 	PreviewKeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("PreviewKeyLight"));
 	PreviewKeyLight->SetRelativeRotation(FRotator(-35.f, -35.f, 0.f));
-	PreviewKeyLight->Intensity = 4.f;
+	PreviewKeyLight->Intensity = 5000.f;
 	PreviewKeyLight->LightColor = FColor(180, 210, 255);
-	PreviewKeyLight->SetHiddenInGame(true);
+	PreviewKeyLight->SetHiddenInGame(false);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
@@ -278,6 +278,18 @@ void ANightCourseHost::RebuildEditorPreview()
 void ANightCourseHost::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (PreviewKeyLight)
+	{
+		PreviewKeyLight->SetHiddenInGame(false);
+		PreviewKeyLight->SetVisibility(true);
+		PreviewKeyLight->SetIntensity(RuntimeKeyLightIntensity);
+		PreviewKeyLight->SetLightColor(RuntimeKeyLightColor);
+	}
+	if (NightFog)
+	{
+		NightFog->FogDensity = RuntimeFogDensity;
+	}
 
 	if (!Config)
 	{
