@@ -85,7 +85,7 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 	// ArtSubmit models use a different forward axis than the course lane.
 	FoeCapsule->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
+	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
 	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
 		nullptr,
 		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
@@ -97,6 +97,20 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 			MID->SetVectorParameterValue(TEXT("Color"), FoeColor);
 		}
 	}
+}
+
+void ANightCourseStoneActor::ShowFoe()
+{
+	if (!FoeCapsule)
+	{
+		return;
+	}
+
+	Spec.bHasFoe = true;
+	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
+	FoeCapsule->SetHiddenInGame(false);
+	FoeCapsule->SetVisibility(true);
+	ApplyColors();
 }
 
 void ANightCourseStoneActor::SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation)
