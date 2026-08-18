@@ -9,6 +9,7 @@
 
 class UNightRouteRulesAsset;
 class UMaterialInterface;
+class UStaticMesh;
 
 #pragma region K2 moonyfli
 /**
@@ -157,6 +158,32 @@ public:
 	/** Translucent unlit material with Color / Opacity / FadeAlpha. Falls back to opaque Color-only. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|DistanceFade")
 	TObjectPtr<UMaterialInterface> DistanceFadeMaterial;
+
+	// --- G3.5 procedural + art ---
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Proc")
+	bool bUseProcGenerator = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Proc")
+	FNightProcCourseParams ProcParams;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> BridgeMeshA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> BridgeMeshB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> HeroMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM01;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM02;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
 
 	UNightG1CourseConfig();
 

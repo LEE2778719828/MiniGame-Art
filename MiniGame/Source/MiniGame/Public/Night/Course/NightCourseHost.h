@@ -11,6 +11,7 @@ class UNightG1CourseConfig;
 class ANightCoursePawn;
 class UStaticMesh;
 class UMaterialInterface;
+class UNightProcParamsAsset;
 
 #pragma region K2 moonyfli
 /**
@@ -36,6 +37,10 @@ public:
 	/** If true, overwrite Bootstrap.ForkPair from Config LevelRows for Bootstrap.LevelId. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|G3")
 	bool bApplyLevelTableOnStart = false;
+
+	/** Optional procedural params asset (HTML JSON import target). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Proc")
+	TObjectPtr<UNightProcParamsAsset> ProcParamsAsset; //add by K2
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	bool bAutoStart = true;

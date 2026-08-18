@@ -29,6 +29,22 @@ UNightG1CourseConfig::UNightG1CourseConfig()
 		MakeDefaultLevelSettings(ENightLevelId::L2),
 		MakeDefaultLevelSettings(ENightLevelId::L3)
 	};
+
+#pragma region K2 moonyfli
+	ProcParams.TotalNodes = 12;
+	ProcParams.MaxYawDeltaDeg = 8.f;
+	ProcParams.ForkNodeMin = 4;
+	ProcParams.ForkNodeMax = 8;
+	ProcParams.Seed = 1001;
+	ProcParams.bEnableProcGenerator = true;
+
+	BridgeMeshA = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1")));
+	BridgeMeshB = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2")));
+	HeroMesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Hero/zhujue.zhujue")));
+	FoeMeshM01 = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Foe/fish_moneter.fish_moneter")));
+	FoeMeshM02 = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Foe/cantingguai.cantingguai")));
+	FoeMeshM03 = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Night/Course/Art/Foe/box1.box1")));
+#pragma endregion K2 moonyfli
 }
 
 FNightLevelCourseSettings UNightG1CourseConfig::MakeDefaultLevelSettings(ENightLevelId LevelId)

@@ -1,11 +1,15 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseStoneActor.h"
+#include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightForkController.h"
 #include "Night/Course/NightRouteRules.h"
+#include "Night/Course/NightTrackGenerator.h"
+#include "Night/Course/NightProcParamsAsset.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/StaticMesh.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 
@@ -80,14 +84,55 @@ FVector UNightCourseDirector::GetTrackLocation(float Distance) const
 	return Origin + Forward * Distance;
 }
 
+FVector UNightCourseDirector::GetStoneWorldLocation(int32 StoneIndex) const
+{
+	if (!StoneSpecs.IsValidIndex(StoneIndex))
+	{
+		return GetTrackLocation(0.f);
+	}
+	const FNightStoneSpec& Spec = StoneSpecs[StoneIndex];
+	if (Spec.bUseWorldPose)
+	{
+		return Spec.WorldLocation;
+	}
+	return GetTrackLocation(Spec.TrackDistance);
+}
+
+FRotator UNightCourseDirector::GetStoneWorldRotation(int32 StoneIndex) const
+{
+	if (StoneSpecs.IsValidIndex(StoneIndex) && StoneSpecs[StoneIndex].bUseWorldPose)
+	{
+		return FRotator(0.f, StoneSpecs[StoneIndex].YawDeg, 0.f);
+	}
+	return Config ? Config->TrackForward.Rotation() : FRotator::ZeroRotator;
+}
+
 void UNightCourseDirector::SyncPawnToProgress(bool bInstant)
 {
 	if (!RunnerPawn || !Config)
 	{
 		return;
 	}
-	const FVector Loc = GetTrackLocation(ProgressDistance);
-	const FRotator Rot = Config->TrackForward.Rotation();
+	FVector Loc = GetTrackLocation(ProgressDistance);
+	FRotator Rot = Config->TrackForward.Rotation();
+	if (StoneSpecs.IsValidIndex(CurrentStoneIndex) && StoneSpecs[CurrentStoneIndex].bUseWorldPose)
+	{
+		Loc = StoneSpecs[CurrentStoneIndex].WorldLocation;
+		Rot = GetStoneWorldRotation(CurrentStoneIndex);
+	}
+	else
+	{
+		// Snap along arc: find nearest stone by TrackDistance.
+		for (int32 i = 0; i < StoneSpecs.Num(); ++i)
+		{
+			if (FMath::IsNearlyEqual(StoneSpecs[i].TrackDistance, ProgressDistance, 1.f))
+			{
+				Loc = GetStoneWorldLocation(i);
+				Rot = GetStoneWorldRotation(i);
+				break;
+			}
+		}
+	}
 	if (bInstant)
 	{
 		RunnerPawn->SnapToTrack(Loc, Rot);
@@ -109,13 +154,194 @@ FNightRouteRuleRow UNightCourseDirector::ResolveRouteRule(ENightRouteId RouteId)
 
 void UNightCourseDirector::EnsureBaseCourse()
 {
+	ClearSpawnedActors();
 	StoneSpecs.Reset();
 	BeatSpecs.Reset();
+	BridgeSpecs.Reset();
+	bUsingProcCourse = false;
+	ProcForkAfterStoneIndex = INDEX_NONE;
+	ResolvedProcSeed = ActiveBootstrap.Seed;
+
+	ActiveProcParams = FNightProcCourseParams();
+	if (ProcParamsAsset)
+	{
+		ActiveProcParams = ProcParamsAsset->Params;
+	}
+	else if (Config)
+	{
+		ActiveProcParams = Config->ProcParams;
+	}
+
+	const bool bProc = ActiveProcParams.bEnableProcGenerator
+		&& (ProcParamsAsset != nullptr || (Config && Config->bUseProcGenerator));
+
+	if (bProc)
+	{
+		bUsingProcCourse = true;
+		if (ActiveProcParams.Seed == 0 && ActiveBootstrap.Seed != 0)
+		{
+			ActiveProcParams.Seed = ActiveBootstrap.Seed;
+		}
+
+		if (ProcParamsAsset && ProcParamsAsset->bPreferBakedCourse && ProcParamsAsset->BakedStones.Num() > 0)
+		{
+			StoneSpecs = ProcParamsAsset->BakedStones;
+			BeatSpecs = ProcParamsAsset->BakedBeats;
+			BridgeSpecs = ProcParamsAsset->BakedBridges;
+			ResolvedProcSeed = ActiveProcParams.Seed != 0 ? ActiveProcParams.Seed : ActiveBootstrap.Seed;
+			BaseBeatCount = BeatSpecs.Num();
+			ActiveBootstrap.ForkPair = UNightTrackGenerator::ForkEnvToPair(
+				ActiveProcParams.ForkEnv, ActiveProcParams.ForkPair);
+			ActiveBootstrap.Seed = ResolvedProcSeed;
+		}
+		else
+		{
+			const FVector Origin = Config ? Config->TrackOrigin : FVector::ZeroVector;
+			const FVector Forward = Config ? Config->TrackForward : FVector::ForwardVector;
+			FNightGeneratedCourse Gen = UNightTrackGenerator::GenerateBaseOnly(ActiveProcParams, Origin, Forward);
+			StoneSpecs = Gen.Stones;
+			BeatSpecs = Gen.Beats;
+			BridgeSpecs = Gen.Bridges;
+			BaseBeatCount = Gen.BaseBeatCount;
+			ResolvedProcSeed = Gen.ResolvedSeed;
+			ProcForkAfterStoneIndex = Gen.ForkAfterStoneIndex;
+			ActiveBootstrap.ForkPair = Gen.ForkPair;
+			ActiveBootstrap.Seed = Gen.ResolvedSeed;
+			ActiveProcParams.Seed = Gen.ResolvedSeed;
+		}
+
+		if (Config)
+		{
+			Config->ForkTimeoutSeconds = ActiveProcParams.ForkTimeoutSeconds;
+			Config->WrongPenalty = ActiveProcParams.WrongPenalty;
+			Config->StartingSoul = ActiveProcParams.StartingSoul;
+			Config->JumpGapCm = ActiveProcParams.JumpGapCm;
+			Config->KillGapCm = ActiveProcParams.KillGapCm;
+			Config->BranchEntryGapCm = ActiveProcParams.BranchEntryGapCm;
+		}
+		return;
+	}
+
 	if (Config)
 	{
 		Config->BuildBaseCourse(StoneSpecs, BeatSpecs);
 	}
 	BaseBeatCount = BeatSpecs.Num();
+}
+
+void UNightCourseDirector::ClearSpawnedActors()
+{
+	for (ANightCourseStoneActor* Stone : SpawnedStones)
+	{
+		if (Stone)
+		{
+			Stone->Destroy();
+		}
+	}
+	SpawnedStones.Reset();
+	for (ANightBridgeSegmentActor* Bridge : SpawnedBridges)
+	{
+		if (Bridge)
+		{
+			Bridge->Destroy();
+		}
+	}
+	SpawnedBridges.Reset();
+}
+
+UStaticMesh* UNightCourseDirector::ResolveBridgeMesh(int32 MeshVariant) const
+{
+	TSoftObjectPtr<UStaticMesh> Soft;
+	if (ProcParamsAsset)
+	{
+		Soft = (MeshVariant == 0) ? ProcParamsAsset->BridgeMeshA : ProcParamsAsset->BridgeMeshB;
+	}
+	else if (Config)
+	{
+		Soft = (MeshVariant == 0) ? Config->BridgeMeshA : Config->BridgeMeshB;
+	}
+	return Soft.LoadSynchronous();
+}
+
+UStaticMesh* UNightCourseDirector::ResolveFoeMesh(EFoeId FoeId) const
+{
+	TSoftObjectPtr<UStaticMesh> Soft;
+	if (ProcParamsAsset)
+	{
+		switch (FoeId)
+		{
+		case EFoeId::M02: Soft = ProcParamsAsset->FoeMeshM02; break;
+		case EFoeId::M03: Soft = ProcParamsAsset->FoeMeshM03; break;
+		default: Soft = ProcParamsAsset->FoeMeshM01; break;
+		}
+	}
+	else if (Config)
+	{
+		switch (FoeId)
+		{
+		case EFoeId::M02: Soft = Config->FoeMeshM02; break;
+		case EFoeId::M03: Soft = Config->FoeMeshM03; break;
+		default: Soft = Config->FoeMeshM01; break;
+		}
+	}
+	return Soft.LoadSynchronous();
+}
+
+void UNightCourseDirector::ApplyHeroArtMesh()
+{
+	if (!RunnerPawn)
+	{
+		return;
+	}
+	TSoftObjectPtr<UStaticMesh> Soft;
+	if (ProcParamsAsset)
+	{
+		Soft = ProcParamsAsset->HeroMesh;
+	}
+	else if (Config)
+	{
+		Soft = Config->HeroMesh;
+	}
+	if (UStaticMesh* Mesh = Soft.LoadSynchronous())
+	{
+		if (RunnerPawn->BodyMesh)
+		{
+			RunnerPawn->BodyMesh->SetStaticMesh(Mesh);
+			RunnerPawn->BodyMesh->SetRelativeScale3D(FVector(1.f));
+		}
+		if (RunnerPawn->HeadMesh)
+		{
+			RunnerPawn->HeadMesh->SetHiddenInGame(true);
+			RunnerPawn->HeadMesh->SetVisibility(false);
+		}
+	}
+}
+
+void UNightCourseDirector::SpawnBridgeActor(int32 BridgeIndex)
+{
+	UWorld* World = GetWorld();
+	if (!World || !BridgeSpecs.IsValidIndex(BridgeIndex))
+	{
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ANightBridgeSegmentActor* Bridge = World->SpawnActor<ANightBridgeSegmentActor>(
+		ANightBridgeSegmentActor::StaticClass(),
+		BridgeSpecs[BridgeIndex].WorldLocation,
+		FRotator(0.f, BridgeSpecs[BridgeIndex].YawDeg, 0.f),
+		Params);
+	if (!Bridge)
+	{
+		return;
+	}
+	Bridge->SetupBridge(BridgeSpecs[BridgeIndex], ResolveBridgeMesh(BridgeSpecs[BridgeIndex].MeshVariant));
+	if (SpawnedBridges.Num() <= BridgeIndex)
+	{
+		SpawnedBridges.SetNum(BridgeIndex + 1);
+	}
+	SpawnedBridges[BridgeIndex] = Bridge;
 }
 
 void UNightCourseDirector::SpawnStoneActor(int32 Index)
@@ -132,10 +358,11 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	const FRotator Facing = Config ? Config->TrackForward.Rotation() : FRotator::ZeroRotator;
+	const FVector Loc = GetStoneWorldLocation(Index);
+	const FRotator Facing = GetStoneWorldRotation(Index);
 	ANightCourseStoneActor* Stone = World->SpawnActor<ANightCourseStoneActor>(
 		SpawnClass,
-		GetTrackLocation(StoneSpecs[Index].TrackDistance),
+		Loc,
 		Facing,
 		Params);
 	if (!Stone)
@@ -144,7 +371,15 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	}
 
 	Stone->SetupStone(Index, StoneSpecs[Index]);
-	Stone->SetTrackPose(GetTrackLocation(StoneSpecs[Index].TrackDistance), Facing);
+	Stone->SetTrackPose(Loc, Facing);
+	if (UStaticMesh* FoeMesh = ResolveFoeMesh(StoneSpecs[Index].FoeId))
+	{
+		if (Stone->FoeCapsule)
+		{
+			Stone->FoeCapsule->SetStaticMesh(FoeMesh);
+			Stone->FoeCapsule->SetRelativeScale3D(FVector(1.f));
+		}
+	}
 	if (Config)
 	{
 		UMaterialInterface* FadeMat = Config->DistanceFadeMaterial;
@@ -155,6 +390,23 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 		SpawnedStones.SetNum(Index + 1);
 	}
 	SpawnedStones[Index] = Stone;
+}
+
+bool UNightCourseDirector::ImportProcParamsFromJsonFile(const FString& Path)
+{
+	if (!ProcParamsAsset)
+	{
+		ProcParamsAsset = NewObject<UNightProcParamsAsset>(this, TEXT("RuntimeProcParams"));
+	}
+	FString Err;
+	if (!ProcParamsAsset->ImportFromJsonFile(Path, Err))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[NightCourse] ImportProcParams failed: %s"), *Err);
+		return false;
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourse] Imported proc params from %s (seed=%d nodes=%d)"),
+		*Path, ProcParamsAsset->Params.Seed, ProcParamsAsset->Params.TotalNodes);
+	return true;
 }
 
 void UNightCourseDirector::RefreshStoneVisibility()
@@ -257,13 +509,13 @@ float UNightCourseDirector::ComputeStoneFadeOpacity(int32 StoneIndex, const FVec
 	{
 	case ENightDistanceFadeSpace::HorizontalXY:
 	{
-		const FVector StoneWS = GetTrackLocation(Spec.TrackDistance);
+		const FVector StoneWS = GetStoneWorldLocation(StoneIndex);
 		DistCm = FVector::Dist2D(StoneWS, AnchorWS);
 		break;
 	}
 	case ENightDistanceFadeSpace::World3D:
 	{
-		const FVector StoneWS = GetTrackLocation(Spec.TrackDistance);
+		const FVector StoneWS = GetStoneWorldLocation(StoneIndex);
 		DistCm = FVector::Dist(StoneWS, AnchorWS);
 		break;
 	}
@@ -361,8 +613,15 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	{
 		SpawnStoneActor(Index);
 	}
+	SpawnedBridges.Init(nullptr, BridgeSpecs.Num());
+	for (int32 Index = 0; Index < BridgeSpecs.Num(); ++Index)
+	{
+		SpawnBridgeActor(Index);
+	}
+	ApplyHeroArtMesh();
 
 	ProgressDistance = StoneSpecs.IsValidIndex(0) ? StoneSpecs[0].TrackDistance : 0.f;
+	CurrentStoneIndex = 0;
 	SyncPawnToProgress(true);
 	RefreshStoneVisibility();
 	SetPhase(ENightCoursePhase::BaseSegment);
@@ -384,9 +643,10 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 
 	if (GetDebug().bLogEvents)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[NightCourse] StartNight stones=%d beats=%d fork=%d level=%d pair=%d"),
-			StoneSpecs.Num(), BeatSpecs.Num(), Config->bEnableFork ? 1 : 0,
-			static_cast<int32>(ActiveBootstrap.LevelId), static_cast<int32>(ActiveBootstrap.ForkPair));
+		UE_LOG(LogTemp, Log, TEXT("[NightCourse] StartNight stones=%d beats=%d bridges=%d fork=%d level=%d pair=%d seed=%d proc=%d"),
+			StoneSpecs.Num(), BeatSpecs.Num(), BridgeSpecs.Num(), Config->bEnableFork ? 1 : 0,
+			static_cast<int32>(ActiveBootstrap.LevelId), static_cast<int32>(ActiveBootstrap.ForkPair),
+			ResolvedProcSeed, bUsingProcCourse ? 1 : 0);
 	}
 }
 
@@ -465,17 +725,41 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		return;
 	}
 
+	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
+	const bool bOnBranch = (Phase == ENightCoursePhase::BranchSegment);
+
+#pragma region K2 moonyfli
+	// Wrong button: penalty only, keep window open so Jump stays Jump and Attack stays Attack.
+	if (Outcome == ENightJudgeOutcome::WrongButton)
+	{
+		if (INightFeelBridge* Feel = GetFeel())
+		{
+			float Penalty = Config->WrongPenalty;
+			if (bOnBranch)
+			{
+				Penalty *= ActiveRouteRule.SoulPenaltyScale;
+			}
+			INightFeelBridge::Execute_ApplySoulPenalty(FeelBridgeObject, Penalty, Outcome);
+			INightFeelBridge::Execute_PlayFailFeedback(FeelBridgeObject, Outcome, Beat.Action);
+		}
+		OnNodeResolved.Broadcast(BeatIndex, Beat.Action, Outcome);
+		if (GetDebug().bLogEvents)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[NightCourse] ResolveBeat idx=%d WrongButton (no advance)"), BeatIndex);
+		}
+		return;
+	}
+#pragma endregion K2 moonyfli
+
 	BeatConsumed[BeatIndex] = 1;
 	bWindowOpen = false;
 	ActiveBeatIndex = INDEX_NONE;
 
-	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
 	if (SpawnedStones.IsValidIndex(Beat.FromStoneIndex) && SpawnedStones[Beat.FromStoneIndex])
 	{
 		SpawnedStones[Beat.FromStoneIndex]->SetHighlight(false);
 	}
 
-	const bool bOnBranch = (Phase == ENightCoursePhase::BranchSegment);
 	if (INightFeelBridge* Feel = GetFeel())
 	{
 		INightFeelBridge::Execute_ClearJudgeRequest(FeelBridgeObject, BeatIndex);
@@ -485,7 +769,7 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		}
 		else
 		{
-			float Penalty = (Outcome == ENightJudgeOutcome::Miss) ? Config->MissPenalty : Config->WrongPenalty;
+			float Penalty = Config->MissPenalty;
 			if (bOnBranch)
 			{
 				Penalty *= ActiveRouteRule.SoulPenaltyScale;
@@ -568,8 +852,8 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 	if (RunnerPawn)
 	{
 		RunnerPawn->BeginTrackAdvance(
-			GetTrackLocation(AdvanceTargetDistance),
-			Config->TrackForward.Rotation(),
+			GetStoneWorldLocation(StoneIndex),
+			GetStoneWorldRotation(StoneIndex),
 			Config->AdvanceSpeed);
 	}
 }
@@ -722,17 +1006,40 @@ void UNightCourseDirector::AppendBranchCourse(ENightRouteId ChosenRoute)
 		return;
 	}
 
-	const float LastDist = StoneSpecs.Last().TrackDistance;
-	const float StartDist = LastDist + Config->BranchEntryGapCm;
 	BranchFirstStoneIndex = StoneSpecs.Num();
 	BranchFirstBeatIndex = BeatSpecs.Num();
+	const int32 BridgeStart = BridgeSpecs.Num();
 
-	TArray<FNightStoneSpec> BranchStones;
-	TArray<FNightBeatSpec> BranchBeats;
-	Config->BuildBranchCourse(ChosenRoute, StartDist, BranchFirstStoneIndex, BranchStones, BranchBeats);
+	if (bUsingProcCourse)
+	{
+		FNightGeneratedCourse Gen;
+		Gen.Stones = StoneSpecs;
+		Gen.Beats = BeatSpecs;
+		Gen.Bridges = BridgeSpecs;
+		Gen.ResolvedSeed = ResolvedProcSeed;
+		Gen.BaseBeatCount = BaseBeatCount;
+		UNightTrackGenerator::AppendBranch(Gen, ChosenRoute, ActiveProcParams, Config->TrackOrigin);
+		StoneSpecs = Gen.Stones;
+		BeatSpecs = Gen.Beats;
+		BridgeSpecs = Gen.Bridges;
 
-	StoneSpecs.Append(BranchStones);
-	BeatSpecs.Append(BranchBeats);
+		if (Gen.KeySwaps.Num() > 0)
+		{
+			ActiveLevelSettings.KeySwaps = Gen.KeySwaps;
+			ActiveLevelSettings.bKeySwapOnlyOnRouteC = (ChosenRoute == ENightRouteId::C);
+			NextKeySwapCueIndex = 0;
+		}
+	}
+	else
+	{
+		const float LastDist = StoneSpecs.Last().TrackDistance;
+		const float StartDist = LastDist + Config->BranchEntryGapCm;
+		TArray<FNightStoneSpec> BranchStones;
+		TArray<FNightBeatSpec> BranchBeats;
+		Config->BuildBranchCourse(ChosenRoute, StartDist, BranchFirstStoneIndex, BranchStones, BranchBeats);
+		StoneSpecs.Append(BranchStones);
+		BeatSpecs.Append(BranchBeats);
+	}
 
 	const int32 OldConsumed = BeatConsumed.Num();
 	BeatConsumed.SetNum(BeatSpecs.Num());
@@ -745,6 +1052,11 @@ void UNightCourseDirector::AppendBranchCourse(ENightRouteId ChosenRoute)
 	for (int32 Index = BranchFirstStoneIndex; Index < StoneSpecs.Num(); ++Index)
 	{
 		SpawnStoneActor(Index);
+	}
+	SpawnedBridges.SetNum(BridgeSpecs.Num());
+	for (int32 Index = BridgeStart; Index < BridgeSpecs.Num(); ++Index)
+	{
+		SpawnBridgeActor(Index);
 	}
 	RefreshStoneVisibility();
 }

@@ -10,8 +10,11 @@
 class UNightG1CourseConfig;
 class ANightCourseStoneActor;
 class ANightCoursePawn;
+class ANightBridgeSegmentActor;
 class INightFeelBridge;
 class UNightForkController;
+class UNightProcParamsAsset;
+class UStaticMesh;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseFinished, const FNightResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNightCoursePhaseChanged, ENightCoursePhase, OldPhase, ENightCoursePhase, NewPhase);
@@ -33,6 +36,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	TObjectPtr<UNightG1CourseConfig> Config;
+
+	/** Optional G3.5 procedural params (JSON import / DA). Overrides legacy BuildSegment when enabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Proc")
+	TObjectPtr<UNightProcParamsAsset> ProcParamsAsset; //add by K2
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	FNightG1DebugSettings DebugOverride;
@@ -112,6 +119,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
 
+	UFUNCTION(BlueprintPure, Category = "Night|Course")
+	const TArray<FNightBeatSpec>& GetBeatSpecs() const { return BeatSpecs; } //add by K2
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course")
+	const TArray<FNightStoneSpec>& GetStoneSpecs() const { return StoneSpecs; } //add by K2
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Proc")
+	bool ImportProcParamsFromJsonFile(const FString& Path); //add by K2
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Proc")
+	int32 GetResolvedProcSeed() const { return ResolvedProcSeed; } //add by K2
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course|G3")
 	ENightControlScheme GetActiveControlScheme() const { return ActiveControlScheme; }
 
@@ -158,7 +177,13 @@ protected:
 	TArray<FNightBeatSpec> BeatSpecs;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<FNightBridgeSpec> BridgeSpecs; //add by K2
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<TObjectPtr<ANightCourseStoneActor>> SpawnedStones;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<TObjectPtr<ANightBridgeSegmentActor>> SpawnedBridges; //add by K2
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
@@ -191,6 +216,10 @@ protected:
 	int32 BranchAttackResolveCount = 0;
 	int32 BranchBeatsResolved = 0;
 	int32 NextKeySwapCueIndex = 0;
+	int32 ResolvedProcSeed = 0; //add by K2
+	int32 ProcForkAfterStoneIndex = INDEX_NONE; //add by K2
+	bool bUsingProcCourse = false; //add by K2
+	FNightProcCourseParams ActiveProcParams; //add by K2
 	TArray<FIngredientStack> BranchCollectedIngredients;
 	float ExitBufferEndTime = 0.f;
 	float BranchEnterBufferEndTime = 0.f;
@@ -210,6 +239,8 @@ protected:
 	void FinishNight(const FNightResult& Result);
 	void EnsureBaseCourse();
 	void SpawnStoneActor(int32 Index);
+	void SpawnBridgeActor(int32 BridgeIndex); //add by K2
+	void ClearSpawnedActors(); //add by K2
 	void TryOpenBeat(int32 BeatIndex);
 	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginAdvanceToStone(int32 StoneIndex);
@@ -227,6 +258,11 @@ protected:
 	float ComputeStoneFadeOpacity(int32 StoneIndex, const FVector& AnchorWS, float AnchorTrackDist) const;
 	FNightRouteRuleRow ResolveRouteRule(ENightRouteId RouteId) const;
 	FVector GetTrackLocation(float Distance) const;
+	FVector GetStoneWorldLocation(int32 StoneIndex) const; //add by K2
+	FRotator GetStoneWorldRotation(int32 StoneIndex) const; //add by K2
+	UStaticMesh* ResolveBridgeMesh(int32 MeshVariant) const; //add by K2
+	UStaticMesh* ResolveFoeMesh(EFoeId FoeId) const; //add by K2
+	void ApplyHeroArtMesh(); //add by K2
 	INightFeelBridge* GetFeel() const;
 	bool ShouldRunKeySwaps() const;
 	bool TryBeginPendingKeySwap();

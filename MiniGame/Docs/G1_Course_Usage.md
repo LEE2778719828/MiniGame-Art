@@ -9,6 +9,7 @@
 1. 玩家站在**石头1**：前方是空档 → 按 **Q 跳** → 落到石头2  
 2. 站在**石头2**：前方石头3带怪 → 按 **E 砍** → 冲到石头3，胶囊体消失  
 3. 不按键则角色/镜头/石头都不推进  
+4. **错键不推进**：该跳按了砍 / 该砍按了跳 → 只扣灶魂，窗口保持，必须按对键才前进
 
 | 概念 | 含义 |
 |---|---|
@@ -59,4 +60,5 @@
 - 本文件 + `Docs/R2_Gameplay_Plan.md` Phase G1  
 - G2 岔口 / A/B：`Docs/G2_Course_Usage.md`  
 - G3 C / 换键：`Docs/G3_Course_Usage.md`  
+- G3.5 程序化桥轨 / HTML：`Docs/G3_5_ProcCourse_Plan.md`、`Docs/NightProcParams_Schema.md`
 - Cursor 规则：`.cursor/rules/blade-heart-stone-chain.mdc`

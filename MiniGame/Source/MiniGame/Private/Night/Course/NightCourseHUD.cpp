@@ -163,5 +163,18 @@ void ANightCourseHUD::DrawHUD()
 		PromptText.Scale = FVector2D(1.8f, 1.8f);
 		Canvas->DrawItem(PromptText);
 	}
+
+#pragma region K2 moonyfli
+	if (Director && Director->IsAwaitingInput() && !bFork)
+	{
+		FCanvasTextItem Hint(
+			FVector2D(W * 0.18f, H * 0.2f),
+			FText::FromString(TEXT("WRONG KEY = NO ADVANCE")),
+			GEngine->GetLargeFont(),
+			FLinearColor(1.f, 0.55f, 0.2f, 0.85f));
+		Hint.Scale = FVector2D(1.0f, 1.0f);
+		Canvas->DrawItem(Hint);
+	}
+#pragma endregion K2 moonyfli
 }
 #pragma endregion K2 moonyfli

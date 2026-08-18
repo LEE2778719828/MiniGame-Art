@@ -118,4 +118,28 @@ static FAutoConsoleCommandWithWorld GNightCourseForceKeySwapCmd(
 			}
 		}
 	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GNightCourseImportParamsCmd(
+	TEXT("Night.Course.ImportParams"),
+	TEXT("Night.Course.ImportParams <jsonPath> then restart course with proc params"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Usage: Night.Course.ImportParams <path.json>"));
+			return;
+		}
+		if (ANightCourseHost* Host = FindFirstCourseHost(World))
+		{
+			if (Host->Director && Host->Director->ImportProcParamsFromJsonFile(Args[0]))
+			{
+				Host->ProcParamsAsset = Host->Director->ProcParamsAsset;
+				if (Host->Director->IsRunning())
+				{
+					Host->Director->DebugForceFinish(false);
+				}
+				Host->StartCourse();
+			}
+		}
+	}));
 #pragma endregion K2 moonyfli

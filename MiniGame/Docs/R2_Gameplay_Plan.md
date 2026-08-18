@@ -118,6 +118,18 @@ Content 根：`/Game/Night/Course/`
 **完成标准：** L2 推荐 C 路径可演示完整换键；与 R1 联调 Feel remap。  
 用法：`Docs/G3_Course_Usage.md`  
 
+### Phase G3.5 — 桥段程序化 + HTML 设计器（插入；先于 G4）✅ 已落地
+
+- [x] WrongButton 不推进、不消耗拍子（跳/砍语义正确）
+- [x] `FNightProcCourseParams` + `UNightTrackGenerator`（Seed、Yaw0.1°、岔路区间、换键频率）
+- [x] 石 WorldPose + `ANightBridgeSegmentActor` 桥板拼接
+- [x] 美术 SoftRef：Bridge/Hero/Foe（分类后的 `ArtSubmit/` → `/Game/Night/Course/Art/**`）
+- [x] `UNightProcParamsAsset` JSON 导入；`Night.Course.ImportParams`
+- [x] `Tools/NightCourseDesigner.html` 俯视预览 / 导出
+
+**完成标准：** 同 Seed 可复现；HTML 导出 JSON 可被 UE 导入。
+文档：`Docs/G3_5_ProcCourse_Plan.md`、`Docs/NightProcParams_Schema.md`
+
 ### Phase G4 — 五怪五料 + 优势池（2–3 天）
 
 - [ ] M01–M05 白模差异（色/缩放）+ 掉落 ID  
