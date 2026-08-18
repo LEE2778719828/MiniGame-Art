@@ -14,7 +14,8 @@ ANightBridgeSegmentActor::ANightBridgeSegmentActor()
 
 	BridgeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BridgeMesh"));
 	BridgeMesh->SetupAttachment(ArtRoot);
-	BridgeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BridgeMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	BridgeMesh->SetCollisionProfileName(TEXT("BlockAll"));
 	BridgeMesh->SetRelativeLocation(FVector(0.f, 0.f, 8.f));
 	// The imported bridge's long axis is local Y; rotate it onto course forward.
 	BridgeMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));

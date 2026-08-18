@@ -30,13 +30,13 @@
 
 namespace DayBoardPresentationPrivate
 {
-	const FName LingGuId(TEXT("LingGu"));
-	const FName YinShanJunId(TEXT("YinShanJun"));
-	const FName ChiYanJiaoId(TEXT("ChiYanJiao"));
-	const FName YueLinYuId(TEXT("YueLinYu"));
-	const FName XuanYuQinId(TEXT("XuanYuQin"));
-	const FName NpcALingId(TEXT("ALing"));
-	const FName NpcSangPoId(TEXT("SangPo"));
+	const FName DayLingGuId(TEXT("LingGu"));
+	const FName DayYinShanJunId(TEXT("YinShanJun"));
+	const FName DayChiYanJiaoId(TEXT("ChiYanJiao"));
+	const FName DayYueLinYuId(TEXT("YueLinYu"));
+	const FName DayXuanYuQinId(TEXT("XuanYuQin"));
+	const FName DayNpcALingId(TEXT("ALing"));
+	const FName DayNpcSangPoId(TEXT("SangPo"));
 
 	UStaticMesh* LoadBasicShape(const TCHAR* Path)
 	{
@@ -45,11 +45,11 @@ namespace DayBoardPresentationPrivate
 
 	FLinearColor IngredientColor(const FName IngredientId)
 	{
-		if (IngredientId == LingGuId) return FLinearColor(0.98f, 0.14f, 0.28f);
-		if (IngredientId == YinShanJunId) return FLinearColor(0.10f, 0.78f, 0.64f);
-		if (IngredientId == ChiYanJiaoId) return FLinearColor(1.00f, 0.35f, 0.05f);
-		if (IngredientId == YueLinYuId) return FLinearColor(0.10f, 0.42f, 0.95f);
-		if (IngredientId == XuanYuQinId) return FLinearColor(0.72f, 0.18f, 0.90f);
+		if (IngredientId == DayLingGuId) return FLinearColor(0.98f, 0.14f, 0.28f);
+		if (IngredientId == DayYinShanJunId) return FLinearColor(0.10f, 0.78f, 0.64f);
+		if (IngredientId == DayChiYanJiaoId) return FLinearColor(1.00f, 0.35f, 0.05f);
+		if (IngredientId == DayYueLinYuId) return FLinearColor(0.10f, 0.42f, 0.95f);
+		if (IngredientId == DayXuanYuQinId) return FLinearColor(0.72f, 0.18f, 0.90f);
 		return FLinearColor::White;
 	}
 
@@ -68,11 +68,11 @@ namespace DayBoardPresentationPrivate
 				}
 			}
 		}
-		if (IngredientId == LingGuId) return TEXT("灵");
-		if (IngredientId == YinShanJunId) return TEXT("阴");
-		if (IngredientId == ChiYanJiaoId) return TEXT("赤");
-		if (IngredientId == YueLinYuId) return TEXT("月");
-		if (IngredientId == XuanYuQinId) return TEXT("玄");
+		if (IngredientId == DayLingGuId) return TEXT("灵");
+		if (IngredientId == DayYinShanJunId) return TEXT("阴");
+		if (IngredientId == DayChiYanJiaoId) return TEXT("赤");
+		if (IngredientId == DayYueLinYuId) return TEXT("月");
+		if (IngredientId == DayXuanYuQinId) return TEXT("玄");
 		return IngredientId.ToString().Left(1);
 	}
 
@@ -635,7 +635,7 @@ void ASDayBoardPresenter::BuildBins()
 	{
 		BinClass = Config->IngredientBinClass;
 	}
-	const TArray<FName> Ids = {LingGuId, YinShanJunId, ChiYanJiaoId, YueLinYuId, XuanYuQinId};
+	const TArray<FName> Ids = {DayLingGuId, DayYinShanJunId, DayChiYanJiaoId, DayYueLinYuId, DayXuanYuQinId};
 
 	for (int32 Index = 0; Index < Ids.Num(); ++Index)
 	{
@@ -1352,11 +1352,11 @@ void USDayHUD::Refresh()
 	{
 		InventoryText->SetText(FText::FromString(FString::Printf(
 			TEXT("库存  灵谷 %d｜阴山菌 %d｜赤焰椒 %d｜月鳞鱼 %d｜玄羽禽 %d"),
-			GameInstance->GetQuantity(LingGuId),
-			GameInstance->GetQuantity(YinShanJunId),
-			GameInstance->GetQuantity(ChiYanJiaoId),
-			GameInstance->GetQuantity(YueLinYuId),
-			GameInstance->GetQuantity(XuanYuQinId))));
+			GameInstance->GetQuantity(DayLingGuId),
+			GameInstance->GetQuantity(DayYinShanJunId),
+			GameInstance->GetQuantity(DayChiYanJiaoId),
+			GameInstance->GetQuantity(DayYueLinYuId),
+			GameInstance->GetQuantity(DayXuanYuQinId))));
 	}
 	if (OrderText)
 	{
@@ -1460,8 +1460,8 @@ void USDayHUD::DeliverNpc(const FName NpcId)
 	}
 }
 
-void USDayHUD::HandleALing() { DeliverNpc(NpcALingId); }
-void USDayHUD::HandleSangPo() { DeliverNpc(NpcSangPoId); }
+void USDayHUD::HandleALing() { DeliverNpc(DayNpcALingId); }
+void USDayHUD::HandleSangPo() { DeliverNpc(DayNpcSangPoId); }
 
 void USDayHUD::SpawnIngredient(const FName IngredientId)
 {
@@ -1471,11 +1471,11 @@ void USDayHUD::SpawnIngredient(const FName IngredientId)
 	}
 }
 
-void USDayHUD::HandleLingGu() { SpawnIngredient(LingGuId); }
-void USDayHUD::HandleYinShanJun() { SpawnIngredient(YinShanJunId); }
-void USDayHUD::HandleChiYanJiao() { SpawnIngredient(ChiYanJiaoId); }
-void USDayHUD::HandleYueLinYu() { SpawnIngredient(YueLinYuId); }
-void USDayHUD::HandleXuanYuQin() { SpawnIngredient(XuanYuQinId); }
+void USDayHUD::HandleLingGu() { SpawnIngredient(DayLingGuId); }
+void USDayHUD::HandleYinShanJun() { SpawnIngredient(DayYinShanJunId); }
+void USDayHUD::HandleChiYanJiao() { SpawnIngredient(DayChiYanJiaoId); }
+void USDayHUD::HandleYueLinYu() { SpawnIngredient(DayYueLinYuId); }
+void USDayHUD::HandleXuanYuQin() { SpawnIngredient(DayXuanYuQinId); }
 
 void USDayHUD::HandleFlowButton()
 {
@@ -1981,11 +1981,11 @@ void USDayCheatPanel::SetStock(const int32 Quantity)
 }
 
 void USDayCheatPanel::HandleClose() { SetPanelVisible(false); }
-void USDayCheatPanel::HandleSelectLingGu() { SetSelectedIngredient(LingGuId); }
-void USDayCheatPanel::HandleSelectYin() { SetSelectedIngredient(YinShanJunId); }
-void USDayCheatPanel::HandleSelectChi() { SetSelectedIngredient(ChiYanJiaoId); }
-void USDayCheatPanel::HandleSelectYue() { SetSelectedIngredient(YueLinYuId); }
-void USDayCheatPanel::HandleSelectXuan() { SetSelectedIngredient(XuanYuQinId); }
+void USDayCheatPanel::HandleSelectLingGu() { SetSelectedIngredient(DayLingGuId); }
+void USDayCheatPanel::HandleSelectYin() { SetSelectedIngredient(DayYinShanJunId); }
+void USDayCheatPanel::HandleSelectChi() { SetSelectedIngredient(DayChiYanJiaoId); }
+void USDayCheatPanel::HandleSelectYue() { SetSelectedIngredient(DayYueLinYuId); }
+void USDayCheatPanel::HandleSelectXuan() { SetSelectedIngredient(DayXuanYuQinId); }
 void USDayCheatPanel::HandleStockPlus1() { AdjustStock(1); }
 void USDayCheatPanel::HandleStockPlus10() { AdjustStock(10); }
 void USDayCheatPanel::HandleStockClear() { SetStock(0); }
