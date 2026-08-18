@@ -1,0 +1,55 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.16.0",
+	"FriendlyName": "NexusLink",
+	"Description": "MCP (Model Context Protocol) server for Unreal Engine — Editor / -server / Game; enable via Preferences or -EnableNexusMcp.",
+	"Category": "Developer Tools",
+	"CreatedBy": "byteyang",
+	"CreatedByURL": "https://github.com/bytepine",
+	"DocsURL": "https://github.com/bytepine/NexusLink/blob/master/README.en.md",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/bytepine/NexusLink/issues",
+	"EngineVersion": "5.8",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "NexusLink",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"TargetConfigurationDenyList": [
+				"Shipping"
+			],
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			]
+		},
+		{
+			"Name": "NexusLinkTests",
+			"Type": "DeveloperTool",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "WebSocketNetworking",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayAbilities",
+			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		}
+	]
+}

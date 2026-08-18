@@ -159,27 +159,15 @@ void ANightCourseHost::StartCourse()
 			Director->Config = NewObject<UNightG1CourseConfig>(this, TEXT("RuntimeG1Config"));
 			Config = Director->Config;
 		}
-		if (ProcParamsAsset)
-		{
-			Director->ProcParamsAsset = ProcParamsAsset; //add by K2
-		}
-		FNightBootstrap Boot = Bootstrap;
-		if (bApplyLevelTableOnStart && Config)
-		{
-			Config->ApplyLevelDefaultsToBootstrap(Boot);
-		}
-		Director->StartNight(Boot);
+		Director->StartNight(Bootstrap);
 	}
 }
 
 void ANightCourseHost::HandleFinished(const FNightResult& Result)
 {
 	LastResult = Result;
-	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d route=%d drops=%d soul=%.1f"),
-		Result.bSuccess ? 1 : 0,
-		static_cast<int32>(Result.RouteTaken),
-		Result.Ingredients.Num(),
-		Result.SoulLeft);
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d drops=%d soul=%.1f"),
+		Result.bSuccess ? 1 : 0, Result.Ingredients.Num(), Result.SoulLeft);
 	for (const FIngredientStack& Stack : Result.Ingredients)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("  Drop Id=%d Count=%d"), static_cast<int32>(Stack.Id), Stack.Count);
@@ -202,27 +190,11 @@ void ANightCourseHost::DebugDumpState() const
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Running=%d Phase=%d Elapsed=%.2f ActiveNode=%d Route=%d Scheme=%d Ingredients=%d Fork=%d Swap=%d Awaiting=%d Seed=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Running=%d Phase=%d Elapsed=%.2f ActiveNode=%d Ingredients=%d"),
 		Director->IsRunning() ? 1 : 0,
 		static_cast<int32>(Director->GetPhase()),
 		Director->GetElapsedSeconds(),
 		Director->GetActiveNodeIndex(),
-		static_cast<int32>(Director->GetRouteTaken()),
-		static_cast<int32>(Director->GetActiveControlScheme()),
-		Director->GetCollectedIngredients().Num(),
-		Director->IsForkChoiceActive() ? 1 : 0,
-		(Director->IsKeySwapWarningActive() || Director->IsKeySwapSafetyActive()) ? 1 : 0,
-		Director->IsAwaitingInput() ? 1 : 0,
-		Director->GetResolvedProcSeed()); //add by K2
-
-#pragma region K2 moonyfli
-	if (Director->GetActiveNodeIndex() != INDEX_NONE
-		&& Director->GetBeatSpecs().IsValidIndex(Director->GetActiveNodeIndex()))
-	{
-		const FNightBeatSpec& Beat = Director->GetBeatSpecs()[Director->GetActiveNodeIndex()];
-		UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] RequiredAction=%d FromStone=%d ToStone=%d"),
-			static_cast<int32>(Beat.Action), Beat.FromStoneIndex, Beat.ToStoneIndex);
-	}
-#pragma endregion K2 moonyfli
+		Director->GetCollectedIngredients().Num());
 }
 #pragma endregion K2 moonyfli

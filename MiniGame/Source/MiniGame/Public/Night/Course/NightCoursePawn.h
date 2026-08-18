@@ -8,7 +8,6 @@
 class UCameraComponent;
 class USpringArmComponent;
 class UNightFeelStubComponent;
-class UNightCourseDirector;
 class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
@@ -40,10 +39,6 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Feel")
 	TObjectPtr<UNightFeelStubComponent> FeelStub;
-
-	/** Wired by CourseHost/Director; used to route Q/E during ForkChoice. */
-	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	TObjectPtr<UNightCourseDirector> CourseDirector;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Feel|Input")
 	TObjectPtr<UInputMappingContext> MappingContext;

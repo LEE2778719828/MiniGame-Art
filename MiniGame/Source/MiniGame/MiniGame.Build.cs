@@ -14,9 +14,7 @@ public class MiniGame : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
-			"UMG",
-			"Json",
-			"JsonUtilities"
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
