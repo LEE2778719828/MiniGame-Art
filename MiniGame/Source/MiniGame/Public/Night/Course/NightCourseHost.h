@@ -12,6 +12,7 @@ class ANightCoursePawn;
 class UStaticMesh;
 class UMaterialInterface;
 class UExponentialHeightFogComponent;
+class UInstancedStaticMeshComponent;
 
 #pragma region K2 moonyfli
 /**
@@ -43,14 +44,24 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Presentation")
 	TObjectPtr<UExponentialHeightFogComponent> NightFog;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewBridgeA;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewBridgeB;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartCourse();
+
+	UFUNCTION(CallInEditor, Category = "Night|Editor Preview")
+	void RebuildEditorPreview();
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugDumpState() const;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	UFUNCTION()
 	void HandleFinished(const FNightResult& Result);

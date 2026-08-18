@@ -6,8 +6,10 @@
 #include "Night/Course/NightCourseTypes.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
+#include "Night/Course/NightTrackGenerator.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/GameplayStatics.h"
@@ -79,6 +81,13 @@ ANightCourseHost::ANightCourseHost()
 	NightFog->DirectionalInscatteringExponent = 4.f;
 	NightFog->DirectionalInscatteringStartDistance = 0.f;
 
+	PreviewBridgeA = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewBridgeA"));
+	PreviewBridgeA->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewBridgeA->SetHiddenInGame(true);
+	PreviewBridgeB = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewBridgeB"));
+	PreviewBridgeB->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PreviewBridgeB->SetHiddenInGame(true);
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
 	{
@@ -88,6 +97,63 @@ ANightCourseHost::ANightCourseHost()
 	if (UnlitMat.Succeeded())
 	{
 		StageMaterial = UnlitMat.Object;
+	}
+}
+
+void ANightCourseHost::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	if (GetWorld() && !GetWorld()->IsGameWorld())
+	{
+		RebuildEditorPreview();
+	}
+}
+
+void ANightCourseHost::RebuildEditorPreview()
+{
+	if (!PreviewBridgeA || !PreviewBridgeB)
+	{
+		return;
+	}
+
+	PreviewBridgeA->ClearInstances();
+	PreviewBridgeB->ClearInstances();
+	if (!Config || !Config->ProcParams.bEnableProcGenerator)
+	{
+		return;
+	}
+
+	UStaticMesh* MeshA = Config->BridgeMeshA.LoadSynchronous();
+	UStaticMesh* MeshB = Config->BridgeMeshB.LoadSynchronous();
+	if (!MeshA)
+	{
+		MeshA = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1"));
+	}
+	if (!MeshB)
+	{
+		MeshB = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
+	}
+	PreviewBridgeA->SetStaticMesh(MeshA);
+	PreviewBridgeB->SetStaticMesh(MeshB);
+
+	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
+		Config->ProcParams,
+		Config->TrackOrigin,
+		Config->TrackForward);
+	for (const FNightBridgeSpec& Bridge : Preview.Bridges)
+	{
+		const FTransform InstanceTransform(
+			FRotator(0.f, Bridge.YawDeg - 90.f, 0.f),
+			Bridge.WorldLocation + FVector(0.f, 0.f, 8.f),
+			FVector(12.f, FMath::Max(0.05f, Bridge.LengthScale), 4.f));
+		if (Bridge.MeshVariant == 0 && MeshA)
+		{
+			PreviewBridgeA->AddInstance(InstanceTransform);
+		}
+		else if (MeshB)
+		{
+			PreviewBridgeB->AddInstance(InstanceTransform);
+		}
 	}
 }
 

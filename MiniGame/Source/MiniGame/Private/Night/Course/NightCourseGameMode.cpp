@@ -34,6 +34,20 @@ void ANightCourseGameMode::BeginPlay()
 		}
 	}
 
+	for (TActorIterator<ANightCourseHost> It(World); It; ++It)
+	{
+		ANightCourseHost* ExistingHost = *It;
+		if (ExistingHost)
+		{
+			if (!ExistingHost->Config)
+			{
+				ExistingHost->Config = CourseConfig;
+			}
+			SpawnedHost = ExistingHost;
+			return;
+		}
+	}
+
 	UClass* ClassToSpawn = HostClass ? HostClass.Get() : ANightCourseHost::StaticClass();
 	ANightCourseHost* Host = World->SpawnActorDeferred<ANightCourseHost>(
 		ClassToSpawn,
