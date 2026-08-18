@@ -16,7 +16,9 @@ ANightBridgeSegmentActor::ANightBridgeSegmentActor()
 	BridgeMesh->SetupAttachment(ArtRoot);
 	BridgeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BridgeMesh->SetRelativeLocation(FVector(0.f, 0.f, 8.f));
-	BridgeMesh->SetRelativeScale3D(FVector(1.f, 0.65f, 0.12f));
+	// The imported bridge's long axis is local Y; rotate it onto course forward.
+	BridgeMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	BridgeMesh->SetRelativeScale3D(FVector::OneVector);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
@@ -52,10 +54,10 @@ void ANightBridgeSegmentActor::SetupBridge(const FNightBridgeSpec& InSpec, UStat
 	SetActorLocationAndRotation(Spec.WorldLocation, FRotator(0.f, Spec.YawDeg, 0.f));
 	if (BridgeMesh)
 	{
-		const FVector Base = BridgeMesh->GetRelativeScale3D();
+		const FVector Base = FVector::OneVector;
 		BridgeMesh->SetRelativeScale3D(FVector(
-			FMath::Max(0.05f, Spec.LengthScale) * Base.X,
-			Base.Y,
+			Base.X,
+			FMath::Max(0.05f, Spec.LengthScale) * Base.Y,
 			Base.Z));
 	}
 }

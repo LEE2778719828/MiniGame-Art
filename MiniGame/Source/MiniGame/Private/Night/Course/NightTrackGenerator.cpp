@@ -106,7 +106,9 @@ void UNightTrackGenerator::AppendStep(
 	Bridge.ToStoneIndex = ToIndex;
 	Bridge.WorldLocation = (FromPos + InOutPos) * 0.5f;
 	Bridge.YawDeg = InOutYawDeg;
-	Bridge.LengthScale = FMath::Max(0.2f, Gap / 200.f);
+	// muban bridge source length is about 12 cm; bridges are the actual
+	// footholds, so scale their local Y axis to span the generated gap.
+	Bridge.LengthScale = FMath::Max(0.2f, Gap / 12.f);
 	Bridge.MeshVariant = (Rng.FRand() < Params.BridgeMeshAWeight) ? 0 : 1;
 	Out.Bridges.Add(Bridge);
 }
@@ -248,7 +250,7 @@ void UNightTrackGenerator::AppendBranch(
 		Bridge.ToStoneIndex = BranchStartIndex;
 		Bridge.WorldLocation = (Last.WorldLocation + Pos) * 0.5f;
 		Bridge.YawDeg = YawDeg;
-		Bridge.LengthScale = FMath::Max(0.2f, Params.BranchEntryGapCm / 200.f);
+		Bridge.LengthScale = FMath::Max(0.2f, Params.BranchEntryGapCm / 12.f);
 		Bridge.MeshVariant = 0;
 		InOutCourse.Bridges.Add(Bridge);
 	}

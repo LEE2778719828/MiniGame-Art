@@ -8,6 +8,7 @@
 
 class UNightG1CourseConfig;
 class ANightCourseStoneActor;
+class ANightBridgeSegmentActor;
 class ANightCoursePawn;
 class INightFeelBridge;
 
@@ -123,7 +124,13 @@ protected:
 	TArray<FNightBeatSpec> BeatSpecs;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<FNightBridgeSpec> BridgeSpecs;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<TObjectPtr<ANightCourseStoneActor>> SpawnedStones;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
+	TArray<TObjectPtr<ANightBridgeSegmentActor>> SpawnedBridges;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
@@ -146,6 +153,7 @@ protected:
 	void FinishNight(const FNightResult& Result);
 	void EnsureCourse();
 	void SpawnStoneActor(int32 Index);
+	void SpawnBridgeActor(int32 Index);
 	void TryOpenBeat(int32 BeatIndex);
 	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginAdvanceToStone(int32 StoneIndex);
@@ -154,6 +162,7 @@ protected:
 	void SyncPawnToProgress(bool bInstant);
 	void AddDrop(EIngredientId Id, int32 Count);
 	FVector GetTrackLocation(float Distance) const;
+	FVector GetStoneWorldLocation(int32 StoneIndex) const;
 	INightFeelBridge* GetFeel() const;
 };
 #pragma endregion K2 moonyfli

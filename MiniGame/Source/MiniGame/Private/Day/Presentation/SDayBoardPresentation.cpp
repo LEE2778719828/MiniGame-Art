@@ -28,7 +28,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
-namespace
+namespace DayBoardPresentationPrivate
 {
 	const FName LingGuId(TEXT("LingGu"));
 	const FName YinShanJunId(TEXT("YinShanJun"));
@@ -142,6 +142,8 @@ namespace
 		Mesh->SetVectorParameterValueOnMaterials(TEXT("Tint"), Rgb);
 	}
 }
+
+using namespace DayBoardPresentationPrivate;
 
 #pragma region K2 moonyfli
 

@@ -45,6 +45,15 @@ struct FNightStoneSpec
 	float TrackDistance = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	bool bUseWorldPose = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	FVector WorldLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	float YawDeg = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	bool bHasFoe = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
@@ -74,6 +83,111 @@ struct FNightBeatSpec
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	ENightNodeKind Action = ENightNodeKind::Hazard;
+};
+
+USTRUCT(BlueprintType)
+struct FNightBridgeSpec
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	int32 FromStoneIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	int32 ToStoneIndex = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	int32 MeshVariant = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	FVector WorldLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	float YawDeg = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
+	float LengthScale = 1.f;
+};
+
+USTRUCT(BlueprintType)
+struct FNightProcCourseParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 TotalNodes = 12;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float MaxYawDeltaDeg = 8.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 ForkNodeMin = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 ForkNodeMax = 8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	ENightForkEnv ForkEnv = ENightForkEnv::ClearAB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	ENightForkPair ForkPair = ENightForkPair::AB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 Seed = 1001;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 KeySwapEveryNNodes = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 KeySwapCountPerPeriod = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float JumpGapCm = 420.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float KillGapCm = 160.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float BranchEntryGapCm = 280.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float AttackBias = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 MaxSameActionStreak = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 BranchANodes = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 BranchBNodes = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	int32 BranchCNodes = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float ForkTimeoutSeconds = 2.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float KeySwapWarningSeconds = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float KeySwapSafetySeconds = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float BridgeMeshAWeight = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float StartingSoul = 100.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	float WrongPenalty = 7.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	bool bEnableProcGenerator = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Proc")
+	bool bPreviewOnly = false;
 };
 
 /** @deprecated Prefer FNightStoneSpec / FNightBeatSpec. Kept for transitional Feel payloads. */
