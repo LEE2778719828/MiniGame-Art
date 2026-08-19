@@ -10,6 +10,7 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Night/Course/NightTrackGenerator.h"
@@ -117,6 +118,72 @@ namespace NightCourseStage_Private
 		return Actor;
 	}
 
+	static AActor* SpawnEditorPreviewVisual(
+		UWorld* World,
+		UClass* VisualClass,
+		const FTransform& Transform,
+		const FNightStoneSpec* StoneSpec,
+		int32 StoneIndex,
+		const FNightBridgeSpec* BridgeSpec,
+		const FString& Label)
+	{
+		if (!World || !VisualClass)
+		{
+			return nullptr;
+		}
+
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AActor* Actor = World->SpawnActor<AActor>(VisualClass, Transform, Params);
+		if (!Actor)
+		{
+			return nullptr;
+		}
+
+#if WITH_EDITOR
+		Actor->SetActorLabel(Label);
+#endif
+		Actor->SetActorTransform(Transform);
+		Actor->SetActorEnableCollision(false);
+
+		if (StoneSpec)
+		{
+			if (ANightCourseStoneActor* StoneActor = Cast<ANightCourseStoneActor>(Actor))
+			{
+				StoneActor->SetupStone(StoneIndex, *StoneSpec);
+			}
+			else if (ANightBridgeSegmentActor* BridgeActor = Cast<ANightBridgeSegmentActor>(Actor))
+			{
+				FNightBridgeSpec PadSpec;
+				PadSpec.FromStoneIndex = StoneIndex;
+				PadSpec.ToStoneIndex = StoneIndex;
+				PadSpec.WorldLocation = Transform.GetLocation();
+				PadSpec.YawDeg = Transform.GetRotation().Rotator().Yaw;
+				PadSpec.LengthScale = 1.f;
+				BridgeActor->SetupBridge(
+					PadSpec,
+					nullptr,
+					nullptr,
+					FVector::ZeroVector,
+					1.f);
+			}
+		}
+		else if (BridgeSpec)
+		{
+			if (ANightBridgeSegmentActor* BridgeActor = Cast<ANightBridgeSegmentActor>(Actor))
+			{
+				BridgeActor->SetupBridge(
+					*BridgeSpec,
+					nullptr,
+					nullptr,
+					FVector::ZeroVector,
+					1.f);
+			}
+		}
+		return Actor;
+	}
+
 	static AStaticMeshActor* SpawnBox(
 		UWorld* World,
 		UStaticMesh* Cube,
@@ -192,11 +259,27 @@ ANightCourseHost::ANightCourseHost()
 	PreviewKeyLight->LightColor = FColor(180, 210, 255);
 	PreviewKeyLight->SetHiddenInGame(false);
 
+	LayoutBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("LayoutBounds"));
+	LayoutBounds->SetBoxExtent(FVector(10000.f, 10000.f, 3000.f));
+	LayoutBounds->ShapeColor = FColor(80, 180, 255, 45);
+	LayoutBounds->SetBoxExtent(LayoutBoundsExtent);
+	LayoutBounds->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	LayoutBounds->SetHiddenInGame(true);
+	LayoutBounds->SetVisibility(true);
+
 }
 
 void ANightCourseHost::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	if (LayoutBounds)
+	{
+		LayoutBounds->SetBoxExtent(LayoutBoundsExtent);
+	}
+	if (Director)
+	{
+		Director->SetLayoutBoundsComponent(LayoutBounds, bEnforceLayoutBounds);
+	}
 	if (GetWorld() && !GetWorld()->IsGameWorld())
 	{
 		RebuildEditorPreview();
@@ -234,17 +317,85 @@ void ANightCourseHost::RebuildEditorPreview()
 		}
 	}
 	EditorPreviewMeshActors.Reset();
-	if (!Config || !Config->ProcParams.bEnableProcGenerator)
+	if (!Config || !Director)
 	{
 		return;
 	}
 
-	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
-		Config->ProcParams,
-		Config->TrackOrigin,
-		Config->TrackForward);
+	Director->Config = Config;
+	Director->SetLayoutBoundsComponent(LayoutBounds, bEnforceLayoutBounds);
+	FNightGeneratedCourse Preview;
+	TArray<FNightAtomVisualBinding> VisualBindings;
+	if (!Director->BuildCourseForPreview(
+		Preview.Stones,
+		Preview.Beats,
+		Preview.Bridges,
+		VisualBindings))
+	{
+		return;
+	}
+
+	TSet<int32> ArtBridgeIndexes;
+	TSet<int32> ArtStoneIndexes;
+	for (const FNightAtomVisualBinding& Binding : VisualBindings)
+	{
+		if (Binding.bIsBridge)
+		{
+			ArtBridgeIndexes.Add(Binding.BridgeIndex);
+		}
+		else
+		{
+			ArtStoneIndexes.Add(Binding.StoneIndex);
+		}
+
+		TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
+		if (!Binding.bIsBridge
+			&& Preview.Stones.IsValidIndex(Binding.StoneIndex)
+			&& Preview.Stones[Binding.StoneIndex].bHasFoe
+			&& Binding.AlternateVisualPrefabClass)
+		{
+			VisualClass = Binding.AlternateVisualPrefabClass;
+		}
+		AActor* Actor = nullptr;
+		if (Binding.bIsBridge && Preview.Bridges.IsValidIndex(Binding.BridgeIndex))
+		{
+			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+				GetWorld(),
+				VisualClass.Get(),
+				Binding.LocalTransform,
+				nullptr,
+				INDEX_NONE,
+				&Preview.Bridges[Binding.BridgeIndex],
+				FString::Printf(
+					TEXT("EditorPreview_Atom_%s_Bridge_%d"),
+					Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
+					Binding.BridgeIndex));
+		}
+		else if (!Binding.bIsBridge && Preview.Stones.IsValidIndex(Binding.StoneIndex))
+		{
+			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+				GetWorld(),
+				VisualClass.Get(),
+				Binding.LocalTransform,
+				&Preview.Stones[Binding.StoneIndex],
+				Binding.StoneIndex,
+				nullptr,
+				FString::Printf(
+					TEXT("EditorPreview_Atom_%s_Landing_%d"),
+					Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
+					Binding.StoneIndex));
+		}
+		if (Actor)
+		{
+			EditorPreviewMeshActors.Add(Actor);
+		}
+	}
 	for (const FNightBridgeSpec& Bridge : Preview.Bridges)
 	{
+		if (ArtBridgeIndexes.Contains(&Bridge - Preview.Bridges.GetData()))
+		{
+			continue;
+		}
 		UClass* BridgeClass =
 			Bridge.MeshVariant == 0 ? Config->BridgeClassA.Get() : Config->BridgeClassB.Get();
 		if (!BridgeClass)
@@ -267,6 +418,10 @@ void ANightCourseHost::RebuildEditorPreview()
 	for (int32 StoneIndex = 0; StoneIndex < Preview.Stones.Num(); ++StoneIndex)
 	{
 		const FNightStoneSpec& Stone = Preview.Stones[StoneIndex];
+		if (ArtStoneIndexes.Contains(StoneIndex))
+		{
+			continue;
+		}
 		if (!Stone.bHasFoe)
 		{
 			continue;
@@ -304,6 +459,10 @@ void ANightCourseHost::RebuildEditorPreview()
 void ANightCourseHost::BeginPlay()
 {
 	Super::BeginPlay();
+	if (LayoutBounds)
+	{
+		LayoutBounds->SetBoxExtent(LayoutBoundsExtent);
+	}
 
 	if (PreviewKeyLight)
 	{
@@ -327,6 +486,7 @@ void ANightCourseHost::BeginPlay()
 	if (Director)
 	{
 		Director->Config = Config;
+		Director->SetLayoutBoundsComponent(LayoutBounds, bEnforceLayoutBounds);
 		Director->OnFinished.AddDynamic(this, &ANightCourseHost::HandleFinished);
 	}
 

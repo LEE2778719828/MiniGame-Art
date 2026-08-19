@@ -10,6 +10,8 @@
 class ANightBridgeSegmentActor;
 class ANightCoursePawn;
 class ANightCourseStoneActor;
+class UNightCourseAtomRouteData;
+class UNightCourseRuleData;
 
 #pragma region K2 moonyfli
 /**
@@ -102,6 +104,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Classes")
 	TSubclassOf<ANightCourseStoneActor> FoeClassM05;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Route")
+	TObjectPtr<UNightCourseAtomRouteData> AtomRoute;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Route")
+	TObjectPtr<UNightCourseRuleData> CourseRuleData;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
