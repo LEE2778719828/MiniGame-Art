@@ -650,6 +650,16 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 	}
 	if (!VisualClass)
 	{
+		const bool bEnemyVisualRequired =
+			!Binding.bIsBridge
+			&& StoneSpecs.IsValidIndex(Binding.StoneIndex)
+			&& StoneSpecs[Binding.StoneIndex].bHasFoe;
+		if (!Binding.bIsBridge && !bEnemyVisualRequired)
+		{
+			// Normal LandingPoint character previews are editor-only. The
+			// runtime only spawns the alternate enemy prefab for Kill beats.
+			return;
+		}
 		UE_LOG(
 			LogTemp,
 			Error,
@@ -657,6 +667,17 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 			BindingIndex,
 			Binding.StoneIndex,
 			Binding.BridgeIndex);
+		return;
+	}
+
+	if (!Binding.bIsBridge
+		&& VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse] LandingPoint visual binding %d resolves to a Bridge BP; bridge visuals must use BridgeVisualComponent."),
+			BindingIndex);
 		return;
 	}
 

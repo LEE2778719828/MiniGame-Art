@@ -10,6 +10,7 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
+#include "CoreGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogNightCourseAtom, Log, All);
 
@@ -36,21 +37,6 @@ namespace NightCourseAtom_Private
 			if (ANightCourseStoneActor* StoneActor = Cast<ANightCourseStoneActor>(PreviewActor))
 			{
 				StoneActor->SetupStone(StoneIndex, *StoneSpec);
-			}
-			else if (ANightBridgeSegmentActor* BridgeActor = Cast<ANightBridgeSegmentActor>(PreviewActor))
-			{
-				FNightBridgeSpec PadSpec;
-				PadSpec.FromStoneIndex = StoneIndex;
-				PadSpec.ToStoneIndex = StoneIndex;
-				PadSpec.WorldLocation = PreviewActor->GetActorLocation();
-				PadSpec.YawDeg = PreviewActor->GetActorRotation().Yaw;
-				PadSpec.LengthScale = 1.f;
-				BridgeActor->SetupBridge(
-					PadSpec,
-					nullptr,
-					nullptr,
-					FVector::ZeroVector,
-					1.f);
 			}
 		}
 		else if (BridgeSpec)
@@ -203,7 +189,9 @@ void ANightCourseAtomActor::OnConstruction(const FTransform& Transform)
 	ArtBoundsPreview->SetVisibility(!GetWorld() || !GetWorld()->IsGameWorld());
 
 #if WITH_EDITOR
-	if (GetWorld() && !GetWorld()->IsGameWorld())
+	if (GetWorld()
+		&& !GetWorld()->IsGameWorld()
+		&& !GIsReconstructingBlueprintInstances)
 	{
 		RebuildAtomVisualPreview();
 	}
@@ -278,7 +266,30 @@ bool ANightCourseAtomActor::ValidateAtom(FString& OutError) const
 		if (!LandingPoints[PointIndex]->LandingVisualPrefab)
 		{
 			OutError = FString::Printf(
-				TEXT("LandingPoint %d is missing LandingVisualPrefab."),
+				TEXT("LandingPoint %d is missing Character Preview Prefab."),
+				PointIndex);
+			return false;
+		}
+		if (LandingPoints[PointIndex]->LandingVisualPrefab->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+		{
+			OutError = FString::Printf(
+				TEXT("LandingPoint %d uses a Bridge BP as Character Preview Prefab; configure a character BP instead."),
+				PointIndex);
+			return false;
+		}
+		if (LandingPoints[PointIndex]->bPreviewAsFoe
+			&& !LandingPoints[PointIndex]->FoeVisualPrefab)
+		{
+			OutError = FString::Printf(
+				TEXT("LandingPoint %d is set to Preview As Enemy but has no Enemy Visual Prefab."),
+				PointIndex);
+			return false;
+		}
+		if (LandingPoints[PointIndex]->FoeVisualPrefab
+			&& LandingPoints[PointIndex]->FoeVisualPrefab->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+		{
+			OutError = FString::Printf(
+				TEXT("LandingPoint %d uses a Bridge BP as Enemy Visual Prefab; configure an enemy BP instead."),
 				PointIndex);
 			return false;
 		}
@@ -435,7 +446,10 @@ void ANightCourseAtomActor::GetLocalArtSpecs(
 		FNightAtomVisualBinding Binding;
 		Binding.StoneIndex = PointIndex;
 		Binding.LocalTransform = Point->GetRelativeTransform();
-		Binding.VisualPrefabClass = Point->LandingVisualPrefab;
+		// LandingPoint character previews are editor-only. Runtime landing
+		// geometry is owned by BridgeVisual components; only the alternate
+		// enemy prefab participates in course spawning.
+		Binding.VisualPrefabClass = nullptr;
 		Binding.AlternateVisualPrefabClass = Point->FoeVisualPrefab;
 		OutVisualBindings.Add(Binding);
 	}
@@ -558,6 +572,13 @@ void ANightCourseAtomActor::GetLocalArtBounds(FVector& OutMin, FVector& OutMax) 
 
 void ANightCourseAtomActor::RebuildAtomVisualPreview()
 {
+#if WITH_EDITOR
+	if (GIsReconstructingBlueprintInstances)
+	{
+		return;
+	}
+#endif
+
 	for (UChildActorComponent* PreviewComponent : PreviewVisualComponents)
 	{
 		if (PreviewComponent)
@@ -597,6 +618,16 @@ void ANightCourseAtomActor::RebuildAtomVisualPreview()
 				LogNightCourseAtom,
 				Warning,
 				TEXT("Atom '%s' preview '%s' has no visual prefab class."),
+				*GetName(),
+				*Name);
+			return;
+		}
+		if (StoneSpec && VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+		{
+			UE_LOG(
+				LogNightCourseAtom,
+				Error,
+				TEXT("Atom '%s' preview '%s' uses a Bridge BP on a LandingPoint; configure a character BP."),
 				*GetName(),
 				*Name);
 			return;
