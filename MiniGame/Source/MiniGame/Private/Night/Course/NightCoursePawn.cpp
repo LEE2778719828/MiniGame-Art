@@ -273,7 +273,9 @@ void ANightCoursePawn::ResolveHeroArt()
 	if (HeroSkelMesh)
 	{
 		HeroSkelMesh->SetRelativeRotation(HeroMeshRotation);
-		HeroSkelMesh->SetRelativeLocation(HeroMeshOffset);
+		// 位置要带上 R2 的枢轴补偿，否则 ApplyConfiguredHeroVisual 刚算好的偏移会被这里抹掉
+		HeroSkelMesh->SetRelativeLocation(
+			HeroMeshOffset + HeroPivotOffsetCm * FMath::Max(0.01f, HeroScale));
 		HeroSkelMesh->SetVisibility(bSkeletalReady);
 		HeroSkelMesh->SetHiddenInGame(!bSkeletalReady);
 	}
