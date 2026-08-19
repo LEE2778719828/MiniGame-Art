@@ -3,6 +3,7 @@
 #include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "Components/StaticMeshComponent.h"
@@ -17,7 +18,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
-#include "UObject/ConstructorHelpers.h"
 
 #pragma region K2 moonyfli
 namespace NightCourseStage_Private
@@ -192,16 +192,6 @@ ANightCourseHost::ANightCourseHost()
 	PreviewKeyLight->LightColor = FColor(180, 210, 255);
 	PreviewKeyLight->SetHiddenInGame(false);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		StageCubeMesh = CubeMesh.Object;
-	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (UnlitMat.Succeeded())
-	{
-		StageMaterial = UnlitMat.Object;
-	}
 }
 
 void ANightCourseHost::OnConstruction(const FTransform& Transform)
@@ -249,139 +239,29 @@ void ANightCourseHost::RebuildEditorPreview()
 		return;
 	}
 
-	UStaticMesh* MeshA = Config->BridgeMeshA.LoadSynchronous();
-	UStaticMesh* MeshB = Config->BridgeMeshB.LoadSynchronous();
-	if (!MeshA)
-	{
-		MeshA = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1"));
-	}
-	if (!MeshB)
-	{
-		MeshB = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
-	}
-	PreviewBridgeA->SetStaticMesh(MeshA);
-	PreviewBridgeB->SetStaticMesh(MeshB);
-
-	UStaticMesh* FoeM01 = Config->FoeMeshM01.LoadSynchronous();
-	UStaticMesh* FoeM02 = Config->FoeMeshM02.LoadSynchronous();
-	UStaticMesh* FoeM03 = Config->FoeMeshM03.LoadSynchronous();
-	UStaticMesh* FoeM04 = Config->FoeMeshM04.LoadSynchronous();
-	UStaticMesh* FoeM05 = Config->FoeMeshM05.LoadSynchronous();
-	if (!FoeM01)
-	{
-		FoeM01 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/fish.fish"));
-	}
-	if (!FoeM02)
-	{
-		FoeM02 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box1.box1"));
-	}
-	if (!FoeM03)
-	{
-		FoeM03 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box2.box2"));
-	}
-	if (!FoeM04)
-	{
-		FoeM04 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/box3.box3"));
-	}
-	if (!FoeM05)
-	{
-		FoeM05 = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Night/Course/Art/Foe/cantingguai.cantingguai"));
-	}
-	PreviewFoeM01->SetStaticMesh(FoeM01);
-	PreviewFoeM02->SetStaticMesh(FoeM02);
-	PreviewFoeM03->SetStaticMesh(FoeM03);
-	PreviewFoeM04->SetStaticMesh(FoeM04);
-	PreviewFoeM05->SetStaticMesh(FoeM05);
-
-	UMaterialInterface* DefaultPreviewMat = EditorPreviewMaterial.LoadSynchronous();
-	if (!DefaultPreviewMat)
-	{
-		DefaultPreviewMat = LoadObject<UMaterialInterface>(
-			nullptr,
-			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	}
-	if (DefaultPreviewMat)
-	{
-		const auto ApplyPreviewMaterial = [](
-			UInstancedStaticMeshComponent* Component,
-			UMaterialInterface* Material,
-			const FLinearColor& Color)
-		{
-			if (!Component || !Component->GetStaticMesh() || !Material)
-			{
-				return;
-			}
-			for (int32 MaterialIndex = 0; MaterialIndex < Component->GetNumMaterials(); ++MaterialIndex)
-			{
-				Component->SetMaterial(MaterialIndex, Material);
-			}
-		};
-		const auto ResolveMaterial = [this, DefaultPreviewMat](const TSoftObjectPtr<UMaterialInterface>& ConfigMaterial)
-		{
-			UMaterialInterface* Material = ConfigMaterial.LoadSynchronous();
-			return Material ? Material : DefaultPreviewMat;
-		};
-		ApplyPreviewMaterial(PreviewBridgeA, ResolveMaterial(Config->BridgeMaterialA), EditorPreviewBridgeColorA);
-		ApplyPreviewMaterial(PreviewBridgeB, ResolveMaterial(Config->BridgeMaterialB), EditorPreviewBridgeColorB);
-		ApplyPreviewMaterial(PreviewFoeM01, ResolveMaterial(Config->FoeMaterialM01), EditorPreviewFoeColorM01);
-		ApplyPreviewMaterial(PreviewFoeM02, ResolveMaterial(Config->FoeMaterialM02), EditorPreviewFoeColorM02);
-		ApplyPreviewMaterial(PreviewFoeM03, ResolveMaterial(Config->FoeMaterialM03), EditorPreviewFoeColorM03);
-		ApplyPreviewMaterial(PreviewFoeM04, ResolveMaterial(Config->FoeMaterialM04), EditorPreviewFoeColorM03);
-		ApplyPreviewMaterial(PreviewFoeM05, ResolveMaterial(Config->FoeMaterialM05), EditorPreviewFoeColorM03);
-	}
-
 	const FNightGeneratedCourse Preview = UNightTrackGenerator::GenerateBaseOnly(
 		Config->ProcParams,
 		Config->TrackOrigin,
 		Config->TrackForward);
 	for (const FNightBridgeSpec& Bridge : Preview.Bridges)
 	{
-		UInstancedStaticMeshComponent* BridgePreview =
-			Bridge.MeshVariant == 0 ? PreviewBridgeA : PreviewBridgeB;
-		if (UStaticMesh* PreviewMesh = BridgePreview
-			? BridgePreview->GetStaticMesh()
-			: nullptr)
+		UClass* BridgeClass =
+			Bridge.MeshVariant == 0 ? Config->BridgeClassA.Get() : Config->BridgeClassB.Get();
+		if (!BridgeClass)
 		{
-			UMaterialInterface* PreviewMaterial =
-				BridgePreview->GetMaterial(0);
-			UClass* BridgeClass = ANightBridgeSegmentActor::StaticClass();
-			UClass* ConfiguredClass =
-				Bridge.MeshVariant == 0
-					? Config->BridgeClassA.Get()
-					: Config->BridgeClassB.Get();
-			if (ConfiguredClass)
-			{
-				BridgeClass = ConfiguredClass;
-			}
-			else
-			{
-				BridgeClass = LoadClass<ANightBridgeSegmentActor>(
-					nullptr,
-					Bridge.MeshVariant == 0
-						? TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeA.BP_NightBridgeA_C")
-						: TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeB.BP_NightBridgeB_C"));
-				if (!BridgeClass)
-				{
-					BridgeClass = ANightBridgeSegmentActor::StaticClass();
-				}
-			}
-			const FString Label = FString::Printf(
-				TEXT("EditorPreview_Bridge_%s_%d"),
-				Bridge.MeshVariant == 0 ? TEXT("A") : TEXT("B"),
-				Bridge.FromStoneIndex);
-			if (ANightBridgeSegmentActor* Actor =
-				NightCourseStage_Private::SpawnEditorPreviewBridge(
-				GetWorld(),
-				BridgeClass,
-				Bridge,
-				PreviewMesh,
-				PreviewMaterial,
-				Config->BridgePivotOffsetCm,
-				Config->BridgeGlobalScale,
-				Label))
-			{
-				EditorPreviewMeshActors.Add(Actor);
-			}
+			// Missing bridge BP intentionally produces an empty actor.
+			BridgeClass = ANightBridgeSegmentActor::StaticClass();
+		}
+		const FString Label = FString::Printf(
+			TEXT("EditorPreview_Bridge_%s_%d"),
+			Bridge.MeshVariant == 0 ? TEXT("A") : TEXT("B"),
+			Bridge.FromStoneIndex);
+		if (ANightBridgeSegmentActor* Actor =
+			NightCourseStage_Private::SpawnEditorPreviewBridge(
+			GetWorld(), BridgeClass, Bridge, nullptr, nullptr,
+			FVector::ZeroVector, 1.f, Label))
+		{
+			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
 	for (int32 StoneIndex = 0; StoneIndex < Preview.Stones.Num(); ++StoneIndex)
@@ -391,50 +271,32 @@ void ANightCourseHost::RebuildEditorPreview()
 		{
 			continue;
 		}
-		UInstancedStaticMeshComponent* FoePreview = PreviewFoeM01;
-		if (Stone.FoeId == EFoeId::M02)
+		UClass* FoeClass = nullptr;
+		switch (Stone.FoeId)
 		{
-			FoePreview = PreviewFoeM02;
+		case EFoeId::M01: FoeClass = Config->FoeClassM01.Get(); break;
+		case EFoeId::M02: FoeClass = Config->FoeClassM02.Get(); break;
+		case EFoeId::M03: FoeClass = Config->FoeClassM03.Get(); break;
+		case EFoeId::M04: FoeClass = Config->FoeClassM04.Get(); break;
+		case EFoeId::M05: FoeClass = Config->FoeClassM05.Get(); break;
+		default: break;
 		}
-		else if (Stone.FoeId == EFoeId::M03)
+		if (!FoeClass)
 		{
-			FoePreview = PreviewFoeM03;
+			// Missing foe BP intentionally produces an empty actor.
+			FoeClass = ANightCourseStoneActor::StaticClass();
 		}
-		else if (Stone.FoeId == EFoeId::M04)
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (ANightCourseStoneActor* Actor = GetWorld()->SpawnActor<ANightCourseStoneActor>(
+			FoeClass, Stone.WorldLocation, FRotator(0.f, Stone.YawDeg, 0.f), Params))
 		{
-			FoePreview = PreviewFoeM04;
-		}
-		else if (Stone.FoeId == EFoeId::M05)
-		{
-			FoePreview = PreviewFoeM05;
-		}
-		if (FoePreview && FoePreview->GetStaticMesh())
-		{
-			const float FoeScale = Config->FoeScale;
-			const FRotator FoeRotation(0.f, Stone.YawDeg + Config->FoeYawOffsetDeg, 0.f);
-			const FVector MeshCenter = FoePreview->GetStaticMesh()->GetBounds().Origin;
-			const FVector CenterOffset = FoeRotation.RotateVector(
-				(Config->FoePivotOffsetCm - MeshCenter) * FoeScale);
-			const FTransform FoeTransform(
-				FoeRotation,
-				Stone.WorldLocation + FVector(0.f, 0.f, Config->FoeHeightOffsetCm) + CenterOffset,
-				FVector(
-					FoeScale,
-					FoeScale,
-					FoeScale));
-			const FString Label = FString::Printf(
+			Actor->SetupStone(StoneIndex, Stone);
+			Actor->SetActorLabel(FString::Printf(
 				TEXT("EditorPreview_Foe_M%02d_%d"),
-				static_cast<int32>(Stone.FoeId),
-				StoneIndex);
-			if (AStaticMeshActor* Actor = NightCourseStage_Private::SpawnEditorPreviewMesh(
-				GetWorld(),
-				FoePreview->GetStaticMesh(),
-				FoePreview->GetMaterial(0),
-				FoeTransform,
-				Label))
-			{
-				EditorPreviewMeshActors.Add(Actor);
-			}
+				static_cast<int32>(Stone.FoeId), StoneIndex));
+			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
 }
@@ -498,17 +360,19 @@ void ANightCourseHost::WireFeelFromPlayer()
 
 	if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(Pawn))
 	{
-		if (Config)
+		if (Config && Config->HeroClass)
 		{
-			UMaterialInterface* HeroMaterial = Config->HeroMaterial.LoadSynchronous();
-			if (!HeroMaterial)
+			const ANightCoursePawn* HeroDefaults =
+				Config->HeroClass->GetDefaultObject<ANightCoursePawn>();
+			if (HeroDefaults)
 			{
-				HeroMaterial = Config->DefaultArtMaterial.LoadSynchronous();
+				CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
+				CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
+				CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
+				CoursePawn->HeroScale = HeroDefaults->HeroScale;
+				CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
+				CoursePawn->ApplyConfiguredHeroVisual();
 			}
-			CoursePawn->ApplyHeroMesh(
-				Config->HeroMesh.LoadSynchronous(),
-				HeroMaterial,
-				Config->HeroPivotOffsetCm);
 		}
 		if (Director)
 		{

@@ -1,8 +1,6 @@
 #include "Night/Course/NightBridgeSegmentActor.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -18,32 +16,10 @@ ANightBridgeSegmentActor::ANightBridgeSegmentActor()
 	BridgeMesh->SetupAttachment(ArtRoot);
 	BridgeMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	BridgeMesh->SetCollisionProfileName(TEXT("BlockAll"));
-	BridgeMesh->SetRelativeLocation(FVector(0.f, 0.f, 8.f));
-	// The imported bridge's long axis is local Y; rotate it onto course forward.
-	BridgeMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	BridgeMesh->SetRelativeLocation(FVector::ZeroVector);
+	BridgeMesh->SetRelativeRotation(FRotator::ZeroRotator);
 	BridgeMesh->SetRelativeScale3D(FVector::OneVector);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		BridgeMesh->SetStaticMesh(CubeMesh.Object);
-	}
-
-	// Prefer imported muban when present; falls back to cube above.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> MubanA(
-		TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1"));
-	if (MubanA.Succeeded())
-	{
-		BridgeMesh->SetStaticMesh(MubanA.Object);
-		BridgeMesh->SetRelativeScale3D(FVector(1.f, 1.f, 1.f));
-	}
-
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> NightMat(
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (NightMat.Succeeded())
-	{
-		BridgeMesh->SetMaterial(0, NightMat.Object);
-	}
 }
 
 void ANightBridgeSegmentActor::ApplyMesh(UStaticMesh* Mesh)
@@ -62,6 +38,9 @@ void ANightBridgeSegmentActor::SetupBridge(
 	float GlobalScaleMultiplier)
 {
 	Spec = InSpec;
+	const FTransform BpComponentTransform =
+		BridgeMesh ? BridgeMesh->GetRelativeTransform() : FTransform::Identity;
+	const bool bHadBpMesh = BridgeMesh && BridgeMesh->GetStaticMesh();
 	if (BridgeMeshOverride)
 	{
 		ApplyMesh(BridgeMeshOverride);
@@ -73,31 +52,47 @@ void ANightBridgeSegmentActor::SetupBridge(
 	SetActorLocationAndRotation(Spec.WorldLocation, FRotator(0.f, Spec.YawDeg, 0.f));
 	if (BridgeMesh)
 	{
-		const float GlobalScale = FMath::Max(
-			0.01f,
-			FMath::Max(0.01f, GlobalScaleMultiplier)
-			* FMath::Max(0.01f, BridgeScaleMultiplier));
-		const FVector MeshScale(GlobalScale);
-		BridgeMesh->SetRelativeScale3D(MeshScale);
+		const bool bExplicitTransform =
+			!FMath::IsNearlyEqual(GlobalScaleMultiplier, 1.f) ||
+			!FMath::IsNearlyEqual(BridgeScaleMultiplier, 1.f) ||
+			!BridgePivotOffsetCm.IsNearlyZero() ||
+			!PivotOffsetCm.IsNearlyZero();
+		const bool bHasConfiguredMesh =
+			bHadBpMesh || BridgeMeshOverride || MeshOverride;
+		if (bExplicitTransform || !bHasConfiguredMesh)
+		{
+			const float GlobalScale = FMath::Max(
+				0.01f,
+				FMath::Max(0.01f, GlobalScaleMultiplier)
+				* FMath::Max(0.01f, BridgeScaleMultiplier));
+			const FVector MeshScale(GlobalScale);
+			BridgeMesh->SetRelativeScale3D(MeshScale);
+			const FVector MeshCenter = BridgeMesh->GetStaticMesh()
+				? BridgeMesh->GetStaticMesh()->GetBounds().Origin
+				: FVector::ZeroVector;
+			BridgeMesh->SetRelativeLocation(
+				BridgeMesh->GetRelativeRotation().RotateVector(
+					(BridgePivotOffsetCm + PivotOffsetCm - MeshCenter) * MeshScale));
+		}
+		else
+		{
+			// The BP component transform is the source of truth.
+			BridgeMesh->SetRelativeTransform(BpComponentTransform);
+		}
 		BridgeMesh->SetCollisionEnabled(
 			bBridgeCollisionEnabled
 				? ECollisionEnabled::QueryAndPhysics
 				: ECollisionEnabled::NoCollision);
-		const FVector MeshCenter = BridgeMesh->GetStaticMesh()
-			? BridgeMesh->GetStaticMesh()->GetBounds().Origin
-			: FVector::ZeroVector;
-		BridgeMesh->SetRelativeLocation(
-			BridgeMesh->GetRelativeRotation().RotateVector(
-				(BridgePivotOffsetCm + PivotOffsetCm - MeshCenter) * MeshScale));
 		UMaterialInterface* EffectiveMaterial =
 			BridgeMaterialOverride.Get() ? BridgeMaterialOverride.Get() : MaterialOverride;
-		if (EffectiveMaterial)
+		if (BridgeMesh->GetStaticMesh() && EffectiveMaterial)
 		{
 			for (int32 MaterialIndex = 0; MaterialIndex < BridgeMesh->GetNumMaterials(); ++MaterialIndex)
 			{
 				BridgeMesh->SetMaterial(MaterialIndex, EffectiveMaterial);
 			}
 		}
+		if (BridgeMesh->GetStaticMesh() && BridgeMesh->GetMaterial(0))
 		if (UMaterialInstanceDynamic* MID =
 			BridgeMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, BridgeMesh->GetMaterial(0)))
 		{

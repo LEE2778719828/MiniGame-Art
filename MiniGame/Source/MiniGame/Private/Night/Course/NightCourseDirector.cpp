@@ -135,6 +135,45 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	UClass* SpawnClass = (Config && Config->StoneClass)
 		? Config->StoneClass.Get()
 		: ANightCourseStoneActor::StaticClass();
+	bool bFoeClassSelected = false;
+	if (StoneSpecs[Index].bHasFoe && Config)
+	{
+		switch (StoneSpecs[Index].FoeId)
+		{
+		case EFoeId::M01:
+			if (Config->FoeClassM01) { SpawnClass = Config->FoeClassM01.Get(); bFoeClassSelected = true; }
+			break;
+		case EFoeId::M02:
+			if (Config->FoeClassM02) { SpawnClass = Config->FoeClassM02.Get(); bFoeClassSelected = true; }
+			break;
+		case EFoeId::M03:
+			if (Config->FoeClassM03) { SpawnClass = Config->FoeClassM03.Get(); bFoeClassSelected = true; }
+			break;
+		case EFoeId::M04:
+			if (Config->FoeClassM04) { SpawnClass = Config->FoeClassM04.Get(); bFoeClassSelected = true; }
+			break;
+		case EFoeId::M05:
+			if (Config->FoeClassM05) { SpawnClass = Config->FoeClassM05.Get(); bFoeClassSelected = true; }
+			break;
+		default: break;
+		}
+	}
+	if (StoneSpecs[Index].bHasFoe && !bFoeClassSelected)
+	{
+		// Never substitute another visual class. A missing BP intentionally
+		// spawns an empty native actor so the configuration error is visible.
+		SpawnClass = ANightCourseStoneActor::StaticClass();
+	}
+	if (StoneSpecs[Index].bHasFoe)
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("[NightCourse] Foe M%02d stone=%d class=%s"),
+			static_cast<int32>(StoneSpecs[Index].FoeId),
+			Index,
+			*GetNameSafe(SpawnClass));
+	}
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -150,64 +189,6 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	}
 
 	Stone->SetupStone(Index, StoneSpecs[Index]);
-	if (StoneSpecs[Index].bHasFoe)
-	{
-		UStaticMesh* FoeMesh = nullptr;
-		UMaterialInterface* FoeMaterial = nullptr;
-		if (Config)
-		{
-			switch (StoneSpecs[Index].FoeId)
-			{
-			case EFoeId::M01:
-				FoeMesh = Config->FoeMeshM01.LoadSynchronous();
-				FoeMaterial = Config->FoeMaterialM01.LoadSynchronous();
-				break;
-			case EFoeId::M02:
-				FoeMesh = Config->FoeMeshM02.LoadSynchronous();
-				FoeMaterial = Config->FoeMaterialM02.LoadSynchronous();
-				break;
-			case EFoeId::M03:
-				FoeMesh = Config->FoeMeshM03.LoadSynchronous();
-				FoeMaterial = Config->FoeMaterialM03.LoadSynchronous();
-				break;
-			case EFoeId::M04:
-				FoeMesh = Config->FoeMeshM04.LoadSynchronous();
-				FoeMaterial = Config->FoeMaterialM04.LoadSynchronous();
-				break;
-			case EFoeId::M05:
-				FoeMesh = Config->FoeMeshM05.LoadSynchronous();
-				FoeMaterial = Config->FoeMaterialM05.LoadSynchronous();
-				break;
-			default: break;
-			}
-			if (!FoeMaterial)
-			{
-				FoeMaterial = Config->DefaultArtMaterial.LoadSynchronous();
-			}
-		}
-		if (!FoeMesh)
-		{
-			const TCHAR* FoePath = TEXT("/Game/Night/Course/Art/Foe/fish.fish");
-			switch (StoneSpecs[Index].FoeId)
-			{
-			case EFoeId::M02: FoePath = TEXT("/Game/Night/Course/Art/Foe/box1.box1"); break;
-			case EFoeId::M03: FoePath = TEXT("/Game/Night/Course/Art/Foe/box2.box2"); break;
-			case EFoeId::M04: FoePath = TEXT("/Game/Night/Course/Art/Foe/box3.box3"); break;
-			case EFoeId::M05: FoePath = TEXT("/Game/Night/Course/Art/Foe/cantingguai.cantingguai"); break;
-			default: break;
-			}
-			FoeMesh = LoadObject<UStaticMesh>(nullptr, FoePath);
-		}
-		Stone->ApplyFoeMesh(FoeMesh, FoeMaterial);
-		if (Config)
-		{
-			Stone->SetFoeArtTransform(
-				Config->FoeYawOffsetDeg,
-				Config->FoeScale,
-				Config->FoeHeightOffsetCm,
-				Config->FoePivotOffsetCm);
-		}
-	}
 	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
 	SpawnedStones[Index] = Stone;
 }
@@ -233,18 +214,6 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 		{
 			BridgeClass = ConfiguredClass;
 		}
-		else
-		{
-			BridgeClass = LoadClass<ANightBridgeSegmentActor>(
-				nullptr,
-				BridgeSpecs[Index].MeshVariant == 0
-					? TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeA.BP_NightBridgeA_C")
-					: TEXT("/Game/Night/Course/Blueprints/BP_NightBridgeB.BP_NightBridgeB_C"));
-			if (!BridgeClass)
-			{
-				BridgeClass = ANightBridgeSegmentActor::StaticClass();
-			}
-		}
 	}
 	ANightBridgeSegmentActor* Bridge = World->SpawnActor<ANightBridgeSegmentActor>(
 		BridgeClass,
@@ -256,38 +225,12 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 		return;
 	}
 
-	UStaticMesh* Mesh = nullptr;
-	if (Config)
-	{
-		const TSoftObjectPtr<UStaticMesh>& SoftMesh =
-			BridgeSpecs[Index].MeshVariant == 0 ? Config->BridgeMeshA : Config->BridgeMeshB;
-		Mesh = SoftMesh.LoadSynchronous();
-	}
-	if (!Mesh)
-	{
-		Mesh = LoadObject<UStaticMesh>(
-			nullptr,
-			BridgeSpecs[Index].MeshVariant == 0
-				? TEXT("/Game/Night/Course/Art/Bridge/muban1.muban1")
-				: TEXT("/Game/Night/Course/Art/Bridge/muban2.muban2"));
-	}
-	UMaterialInterface* BridgeMaterial = nullptr;
-	if (Config)
-	{
-		BridgeMaterial = BridgeSpecs[Index].MeshVariant == 0
-			? Config->BridgeMaterialA.LoadSynchronous()
-			: Config->BridgeMaterialB.LoadSynchronous();
-		if (!BridgeMaterial)
-		{
-			BridgeMaterial = Config->DefaultArtMaterial.LoadSynchronous();
-		}
-	}
 	Bridge->SetupBridge(
 		BridgeSpecs[Index],
-		Mesh,
-		BridgeMaterial,
-		Config ? Config->BridgePivotOffsetCm : FVector::ZeroVector,
-		Config ? Config->BridgeGlobalScale : 1.f);
+		nullptr,
+		nullptr,
+		FVector::ZeroVector,
+		1.f);
 	SpawnedBridges[Index] = Bridge;
 }
 

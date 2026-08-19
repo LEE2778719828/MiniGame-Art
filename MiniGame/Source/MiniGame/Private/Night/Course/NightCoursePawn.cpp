@@ -39,24 +39,6 @@ ANightCoursePawn::ANightCoursePawn()
 	HeadMesh->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
 	HeadMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.35f));
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> HeroMesh(
-		TEXT("/Game/Night/Course/Art/Hero/kat.kat"));
-	if (CubeMesh.Succeeded())
-	{
-		BodyMesh->SetStaticMesh(CubeMesh.Object);
-		HeadMesh->SetStaticMesh(CubeMesh.Object);
-	}
-	if (HeroMesh.Succeeded())
-	{
-		bUsingHeroArt = true;
-		BodyMesh->SetStaticMesh(HeroMesh.Object);
-		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
-		BodyMesh->SetRelativeScale3D(FVector(0.75f));
-		HeadMesh->SetVisibility(false);
-		HeadMesh->SetHiddenInGame(true);
-	}
-
 	// add by K2 (R1): 骨骼主角。单节点播放，不挂 AnimBP —— 这一层只要「按一下动一下」，
 	// 状态机等 idle 动画到位后再说。
 	HeroSkelMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeroSkelMesh"));
@@ -65,19 +47,15 @@ ANightCoursePawn::ANightCoursePawn()
 	HeroSkelMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	HeroSkelMesh->SetRelativeRotation(HeroMeshRotation);
 	HeroSkelMesh->SetRelativeLocation(HeroMeshOffset);
+	HeroSkelMesh->SetVisibility(false);
+	HeroSkelMesh->SetHiddenInGame(true);
 
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> HeroSkeletal(
-		TEXT("/Game/Night/Character/SK_Hero.SK_Hero"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpClip(
 		TEXT("/Game/Night/Character/Anims/Jump_noknife2.Jump_noknife2"));
 	// 常速斩击尚未到位（源文件的动画取不出来，见任务清单第 22 轮），暂用 200ms 的快版顶替
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> AttackClip(
 		TEXT("/Game/Night/Character/Anims/Slash_fast_Armature_Armature_kan.Slash_fast_Armature_Armature_kan"));
 
-	if (HeroSkeletal.Succeeded())
-	{
-		HeroSkelMesh->SetSkeletalMeshAsset(HeroSkeletal.Object);
-	}
 	if (JumpClip.Succeeded())
 	{
 		JumpAnim = JumpClip.Object;
@@ -85,16 +63,6 @@ ANightCoursePawn::ANightCoursePawn()
 	if (AttackClip.Succeeded())
 	{
 		AttackAnim = AttackClip.Object;
-	}
-
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (UnlitMat.Succeeded())
-	{
-		BodyMesh->SetMaterial(0, UnlitMat.Object);
-		if (!bUsingHeroArt)
-		{
-			HeadMesh->SetMaterial(0, UnlitMat.Object);
-		}
 	}
 
 	// 刃心-style: behind + above the runner, looking forward down the lane.
@@ -162,8 +130,7 @@ void ANightCoursePawn::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyRearElevatedCamera();
-	ApplyAvatarColor(FLinearColor(0.95f, 0.9f, 0.75f));
-	ResolveHeroArt();
+	ApplyConfiguredHeroVisual();
 	if (UWorld* World = GetWorld())
 	{
 		if (APlayerController* PC = World->GetFirstPlayerController())
@@ -206,31 +173,77 @@ void ANightCoursePawn::ApplyHeroMesh(
 
 	bUsingHeroArt = true;
 	BodyMesh->SetStaticMesh(Mesh);
+	BodyMesh->SetVisibility(true);
+	BodyMesh->SetHiddenInGame(false);
 	const FVector MeshCenter = Mesh->GetBounds().Origin;
-	const float HeroScale = 0.75f;
+	const float AppliedHeroScale = FMath::Max(0.01f, HeroScale);
 	BodyMesh->SetRelativeLocation(
-		FVector(0.f, 0.f, 90.f) + (PivotOffsetCm - MeshCenter) * HeroScale);
-	BodyMesh->SetRelativeScale3D(FVector(HeroScale));
+		FVector(0.f, 0.f, 90.f) + (PivotOffsetCm - MeshCenter) * AppliedHeroScale);
+	BodyMesh->SetRelativeScale3D(FVector(AppliedHeroScale));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
-	UMaterialInterface* HeroMat = MaterialOverride;
-	if (!HeroMat)
-	{
-		HeroMat = LoadObject<UMaterialInterface>(
-			nullptr,
-			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	}
-	if (HeroMat)
+	if (MaterialOverride)
 	{
 		for (int32 MaterialIndex = 0; MaterialIndex < BodyMesh->GetNumMaterials(); ++MaterialIndex)
 		{
-			BodyMesh->SetMaterial(MaterialIndex, HeroMat);
+			BodyMesh->SetMaterial(MaterialIndex, MaterialOverride);
 		}
 		if (UMaterialInstanceDynamic* MID =
-			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, HeroMat))
+			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, MaterialOverride))
 		{
 			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
 		}
+	}
+}
+
+void ANightCoursePawn::ApplyConfiguredHeroVisual()
+{
+	if (HeroSkeletalMesh && HeroSkelMesh)
+	{
+		HeroSkelMesh->SetSkeletalMeshAsset(HeroSkeletalMesh);
+		HeroSkelMesh->SetRelativeLocation(
+			HeroMeshOffset + HeroPivotOffsetCm * HeroScale);
+		HeroSkelMesh->SetRelativeScale3D(FVector(FMath::Max(0.01f, HeroScale)));
+		if (HeroMaterial)
+		{
+			HeroSkelMesh->SetMaterial(0, HeroMaterial);
+		}
+		bPreferSkeletalHero = true;
+		ResolveHeroArt();
+		return;
+	}
+
+	if (HeroStaticMesh)
+	{
+		bPreferSkeletalHero = false;
+		ApplyHeroMesh(HeroStaticMesh, HeroMaterial, HeroPivotOffsetCm);
+		if (HeroSkelMesh)
+		{
+			HeroSkelMesh->SetVisibility(false);
+			HeroSkelMesh->SetHiddenInGame(true);
+		}
+		return;
+	}
+
+	// Missing BP visual configuration intentionally produces an empty pawn.
+	bUsingHeroArt = false;
+	if (BodyMesh)
+	{
+		BodyMesh->SetStaticMesh(nullptr);
+		BodyMesh->SetVisibility(false);
+		BodyMesh->SetHiddenInGame(true);
+	}
+	if (HeadMesh)
+	{
+		HeadMesh->SetStaticMesh(nullptr);
+		HeadMesh->SetVisibility(false);
+		HeadMesh->SetHiddenInGame(true);
+	}
+	if (HeroSkelMesh)
+	{
+		HeroSkelMesh->SetSkeletalMeshAsset(nullptr);
+		HeroSkelMesh->SetVisibility(false);
+		HeroSkelMesh->SetHiddenInGame(true);
 	}
 }
 
