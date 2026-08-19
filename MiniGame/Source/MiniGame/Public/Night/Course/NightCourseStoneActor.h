@@ -9,6 +9,8 @@ class UStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
 class UMaterialInterface;
+class USkeletalMesh;
+class USkeletalMeshComponent;
 
 #pragma region K2 moonyfli
 /** Single stepping stone; optional foe capsule on top (刃心 whitebox). */
@@ -28,6 +30,18 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> FoeCapsule;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TObjectPtr<USkeletalMeshComponent> FoeSkeletalMeshComponent;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<USkeletalMesh> FoeSkeletalMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<UStaticMesh> FoeStaticMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<UMaterialInterface> FoeMaterial;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	FNightStoneSpec Spec;
@@ -58,6 +72,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride = nullptr);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ApplyConfiguredFoeVisual();
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ShowFoe();
@@ -96,5 +113,6 @@ protected:
 
 	float FoeClearAlpha = 1.f;
 	bool bClearingFoe = false;
+	FVector FoeRuntimeBaseScale = FVector::OneVector;
 };
 #pragma endregion K2 moonyfli

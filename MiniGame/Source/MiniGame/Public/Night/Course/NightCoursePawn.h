@@ -12,6 +12,7 @@ class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
 class UStaticMesh;
+class USkeletalMesh;
 class UMaterialInterface;
 class USkeletalMeshComponent;
 class UAnimSequence;
@@ -34,6 +35,21 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> HeadMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<USkeletalMesh> HeroSkeletalMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<UStaticMesh> HeroStaticMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	TObjectPtr<UMaterialInterface> HeroMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	float HeroScale = 0.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
+	FVector HeroPivotOffsetCm = FVector::ZeroVector;
 
 	// add by K2 (R1) —— 骨骼网格主角
 	/**
@@ -145,6 +161,9 @@ public:
 		UStaticMesh* Mesh,
 		UMaterialInterface* MaterialOverride = nullptr,
 		const FVector& PivotOffsetCm = FVector::ZeroVector);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ApplyConfiguredHeroVisual();
 
 	/**
 	 * add by K2 (R1): 判定成功时播对应动作，bAttack=false 播跳跃。

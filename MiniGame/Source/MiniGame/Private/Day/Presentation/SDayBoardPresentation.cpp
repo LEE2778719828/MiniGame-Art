@@ -3,14 +3,18 @@
 #include "../../../SStandaloneSandbox.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Camera/CameraActor.h" //add by K2
 #include "Camera/CameraComponent.h"
+#include "EngineUtils.h" //add by K2
 #include "Components/Border.h"
+#include "Components/BillboardComponent.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/SafeZone.h"
 #include "Components/ScrollBox.h"
 #include "Components/SkyLightComponent.h"
@@ -23,7 +27,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WrapBox.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "TextureResource.h" //add by K2
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
@@ -42,6 +48,484 @@ namespace DayBoardPresentationPrivate
 	{
 		return LoadObject<UStaticMesh>(nullptr, Path);
 	}
+
+#pragma region K2 moonyfli
+	/**
+	 * Tag on the level CameraActor that frames the board. A tagged camera becomes the view
+	 * target verbatim, so framing is dialled in the editor viewport instead of recompiled.
+	 * Keep in sync with CAMERA_TAG in Tools/AddDayCompositionCamera.py.
+	 */
+	const FName DayLevelCameraTag(TEXT("SDayCamera"));
+	const FName DayArtEnvironmentTag(TEXT("SDay.Environment"));
+	const FName DayArtBoardTag(TEXT("SDay.Board"));
+	/** Plane that fills the camera frame, so the picture's edge is visible against the letterbox. */
+	const FName DayArtBackdropTag(TEXT("SDay.Backdrop"));
+	/** Dish plate row along the top of frame; customers belong behind it. */
+	const FName DayArtCustomerPlatesTag(TEXT("SDay.CustomerPlates"));
+	/** Marks a cell whose origin already sits at the bottom of an art well. */
+	const FName DayCellSeatedTag(TEXT("SDay.Cell.Seated"));
+
+	/** Shipping target is a 1440x3200 portrait phone panel. */
+	constexpr float DayPortraitAspectRatio = 1440.0f / 3200.0f;
+
+	AActor* FindActorWithTag(UWorld* World, const FName Tag)
+	{
+		if (!World || Tag.IsNone())
+		{
+			return nullptr;
+		}
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->ActorHasTag(Tag))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	void DisableDayArtCollision(UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->ActorHasTag(DayArtEnvironmentTag))
+			{
+				It->SetActorEnableCollision(false);
+			}
+		}
+	}
+
+	FName DayArtBinTag(const int32 Index)
+	{
+		return FName(*FString::Printf(TEXT("SDay.Bin.%d"), Index));
+	}
+
+	/**
+	 * Cell rows are authored in the pan's local space (see Tools/GeneratePanCellLayout.py),
+	 * so placing them is a composition with the live pan transform. Scale is dropped: the pan
+	 * is scaled up to fill the stall, but the cell proxies carry their own radius.
+	 */
+	FTransform DayArtCellToWorld(const FTransform& BoardTransform, const FTransform& CellLocal)
+	{
+		return FTransform(
+			BoardTransform.GetRotation() * CellLocal.GetRotation(),
+			BoardTransform.TransformPosition(CellLocal.GetLocation()),
+			FVector::OneVector);
+	}
+
+	/**
+	 * Intensity the key light needs once it points along the view axis instead of the oblique
+	 * whitebox angle. The project renders at a fixed exposure (r.DefaultFeature.AutoExposure is
+	 * off), so this is the frame's only brightness knob, and the restaurant meshes are still flat
+	 * grey placeholders: this is what lands them mid-frame instead of near white.
+	 */
+	constexpr float DayArtKeyLightIntensity = 0.7f;
+
+	/**
+	 * Restaurant art is already painted in warm wood tones, so the whitebox's warm key stacked a
+	 * second yellow cast on top of it. A near-neutral key lets the albedo carry the warmth.
+	 */
+	const FLinearColor DayArtKeyLightColor(1.0f, 0.985f, 0.965f);
+
+	/**
+	 * Key light shares the camera rotation so the composition is lit back-to-front along the
+	 * view axis. The pan is a panel tilted toward the camera, so this is also what makes its
+	 * face read as the brightest surface in frame.
+	 */
+	void AimKeyLightAlongCamera(UDirectionalLightComponent* KeyLight, const FRotator& CameraRotation)
+	{
+		if (KeyLight)
+		{
+			KeyLight->SetWorldRotation(CameraRotation);
+			KeyLight->SetIntensity(DayArtKeyLightIntensity);
+			KeyLight->SetLightColor(DayArtKeyLightColor);
+		}
+	}
+
+	ACameraActor* FindDayLevelCamera(UWorld* World)
+	{
+		if (!World)
+		{
+			return nullptr;
+		}
+
+		for (TActorIterator<ACameraActor> It(World); It; ++It)
+		{
+			if (It->ActorHasTag(DayLevelCameraTag))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Composition frame of the level camera: X is screen right, Y screen up, Z depth. */
+	struct FDayCameraFrame
+	{
+		FVector Origin = FVector::ZeroVector;
+		FVector Right = FVector::ZeroVector;
+		FVector Up = FVector::ZeroVector;
+		FVector Forward = FVector::ZeroVector;
+
+		FVector ToFrame(const FVector& World) const
+		{
+			const FVector Delta = World - Origin;
+			return FVector(Delta | Right, Delta | Up, Delta | Forward);
+		}
+
+		FVector ToWorld(const FVector& Frame) const
+		{
+			return Origin + Right * Frame.X + Up * Frame.Y + Forward * Frame.Z;
+		}
+	};
+
+	bool TryGetDayCameraFrame(UWorld* World, FDayCameraFrame& OutFrame)
+	{
+		ACameraActor* CameraActor = FindDayLevelCamera(World);
+		const UCameraComponent* CameraComponent = CameraActor ? CameraActor->GetCameraComponent() : nullptr;
+		if (!CameraComponent)
+		{
+			return false;
+		}
+
+		const FTransform CameraToWorld = CameraComponent->GetComponentTransform();
+		OutFrame.Origin = CameraToWorld.GetLocation();
+		OutFrame.Right = CameraToWorld.GetUnitAxis(EAxis::Y);
+		OutFrame.Up = CameraToWorld.GetUnitAxis(EAxis::Z);
+		OutFrame.Forward = CameraToWorld.GetUnitAxis(EAxis::X);
+		return true;
+	}
+
+	/** Clearance the backdrop keeps behind the furthest piece of dressing. */
+	constexpr float DayArtBackdropDepthMargin = 200.0f;
+
+	/** The engine plane mesh is 100 x 100 cm at scale 1. */
+	constexpr float DayArtBackdropPlaneSize = 100.0f;
+
+	/**
+	 * How wide the camera's frame is at a given distance along the view axis. Orthographic zoom
+	 * is distance-independent; a perspective camera widens with distance, and the project
+	 * constrains the horizontal FOV (ASPECT_RATIO_MAINTAIN_XFOV), so FieldOfView is horizontal.
+	 */
+	float DayCameraFrameWidthAtDepth(const UCameraComponent& Camera, const float Depth)
+	{
+		if (Camera.ProjectionMode == ECameraProjectionMode::Orthographic)
+		{
+			return Camera.OrthoWidth;
+		}
+		return 2.0f * Depth * FMath::Tan(FMath::DegreesToRadians(0.5f * Camera.FieldOfView));
+	}
+
+	/**
+	 * Refit the backdrop plane to the camera's frame. The restaurant art otherwise floats in a
+	 * void that is the same black as the letterbox around the portrait frame, so there is no
+	 * telling where the rendered picture ends; sizing the plane to the frame makes that edge the
+	 * boundary between backdrop and black. Solved at runtime so re-framing the camera in the
+	 * editor, or switching it between perspective and orthographic, cannot leave the plane lying
+	 * about where the edge is.
+	 */
+	void FitDayArtBackdrop(UWorld* World)
+	{
+		AActor* Backdrop = FindActorWithTag(World, DayArtBackdropTag);
+		const ACameraActor* CameraActor = FindDayLevelCamera(World);
+		const UCameraComponent* CameraComponent = CameraActor ? CameraActor->GetCameraComponent() : nullptr;
+		FDayCameraFrame Frame;
+		if (!Backdrop || !CameraComponent || !TryGetDayCameraFrame(World, Frame))
+		{
+			return;
+		}
+
+		const float AspectRatio = CameraComponent->AspectRatio;
+		if (AspectRatio <= 0.0f)
+		{
+			return;
+		}
+
+		float Depth = 0.0f;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (*It == Backdrop || !It->ActorHasTag(DayArtEnvironmentTag))
+			{
+				continue;
+			}
+			FVector Center = FVector::ZeroVector;
+			FVector Extent = FVector::ZeroVector;
+			It->GetActorBounds(false, Center, Extent);
+			Depth = FMath::Max(Depth, Frame.ToFrame(Center).Z + Extent.Size());
+		}
+		Depth += DayArtBackdropDepthMargin;
+
+		const float FrameWidth = DayCameraFrameWidthAtDepth(*CameraComponent, Depth);
+		if (FrameWidth <= 0.0f)
+		{
+			return;
+		}
+
+		// The plane's normal is local +Z and its surface spans local X and Y.
+		Backdrop->SetActorTransform(FTransform(
+			FRotationMatrix::MakeFromZX(-Frame.Forward, Frame.Right).Rotator(),
+			Frame.ToWorld(FVector(0.0f, 0.0f, Depth)),
+			FVector(FrameWidth / DayArtBackdropPlaneSize,
+				FrameWidth / AspectRatio / DayArtBackdropPlaneSize,
+				1.0f)));
+	}
+
+	/**
+	 * World height every portrait sprite gets. The PNGs differ in pixel size but share a
+	 * baseline, so one height keeps the cast in proportion while leaving their own height
+	 * differences intact.
+	 */
+	constexpr float DayArtPortraitSpriteHeight = 330.0f;
+
+	/** Sprites have to resolve behind the stall front, not in front of it. */
+	constexpr float DayArtPortraitDepthBias = 120.0f;
+
+	/** Pointer proxy scale that keeps the whole visible portrait clickable for deliveries. */
+	const FVector DayArtSeatProxyScale(1.8f, 1.8f, 2.6f);
+
+	/**
+	 * The plate row is authored with four slots while the stage decides how many seats are
+	 * actually open, so smaller counts leave spare plates for the seats to be drawn from.
+	 */
+	constexpr int32 DayArtCustomerPlateCount = 4;
+
+	/**
+	 * FSpriteSceneProxy draws a quad of half-height 0.25 * ComponentScale * texture height, and
+	 * the portrait PNGs differ in pixel size, so the scale is solved per texture.
+	 */
+	float DayPortraitSpriteScale(const UTexture2D* Texture)
+	{
+		const float TextureHeight = Texture ? static_cast<float>(Texture->GetSizeY()) : 0.0f;
+		if (TextureHeight <= 0.0f)
+		{
+			return 1.0f;
+		}
+		return 2.0f * DayArtPortraitSpriteHeight / TextureHeight;
+	}
+
+	/**
+	 * Fraction of a portrait's height that is fully transparent along its bottom edge. The PNGs
+	 * pad their canvas by different amounts - about 12% for the townsfolk, 4% for the special
+	 * guests - so lining the image border up with the counter leaves part of the cast hovering.
+	 * Scanned once per texture; a texture we cannot read reports no padding, which is the plain
+	 * image-border alignment.
+	 */
+	float DayPortraitBottomPadding(UTexture2D* Texture)
+	{
+		if (!Texture)
+		{
+			return 0.0f;
+		}
+
+		static TMap<TWeakObjectPtr<UTexture2D>, float> PaddingCache;
+		if (const float* Cached = PaddingCache.Find(Texture))
+		{
+			return *Cached;
+		}
+
+		// Alpha is the last byte of a BGRA8 pixel; a row is content as soon as one pixel shows.
+		const auto ScanBottomPadding = [](const uint8* Pixels, const int32 Width, const int32 Height)
+		{
+			for (int32 Row = Height - 1; Row >= 0; --Row)
+			{
+				for (int32 Column = 0; Column < Width; ++Column)
+				{
+					if (Pixels[(static_cast<int64>(Row) * Width + Column) * 4 + 3] > 8)
+					{
+						return static_cast<float>(Height - 1 - Row) / static_cast<float>(Height);
+					}
+				}
+			}
+			return 0.0f;
+		};
+
+		float Padding = 0.0f;
+#if WITH_EDITOR
+		FTextureSource& Source = Texture->Source;
+		TArray64<uint8> SourceMip;
+		if (Source.IsValid() && Source.GetFormat() == TSF_BGRA8 && Source.GetMipData(SourceMip, 0))
+		{
+			Padding = ScanBottomPadding(SourceMip.GetData(), Source.GetSizeX(), Source.GetSizeY());
+		}
+#endif
+		if (Padding <= 0.0f)
+		{
+			// Cooked builds have no source art, so read the mip the renderer uses instead.
+			FTexturePlatformData* PlatformData = Texture->GetPlatformData();
+			if (PlatformData && PlatformData->PixelFormat == PF_B8G8R8A8 && PlatformData->Mips.Num() > 0)
+			{
+				FTexture2DMipMap& Mip = PlatformData->Mips[0];
+				const int64 ExpectedSize = static_cast<int64>(Mip.SizeX) * Mip.SizeY * 4;
+				if (Mip.BulkData.GetBulkDataSize() >= ExpectedSize && ExpectedSize > 0)
+				{
+					if (const uint8* Pixels = static_cast<const uint8*>(Mip.BulkData.LockReadOnly()))
+					{
+						Padding = ScanBottomPadding(Pixels, Mip.SizeX, Mip.SizeY);
+					}
+					Mip.BulkData.Unlock();
+				}
+			}
+		}
+
+		PaddingCache.Add(Texture, Padding);
+		return Padding;
+	}
+
+	/**
+	 * Where a customer portrait can stand: one point per dish plate, screen-left first. The
+	 * sprite is centred on the point, so the returned height puts the image's bottom border on
+	 * the plate row's top edge, and the depth keeps it behind the stall.
+	 * Returns empty when the plate row or the camera is missing, which keeps the whitebox layout.
+	 */
+	TArray<FVector> SolveDayArtPlateSlots(UWorld* World, const int32 SeatCount, FDayCameraFrame* OutFrame = nullptr)
+	{
+		TArray<FVector> Slots;
+		AActor* Plates = FindActorWithTag(World, DayArtCustomerPlatesTag);
+		FDayCameraFrame Frame;
+		if (!Plates || SeatCount <= 0 || !TryGetDayCameraFrame(World, Frame))
+		{
+			return Slots;
+		}
+		if (OutFrame)
+		{
+			*OutFrame = Frame;
+		}
+
+		FVector PlatesOrigin = FVector::ZeroVector;
+		FVector PlatesExtent = FVector::ZeroVector;
+		Plates->GetActorBounds(false, PlatesOrigin, PlatesExtent);
+
+		const int32 SlotCount = FMath::Max(SeatCount, DayArtCustomerPlateCount);
+		const float SlotWidth = PlatesExtent.X * 2.0f / static_cast<float>(SlotCount);
+		const float PlateBackY = PlatesOrigin.Y + PlatesExtent.Y;
+		const float PlateTopZ = PlatesOrigin.Z + PlatesExtent.Z;
+
+		Slots.Reserve(SlotCount);
+		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+		{
+			// Slot 0 is screen left, which is the far +X end under the Yaw 90 camera.
+			const float PlateX = PlatesOrigin.X + PlatesExtent.X
+				- SlotWidth * (static_cast<float>(SlotIndex) + 0.5f);
+			const FVector PlateAnchor = Frame.ToFrame(FVector(PlateX, PlateBackY, PlateTopZ));
+			Slots.Add(Frame.ToWorld(FVector(
+				PlateAnchor.X,
+				PlateAnchor.Y + DayArtPortraitSpriteHeight * 0.5f,
+				PlateAnchor.Z + DayArtPortraitDepthBias)));
+		}
+		return Slots;
+	}
+
+	int32 NearestPlateSlot(const TArray<FVector>& Slots, const FVector& Location)
+	{
+		int32 Nearest = INDEX_NONE;
+		float NearestDistanceSq = TNumericLimits<float>::Max();
+		for (int32 Index = 0; Index < Slots.Num(); ++Index)
+		{
+			const float DistanceSq = FVector::DistSquared(Slots[Index], Location);
+			if (DistanceSq < NearestDistanceSq)
+			{
+				NearestDistanceSq = DistanceSq;
+				Nearest = Index;
+			}
+		}
+		return Nearest;
+	}
+
+	/** Random distinct plate per seat, so a fresh day does not always fill the same plates. */
+	TArray<int32> ShuffledPlateSlotOrder(const int32 SlotCount)
+	{
+		TArray<int32> Order;
+		Order.Reserve(SlotCount);
+		for (int32 Index = 0; Index < SlotCount; ++Index)
+		{
+			Order.Add(Index);
+		}
+		for (int32 Index = Order.Num() - 1; Index > 0; --Index)
+		{
+			Order.Swap(Index, FMath::RandHelper(Index + 1));
+		}
+		return Order;
+	}
+
+	/**
+	 * Occupied portraits stay on the plate their customer arrived at; free seats are shuffled
+	 * through the plates nobody is using, which is what makes the next arrival land on a random
+	 * plate instead of a fixed one. Also re-snaps to the current slots so moving the camera or
+	 * the art keeps the row aligned, and drops each sprite by its own transparent bottom padding
+	 * so every customer stands on the counter edge rather than over it.
+	 */
+	void PlaceDayArtSeats(UWorld* World, const TArray<ASDayCharacterStandIn*>& Seats)
+	{
+		FDayCameraFrame Frame;
+		const TArray<FVector> Slots = SolveDayArtPlateSlots(World, Seats.Num(), &Frame);
+		if (Slots.IsEmpty())
+		{
+			return;
+		}
+
+		TArray<bool> Taken;
+		Taken.Init(false, Slots.Num());
+		TArray<ASDayCharacterStandIn*> FreeSeats;
+		for (ASDayCharacterStandIn* Seat : Seats)
+		{
+			if (!Seat)
+			{
+				continue;
+			}
+			if (!Seat->bOccupied)
+			{
+				FreeSeats.Add(Seat);
+				continue;
+			}
+			const int32 Slot = NearestPlateSlot(Slots, Seat->GetActorLocation());
+			if (Slots.IsValidIndex(Slot) && !Taken[Slot])
+			{
+				Taken[Slot] = true;
+				Seat->SetActorLocation(Slots[Slot]);
+			}
+			else
+			{
+				FreeSeats.Add(Seat);
+			}
+		}
+
+		TArray<int32> Available;
+		for (int32 Index = 0; Index < Slots.Num(); ++Index)
+		{
+			if (!Taken[Index])
+			{
+				Available.Add(Index);
+			}
+		}
+		for (ASDayCharacterStandIn* Seat : FreeSeats)
+		{
+			if (Available.IsEmpty())
+			{
+				break;
+			}
+			const int32 Pick = FMath::RandHelper(Available.Num());
+			Seat->SetActorLocation(Slots[Available[Pick]]);
+			Available.RemoveAtSwap(Pick);
+		}
+
+		// Seat actors carry no rotation here, so a relative offset is a straight world offset.
+		for (ASDayCharacterStandIn* Seat : Seats)
+		{
+			if (Seat && Seat->Portrait)
+			{
+				const float Padding = DayPortraitBottomPadding(Seat->Portrait->Sprite);
+				Seat->Portrait->SetRelativeLocation(
+					Frame.Up * (-Padding * DayArtPortraitSpriteHeight));
+			}
+		}
+	}
+#pragma endregion K2 moonyfli
 
 	FLinearColor IngredientColor(const FName IngredientId)
 	{
@@ -75,6 +559,85 @@ namespace DayBoardPresentationPrivate
 		if (IngredientId == DayXuanYuQinId) return TEXT("玄");
 		return IngredientId.ToString().Left(1);
 	}
+
+#pragma region K2 moonyfli
+	UDataTable* LoadSharedDayTable(const TCHAR* AssetName)
+	{
+		return LoadObject<UDataTable>(
+			nullptr,
+			*FString::Printf(
+				TEXT("/Game/Shared/Data/%s.%s"),
+				AssetName,
+				AssetName));
+	}
+
+	UTexture2D* ResolveIngredientIcon(const FName IngredientId)
+	{
+		if (UDataTable* Table = LoadSharedDayTable(TEXT("DT_Ingredients")))
+		{
+			if (const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(
+				IngredientId,
+				TEXT("ResolveIngredientIcon"),
+				false))
+			{
+				if (UTexture2D* Icon = Row->Icon.LoadSynchronous())
+				{
+					return Icon;
+				}
+			}
+		}
+
+		const TCHAR* Fallback = nullptr;
+		if (IngredientId == DayLingGuId) Fallback = TEXT("/Game/Day/Art/food/food_rice.food_rice");
+		else if (IngredientId == DayYinShanJunId) Fallback = TEXT("/Game/Day/Art/food/food_egg.food_egg");
+		else if (IngredientId == DayChiYanJiaoId) Fallback = TEXT("/Game/Day/Art/food/food_hand.food_hand");
+		else if (IngredientId == DayYueLinYuId) Fallback = TEXT("/Game/Day/Art/food/food_fish.food_fish");
+		else if (IngredientId == DayXuanYuQinId) Fallback = TEXT("/Game/Day/Art/food/food_leg.food_leg");
+		return Fallback ? LoadObject<UTexture2D>(nullptr, Fallback) : nullptr;
+	}
+
+	UTexture2D* ResolveCustomerPortrait(const FString& DisplayName)
+	{
+		if (UDataTable* Table = LoadSharedDayTable(TEXT("DT_CustomerNames")))
+		{
+			TArray<FSCustomerNameRow*> Rows;
+			Table->GetAllRows(TEXT("ResolveCustomerPortrait"), Rows);
+			for (const FSCustomerNameRow* Row : Rows)
+			{
+				if (Row && Row->DisplayName == DisplayName)
+				{
+					return Row->Portrait.LoadSynchronous();
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	UTexture2D* ResolveSpecialNpcPortrait(const FName NpcId)
+	{
+		FName LookupId = NpcId;
+		if (NpcId == DayNpcALingId)
+		{
+			LookupId = TEXT("NpcA");
+		}
+		else if (NpcId == DayNpcSangPoId)
+		{
+			LookupId = TEXT("NpcB");
+		}
+
+		if (UDataTable* Table = LoadSharedDayTable(TEXT("DT_SpecialNpcs")))
+		{
+			if (const FSSpecialNpcDefRow* Row = Table->FindRow<FSSpecialNpcDefRow>(
+				LookupId,
+				TEXT("ResolveSpecialNpcPortrait"),
+				false))
+			{
+				return Row->Portrait.LoadSynchronous();
+			}
+		}
+		return nullptr;
+	}
+#pragma endregion K2 moonyfli
 
 	void SetButtonText(UButton* Button, const FString& Text)
 	{
@@ -196,6 +759,22 @@ void ASDayCellVisual::Configure(const int32 InCellIndex, const float InRadius, A
 	RefreshVisual();
 }
 
+#pragma region K2 moonyfli
+void ASDayCellVisual::SetSeatedInWell(const bool bInSeated)
+{
+	// Tracked as a tag, matching how the rest of the Day art binding marks intent on actors.
+	if (bInSeated)
+	{
+		Tags.AddUnique(DayCellSeatedTag);
+	}
+	else
+	{
+		Tags.Remove(DayCellSeatedTag);
+	}
+	RefreshVisual();
+}
+#pragma endregion K2 moonyfli
+
 void ASDayCellVisual::SetLabelFont(UFont* InFont)
 {
 	ApplyLabelFont(PieceLabel, InFont, 36.0f);
@@ -233,12 +812,24 @@ void ASDayCellVisual::RefreshVisual()
 	}
 
 	const float SelectionBoost = bSelected ? 1.25f : 1.0f;
-	const float LevelScale = (0.52f + static_cast<float>(Piece.Level) * 0.10f) * SelectionBoost;
-	PieceMesh->SetRelativeScale3D(FVector(
-		LevelScale,
-		LevelScale,
-		(0.25f + Piece.Level * 0.05f) * SelectionBoost));
-	PieceMesh->SetRelativeLocation(FVector(0.0f, 0.0f, bSelected ? 62.0f : 32.0f));
+#pragma region K2 moonyfli
+	// Follow the cell radius the way CellMesh does, so a dish fills the pan's well instead of
+	// reading as a dot in the middle of it. The 50 reference keeps the whitebox sizing intact.
+	const float RadiusScale = VisualRadius / 50.0f;
+	const float LevelScale = (0.52f + static_cast<float>(Piece.Level) * 0.10f) * SelectionBoost * RadiusScale;
+	const float HeightScale = (0.25f + Piece.Level * 0.05f) * SelectionBoost * RadiusScale;
+	PieceMesh->SetRelativeScale3D(FVector(LevelScale, LevelScale, HeightScale));
+	// Seated in a well the dish only clears its own half-height; on a whitebox disc it also has
+	// to clear the disc, and the selection lift doubles as the "picked up" cue.
+	const float SeatedLift = HeightScale * 50.0f;
+	const bool bSeatedInWell = ActorHasTag(DayCellSeatedTag);
+	PieceMesh->SetRelativeLocation(FVector(
+		0.0f,
+		0.0f,
+		bSeatedInWell
+			? (bSelected ? SeatedLift * 2.0f : SeatedLift)
+			: (bSelected ? 62.0f : 32.0f) * RadiusScale));
+#pragma endregion K2 moonyfli
 
 	const FLinearColor PieceColor = IngredientColor(Piece.IngredientId);
 	ApplyTint(PieceMesh, bSelected ? PieceColor * 1.8f + FLinearColor(0.15f, 0.15f, 0.05f, 0.0f) : PieceColor);
@@ -265,6 +856,16 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	BinMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BinMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
+#pragma region K2 moonyfli
+	IngredientIcon = CreateDefaultSubobject<UBillboardComponent>(TEXT("IngredientIcon"));
+	IngredientIcon->SetupAttachment(Root);
+	IngredientIcon->SetRelativeLocation(FVector(0.0f, 0.0f, 80.0f));
+	IngredientIcon->SetRelativeScale3D(FVector(0.85f));
+	IngredientIcon->bIsScreenSizeScaled = false;
+	IngredientIcon->SetHiddenInGame(false);
+	IngredientIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+#pragma endregion K2 moonyfli
+
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
 	Label->SetupAttachment(Root);
 	Label->SetRelativeLocation(FVector(0.0f, 0.0f, 80.0f));
@@ -289,6 +890,16 @@ void ASDayIngredientBinVisual::Configure(const FName InIngredientId, const FStri
 	Label->SetTextRenderColor(LabelInkColor());
 }
 
+#pragma region K2 moonyfli
+void ASDayIngredientBinVisual::SetIngredientIcon(UTexture2D* InTexture)
+{
+	IngredientIcon->SetSprite(InTexture);
+	IngredientIcon->SetRelativeScale3D(FVector(0.85f));
+	IngredientIcon->SetHiddenInGame(false);
+	IngredientIcon->SetVisibility(InTexture != nullptr);
+}
+#pragma endregion K2 moonyfli
+
 void ASDayIngredientBinVisual::SetLabelFont(UFont* InFont)
 {
 	ApplyLabelFont(Label, InFont, 28.0f);
@@ -306,6 +917,16 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 	CharacterMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CharacterMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	CharacterMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+#pragma region K2 moonyfli
+	Portrait = CreateDefaultSubobject<UBillboardComponent>(TEXT("Portrait"));
+	Portrait->SetupAttachment(Root);
+	Portrait->SetRelativeLocation(FVector(0.0f, 0.0f, 92.0f));
+	Portrait->bIsScreenSizeScaled = false;
+	Portrait->SetHiddenInGame(false);
+	Portrait->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Portrait->SetVisibility(false);
+#pragma endregion K2 moonyfli
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
 	Label->SetupAttachment(Root);
@@ -336,6 +957,16 @@ void ASDayCharacterStandIn::Configure(const FString& InLabel, const FLinearColor
 	Label->SetWorldSize(24.0f);
 	SetHeadline(InLabel, InColor);
 }
+
+#pragma region K2 moonyfli
+void ASDayCharacterStandIn::SetPortrait(UTexture2D* InTexture)
+{
+	Portrait->SetSprite(InTexture);
+	Portrait->SetRelativeScale3D(FVector(DayPortraitSpriteScale(InTexture)));
+	Portrait->SetHiddenInGame(false);
+	Portrait->SetVisibility(InTexture != nullptr);
+}
+#pragma endregion K2 moonyfli
 
 void ASDayCharacterStandIn::SetHeadline(const FString& InText, const FLinearColor& InColor)
 {
@@ -375,7 +1006,7 @@ ASDayBoardPresenter::ASDayBoardPresenter()
 	Camera->SetRelativeRotation(FRotator(-90.0f, 90.0f, 0.0f));
 	Camera->OrthoWidth = PortraitOrthoWidth;
 	Camera->bConstrainAspectRatio = true;
-	Camera->AspectRatio = 9.0f / 16.0f;
+	Camera->AspectRatio = DayBoardPresentationPrivate::DayPortraitAspectRatio; //add by K2
 
 	WhiteboxKeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("WhiteboxKeyLight"));
 	WhiteboxKeyLight->SetupAttachment(Root);
@@ -397,6 +1028,10 @@ void ASDayBoardPresenter::BeginPlay()
 {
 	Super::BeginPlay();
 	LogicBoard = ASMergeBoard::FindBoard(this);
+#pragma region K2 moonyfli
+	DisableDayArtCollision(GetWorld());
+	FitDayArtBackdrop(GetWorld());
+#pragma endregion K2 moonyfli
 	BuildWhitebox();
 
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
@@ -408,14 +1043,25 @@ void ASDayBoardPresenter::BeginPlay()
 	{
 		if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
 		{
-			// Re-apply the portrait framing at runtime so Live Coding picks it up without an editor restart.
-			Camera->ProjectionMode = ECameraProjectionMode::Orthographic;
-			Camera->SetRelativeLocation(FVector(0.0f, 60.0f, 2200.0f));
-			Camera->SetRelativeRotation(FRotator(-90.0f, 90.0f, 0.0f));
-			Camera->OrthoWidth = PortraitOrthoWidth;
-			Camera->bConstrainAspectRatio = true;
-			Camera->AspectRatio = 9.0f / 16.0f;
-			PlayerController->SetViewTarget(this);
+#pragma region K2 moonyfli
+			if (ACameraActor* LevelCamera = DayBoardPresentationPrivate::FindDayLevelCamera(GetWorld()))
+			{
+				PlayerController->SetViewTarget(LevelCamera);
+				DayBoardPresentationPrivate::AimKeyLightAlongCamera(
+					WhiteboxKeyLight, LevelCamera->GetActorRotation());
+			}
+			else
+			{
+				// Re-apply the portrait framing at runtime so Live Coding picks it up without an editor restart.
+				Camera->ProjectionMode = ECameraProjectionMode::Orthographic;
+				Camera->SetRelativeLocation(FVector(0.0f, 60.0f, 2200.0f));
+				Camera->SetRelativeRotation(FRotator(-90.0f, 90.0f, 0.0f));
+				Camera->OrthoWidth = PortraitOrthoWidth;
+				Camera->bConstrainAspectRatio = true;
+				Camera->AspectRatio = DayBoardPresentationPrivate::DayPortraitAspectRatio;
+				PlayerController->SetViewTarget(this);
+			}
+#pragma endregion K2 moonyfli
 		}
 	}
 	RefreshFromLogic();
@@ -465,50 +1111,56 @@ void ASDayBoardPresenter::BuildWhitebox()
 	USDayBoardVisualConfig* Config = VisualConfig.LoadSynchronous();
 	UStaticMesh* Cube = LoadBasicShape(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	UStaticMesh* Cylinder = LoadBasicShape(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	const bool bUseDayArt = FindActorWithTag(GetWorld(), DayArtBoardTag) != nullptr; //add by K2
 
 	UMaterialInterface* BoardMaterial = Config ? Config->BoardMaterial.LoadSynchronous() : nullptr;
 	UMaterialInterface* CellMaterial = Config ? Config->CellMaterial.LoadSynchronous() : nullptr;
 
-	BoardFrame->SetStaticMesh(Config && Config->BoardFrameMesh.LoadSynchronous()
-		? Config->BoardFrameMesh.Get()
-		: Cube);
-	// Sized to enclose the 12 playable cells (X +/-330, Y -150..450) plus their visual radius.
-	BoardFrame->SetRelativeLocation(FVector(0.0f, 150.0f, -25.0f));
-	BoardFrame->SetRelativeScale3D(FVector(9.0f, 8.0f, 0.25f));
-	if (BoardMaterial)
+	BoardFrame->SetVisibility(!bUseDayArt);
+	Counter->SetVisibility(!bUseDayArt);
+	if (!bUseDayArt)
 	{
-		BoardFrame->SetMaterial(0, BoardMaterial);
-	}
-
-	Counter->SetStaticMesh(Cube);
-	Counter->SetRelativeLocation(FVector(0.0f, 760.0f, 65.0f));
-	Counter->SetRelativeScale3D(FVector(9.0f, 0.45f, 0.65f));
-	if (BoardMaterial)
-	{
-		Counter->SetMaterial(0, BoardMaterial);
-	}
-
-	const TArray<FVector> DecorativeLocations =
-	{
-		{-390, 470, 15}, {350, 470, 15}, {-400, 350, 15}, {390, 350, 15},
-		{-410, 210, 15}, {400, 150, 15}, {-400, -50, 15}, {390, -100, 15},
-		{-360, -240, 15}, {350, -260, 15}, {-300, -360, 15}, {270, -390, 15},
-		{-20, 390, 15}, {40, -280, 15}, {300, 80, 15}
-	};
-	for (int32 Index = 0; Index < DecorativeLocations.Num(); ++Index)
-	{
-		UStaticMeshComponent* Decor = NewObject<UStaticMeshComponent>(
-			this, *FString::Printf(TEXT("DecorativeCell_%02d"), Index));
-		Decor->SetStaticMesh(Cylinder);
-		Decor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Decor->SetRelativeLocation(MirrorX(DecorativeLocations[Index]));
-		const float S = 0.65f + static_cast<float>(Index % 4) * 0.10f;
-		Decor->SetRelativeScale3D(FVector(S, S * 0.75f, 0.08f));
-		Decor->SetupAttachment(RootComponent);
-		Decor->RegisterComponent();
-		if (CellMaterial)
+		BoardFrame->SetStaticMesh(Config && Config->BoardFrameMesh.LoadSynchronous()
+			? Config->BoardFrameMesh.Get()
+			: Cube);
+		// Sized to enclose the 12 playable cells (X +/-330, Y -150..450) plus their visual radius.
+		BoardFrame->SetRelativeLocation(FVector(0.0f, 150.0f, -25.0f));
+		BoardFrame->SetRelativeScale3D(FVector(9.0f, 8.0f, 0.25f));
+		if (BoardMaterial)
 		{
-			Decor->SetMaterial(0, CellMaterial);
+			BoardFrame->SetMaterial(0, BoardMaterial);
+		}
+
+		Counter->SetStaticMesh(Cube);
+		Counter->SetRelativeLocation(FVector(0.0f, 760.0f, 65.0f));
+		Counter->SetRelativeScale3D(FVector(9.0f, 0.45f, 0.65f));
+		if (BoardMaterial)
+		{
+			Counter->SetMaterial(0, BoardMaterial);
+		}
+
+		const TArray<FVector> DecorativeLocations =
+		{
+			{-390, 470, 15}, {350, 470, 15}, {-400, 350, 15}, {390, 350, 15},
+			{-410, 210, 15}, {400, 150, 15}, {-400, -50, 15}, {390, -100, 15},
+			{-360, -240, 15}, {350, -260, 15}, {-300, -360, 15}, {270, -390, 15},
+			{-20, 390, 15}, {40, -280, 15}, {300, 80, 15}
+		};
+		for (int32 Index = 0; Index < DecorativeLocations.Num(); ++Index)
+		{
+			UStaticMeshComponent* Decor = NewObject<UStaticMeshComponent>(
+				this, *FString::Printf(TEXT("DecorativeCell_%02d"), Index));
+			Decor->SetStaticMesh(Cylinder);
+			Decor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Decor->SetRelativeLocation(MirrorX(DecorativeLocations[Index]));
+			const float S = 0.65f + static_cast<float>(Index % 4) * 0.10f;
+			Decor->SetRelativeScale3D(FVector(S, S * 0.75f, 0.08f));
+			Decor->SetupAttachment(RootComponent);
+			Decor->RegisterComponent();
+			if (CellMaterial)
+			{
+				Decor->SetMaterial(0, CellMaterial);
+			}
 		}
 	}
 
@@ -546,22 +1198,31 @@ TArray<FSDayBoardLayoutRow> ASDayBoardPresenter::GetLayoutRows() const
 		return Rows;
 	}
 
-	const TArray<int32> CellIndices = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14};
-	const TArray<FVector> Locations =
+#pragma region K2 moonyfli
+	// Whitebox fallback only. The shipping layout is DT_SDayBoardLayout, generated from the
+	// wells modelled into the pan by Tools/GeneratePanCellLayout.py, so this just needs one
+	// sane cell per logical index laid out flat across the whitebox board area.
+	constexpr int32 FallbackColumns = 5;
+	constexpr int32 FallbackRows = 5;
+	for (int32 Y = 0; Y < FallbackRows; ++Y)
 	{
-		{-185, 450, 35}, {150, 445, 35}, {-285, 300, 35}, {-65, 290, 35},
-		{175, 300, 35}, {330, 230, 35}, {-305, 105, 35}, {-75, 105, 35},
-		{165, 100, 35}, {320, -25, 35}, {-165, -125, 35}, {125, -150, 35}
-	};
-	for (int32 Index = 0; Index < CellIndices.Num(); ++Index)
-	{
-		FSDayBoardLayoutRow Row;
-		Row.CellIndex = CellIndices[Index];
-		Row.Transform = FTransform(FRotator::ZeroRotator, Locations[Index], FVector::OneVector);
-		Row.VisualRadius = Index % 3 == 0 ? 92.0f : 78.0f;
-		Rows.Add(Row);
+		for (int32 X = 0; X < FallbackColumns; ++X)
+		{
+			FSDayBoardLayoutRow Row;
+			Row.CellIndex = Y * FallbackColumns + X;
+			Row.Transform = FTransform(
+				FRotator::ZeroRotator,
+				FVector(
+					FMath::Lerp(-330.0f, 330.0f, X / float(FallbackColumns - 1)),
+					FMath::Lerp(450.0f, -150.0f, Y / float(FallbackRows - 1)),
+					35.0f),
+				FVector::OneVector);
+			Row.VisualRadius = 65.0f;
+			Rows.Add(Row);
+		}
 	}
 	return Rows;
+#pragma endregion K2 moonyfli
 }
 
 void ASDayBoardPresenter::BuildCells()
@@ -579,16 +1240,30 @@ void ASDayBoardPresenter::BuildCells()
 		VisualClass = Config->CellVisualClass;
 	}
 
+#pragma region K2 moonyfli
+	AActor* ArtBoard = FindActorWithTag(World, DayArtBoardTag);
+	const bool bUseDayArt = ArtBoard != nullptr;
+#pragma endregion K2 moonyfli
+
 	for (const FSDayBoardLayoutRow& Row : GetLayoutRows())
 	{
 		FTransform LocalTransform = Row.Transform;
 		LocalTransform.SetLocation(MirrorX(Row.Transform.GetLocation()));
+#pragma region K2 moonyfli
+		FTransform SpawnTransform = LocalTransform * GetActorTransform();
+		if (bUseDayArt)
+		{
+			// Art rows are pan-local and already oriented, so the mirror the whitebox needs
+			// would move them off their wells.
+			SpawnTransform = DayArtCellToWorld(ArtBoard->GetActorTransform(), Row.Transform);
+		}
+#pragma endregion K2 moonyfli
 
 		FActorSpawnParameters Params;
 		Params.Owner = this;
 		ASDayCellVisual* Visual = World->SpawnActor<ASDayCellVisual>(
 			VisualClass,
-			LocalTransform * GetActorTransform(),
+			SpawnTransform,
 			Params);
 		if (!Visual)
 		{
@@ -617,6 +1292,20 @@ void ASDayBoardPresenter::BuildCells()
 		}
 		Visual->SetLabelFont(ResolveLabelFont());
 		Visual->Configure(Row.CellIndex, Row.VisualRadius, LogicBoard.Get());
+#pragma region K2 moonyfli
+		// The art mesh owns the visible holes; keep the logical trace surface but remove
+		// the old whitebox cylinder. Pieces and labels remain visible.
+		Visual->CellMesh->SetVisibility(!bUseDayArt);
+		if (bUseDayArt)
+		{
+			// Configure squashes the disc to read under the old top-down camera. The wells
+			// are round and the cell now lies in the pan's plane, so undo the squash to keep
+			// the pointer target matching the well.
+			const float CellScale = Row.VisualRadius / 50.0f;
+			Visual->CellMesh->SetRelativeScale3D(FVector(CellScale, CellScale, 0.12f));
+			Visual->SetSeatedInWell(true);
+		}
+#pragma endregion K2 moonyfli
 		CellVisuals.Add(Visual);
 	}
 }
@@ -640,11 +1329,22 @@ void ASDayBoardPresenter::BuildBins()
 	for (int32 Index = 0; Index < Ids.Num(); ++Index)
 	{
 		const FVector Location(-380.0f + Index * 190.0f, -690.0f + FMath::Abs(2 - Index) * 18.0f, 45.0f);
+#pragma region K2 moonyfli
+		AActor* ArtBin = FindActorWithTag(World, DayArtBinTag(Index));
+		FVector ArtBinCenter = FVector::ZeroVector;
+		FVector ArtBinExtent = FVector::ZeroVector;
+		FTransform SpawnTransform = FTransform(MirrorX(Location)) * GetActorTransform();
+		if (ArtBin)
+		{
+			ArtBin->GetActorBounds(false, ArtBinCenter, ArtBinExtent);
+			SpawnTransform.SetLocation(ArtBinCenter);
+		}
+#pragma endregion K2 moonyfli
 		FActorSpawnParameters Params;
 		Params.Owner = this;
 		ASDayIngredientBinVisual* Bin = World->SpawnActor<ASDayIngredientBinVisual>(
 			BinClass,
-			FTransform(MirrorX(Location)) * GetActorTransform(),
+			SpawnTransform,
 			Params);
 		if (!Bin)
 		{
@@ -664,6 +1364,21 @@ void ASDayBoardPresenter::BuildBins()
 		}
 		Bin->SetLabelFont(ResolveLabelFont());
 		Bin->Configure(Ids[Index], IngredientShortName(this, Ids[Index]));
+#pragma region K2 moonyfli
+		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
+#pragma endregion K2 moonyfli
+#pragma region K2 moonyfli
+		if (ArtBin)
+		{
+			// The imported box supplies the visible geometry. This hidden cube is sized to
+			// the art bounds and remains the stable Visibility trace target.
+			Bin->BinMesh->SetRelativeScale3D(ArtBinExtent / 50.0f);
+			Bin->BinMesh->SetVisibility(false);
+			Bin->Label->SetRelativeLocation(FVector(0.0f, 0.0f, ArtBinExtent.Z + 30.0f));
+			Bin->IngredientIcon->SetRelativeLocation(
+				FVector(0.0f, -75.0f, ArtBinExtent.Z + 45.0f));
+		}
+#pragma endregion K2 moonyfli
 		IngredientBins.Add(Bin);
 	}
 }
@@ -690,6 +1405,7 @@ void ASDayBoardPresenter::BuildCharacters()
 		DeliverySeatCount = GameInstance->GetServiceSeatCount();
 	}
 	DeliverySeatCount = FMath::Clamp(DeliverySeatCount, 1, 6);
+	const bool bUseDayArt = FindActorWithTag(World, DayArtBoardTag) != nullptr; //add by K2
 
 	TArray<FString> Labels;
 	TArray<FVector> Locations;
@@ -711,19 +1427,35 @@ void ASDayBoardPresenter::BuildCharacters()
 		Locations.Add(FVector(FMath::Lerp(SeatLeftX, SeatRightX, Alpha), SeatY, SeatZ));
 		Colors.Add(FLinearColor(0.95f, 0.75f, 0.65f));
 	}
-	Labels.Add(TEXT("厨师"));
-	Locations.Add(FVector(405.0f, -365.0f, 105.0f));
-	Colors.Add(FLinearColor(0.92f, 0.92f, 0.88f));
-	const int32 ChefIndex = DeliverySeatCount;
+	int32 ChefIndex = INDEX_NONE;
+	if (!bUseDayArt)
+	{
+		ChefIndex = DeliverySeatCount;
+		Labels.Add(TEXT("厨师"));
+		Locations.Add(FVector(405.0f, -365.0f, 105.0f));
+		Colors.Add(FLinearColor(0.92f, 0.92f, 0.88f));
+	}
+	// Art mode overrides the whitebox seat row with a random dish plate per seat.
+	const TArray<FVector> PlateSlots = bUseDayArt
+		? SolveDayArtPlateSlots(World, DeliverySeatCount)
+		: TArray<FVector>();
+	const TArray<int32> PlateSlotOrder = ShuffledPlateSlotOrder(PlateSlots.Num());
 #pragma endregion K2 moonyfli
 
 	for (int32 Index = 0; Index < Labels.Num(); ++Index)
 	{
 		FActorSpawnParameters Params;
 		Params.Owner = this;
+#pragma region K2 moonyfli
+		const bool bUsePlateSlot = PlateSlotOrder.IsValidIndex(Index)
+			&& PlateSlots.IsValidIndex(PlateSlotOrder[Index]);
+		const FTransform SpawnTransform = bUsePlateSlot
+			? FTransform(PlateSlots[PlateSlotOrder[Index]])
+			: FTransform(MirrorX(Locations[Index])) * GetActorTransform();
+#pragma endregion K2 moonyfli
 		ASDayCharacterStandIn* Character = World->SpawnActor<ASDayCharacterStandIn>(
 			CharacterClass,
-			FTransform(MirrorX(Locations[Index])) * GetActorTransform(),
+			SpawnTransform,
 			Params);
 		if (!Character)
 		{
@@ -746,11 +1478,27 @@ void ASDayBoardPresenter::BuildCharacters()
 		}
 		Character->NpcId = NAME_None;
 		Character->CustomerId.Reset();
-		Character->SeatIndex = Index < ChefIndex ? Index : INDEX_NONE;
+		const bool bIsChef = Index == ChefIndex;
+		Character->SeatIndex = bIsChef ? INDEX_NONE : Index;
 		Character->bOccupied = false;
-		Character->bDeliveryTarget = Index != ChefIndex;
+		Character->bDeliveryTarget = !bIsChef;
 		Character->SetLabelFont(ResolveLabelFont());
 		Character->Configure(Labels[Index], Colors[Index]);
+#pragma region K2 moonyfli
+		// PNG portraits replace the old whitebox cylinder. Keep its invisible trace proxy and
+		// status label; the chef is still not spawned in art mode.
+		Character->CharacterMesh->SetVisibility(!bUseDayArt);
+		if (bUsePlateSlot)
+		{
+			// The actor already stands where the portrait belongs, so the sprite sits on the
+			// origin and the pointer proxy grows to cover what the player actually sees.
+			Character->Portrait->SetRelativeLocation(FVector::ZeroVector);
+			Character->CharacterMesh->SetRelativeScale3D(DayArtSeatProxyScale);
+			// The world label lies flat for the old top-down framing, so it degenerates into
+			// noise over the customer's head here; the HUD carries the same order text.
+			Character->Label->SetVisibility(false);
+		}
+#pragma endregion K2 moonyfli
 		CharacterStandIns.Add(Character);
 	}
 
@@ -795,6 +1543,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 		Seat->NpcId = NAME_None;
 		Seat->CustomerId.Reset();
 		Seat->bOccupied = false;
+		Seat->SetPortrait(nullptr); //add by K2
 
 #pragma region K2 moonyfli
 		FSCustomerState Customer;
@@ -802,6 +1551,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 		{
 			Seat->CustomerId = Customer.CustomerId;
 			Seat->bOccupied = true;
+			Seat->SetPortrait(ResolveCustomerPortrait(Customer.DisplayName));
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -832,6 +1582,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 		{
 			Seat->NpcId = SeatedNpc.NpcId;
 			Seat->bOccupied = true;
+			Seat->SetPortrait(ResolveSpecialNpcPortrait(SeatedNpc.NpcId));
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -853,6 +1604,12 @@ void ASDayBoardPresenter::RefreshCharacters()
 			FLinearColor(0.62f, 0.58f, 0.54f));
 #pragma endregion K2 moonyfli
 	}
+
+#pragma region K2 moonyfli
+	// Occupancy and portraits are settled now, so the free (invisible) seats can move onto the
+	// plates nobody uses; whichever plate a seat holds is where its next customer shows up.
+	PlaceDayArtSeats(GetWorld(), Seats);
+#pragma endregion K2 moonyfli
 }
 
 bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board)
@@ -1258,6 +2015,32 @@ void USDayHUD::BuildWidgetTree()
 		Button->AddChild(Text);
 		return Button;
 	};
+#pragma region K2 moonyfli
+	auto MakeIngredientButton = [this, &MakeText](const TCHAR* Name, const TCHAR* Label, const FName IngredientId)
+	{
+		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		UHorizontalBox* Content = WidgetTree->ConstructWidget<UHorizontalBox>(
+			UHorizontalBox::StaticClass(),
+			*FString::Printf(TEXT("%s_Content"), Name));
+		UImage* Icon = WidgetTree->ConstructWidget<UImage>(
+			UImage::StaticClass(),
+			*FString::Printf(TEXT("%s_Icon"), Name));
+		if (UTexture2D* Texture = ResolveIngredientIcon(IngredientId))
+		{
+			// Never match the source PNG size (up to 524x391): these are compact HUD icons.
+			Icon->SetBrushFromTexture(Texture, false);
+		}
+		Icon->SetDesiredSizeOverride(FVector2D(46.0f, 40.0f));
+		Content->AddChildToHorizontalBox(Icon)->SetPadding(FMargin(2.0f, 1.0f, 5.0f, 1.0f));
+
+		UTextBlock* Text = MakeText(*FString::Printf(TEXT("%s_Label"), Name), 20, FLinearColor::White);
+		Text->SetText(FText::FromString(Label));
+		Text->SetJustification(ETextJustify::Center);
+		Content->AddChildToHorizontalBox(Text)->SetVerticalAlignment(VAlign_Center);
+		Button->AddChild(Content);
+		return Button;
+	};
+#pragma endregion K2 moonyfli
 
 	PhaseText = MakeText(TEXT("PhaseText"), 24, FLinearColor(0.10f, 0.95f, 0.75f));
 	Root->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
@@ -1292,11 +2075,11 @@ void USDayHUD::BuildWidgetTree()
 	UWrapBox* Ingredients = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("IngredientRow"));
 	Ingredients->SetInnerSlotPadding(FVector2D(4.0f, 4.0f));
 	Root->AddChildToVerticalBox(Ingredients)->SetPadding(FMargin(12.0f, 2.0f));
-	UButton* LingGu = MakeButton(TEXT("DayLingGuButton"), TEXT("灵谷"));
-	UButton* Yin = MakeButton(TEXT("DayYinShanJunButton"), TEXT("阴山菌"));
-	UButton* Chi = MakeButton(TEXT("DayChiYanJiaoButton"), TEXT("赤焰椒"));
-	UButton* Yue = MakeButton(TEXT("DayYueLinYuButton"), TEXT("月鳞鱼"));
-	UButton* Xuan = MakeButton(TEXT("DayXuanYuQinButton"), TEXT("玄羽禽"));
+	UButton* LingGu = MakeIngredientButton(TEXT("DayLingGuButton"), TEXT("灵谷"), DayLingGuId);
+	UButton* Yin = MakeIngredientButton(TEXT("DayYinShanJunButton"), TEXT("阴山菌"), DayYinShanJunId);
+	UButton* Chi = MakeIngredientButton(TEXT("DayChiYanJiaoButton"), TEXT("赤焰椒"), DayChiYanJiaoId);
+	UButton* Yue = MakeIngredientButton(TEXT("DayYueLinYuButton"), TEXT("月鳞鱼"), DayYueLinYuId);
+	UButton* Xuan = MakeIngredientButton(TEXT("DayXuanYuQinButton"), TEXT("玄羽禽"), DayXuanYuQinId);
 	Ingredients->AddChildToWrapBox(LingGu);
 	Ingredients->AddChildToWrapBox(Yin);
 	Ingredients->AddChildToWrapBox(Chi);

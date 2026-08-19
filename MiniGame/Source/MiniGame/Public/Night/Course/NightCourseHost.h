@@ -14,6 +14,7 @@ class UMaterialInterface;
 class UExponentialHeightFogComponent;
 class UInstancedStaticMeshComponent;
 class UDirectionalLightComponent;
+class UBoxComponent;
 class AStaticMeshActor;
 class AActor;
 
@@ -40,6 +41,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	bool bAutoStart = true;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course|Layout")
+	TObjectPtr<UBoxComponent> LayoutBounds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout")
+	bool bEnforceLayoutBounds = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout")
+	FVector LayoutBoundsExtent = FVector(10000.f, 10000.f, 3000.f);
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")
 	FNightResult LastResult;

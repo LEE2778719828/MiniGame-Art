@@ -39,7 +39,9 @@ void ANightCourseGameMode::BeginPlay()
 		ANightCourseHost* ExistingHost = *It;
 		if (ExistingHost)
 		{
-			if (!ExistingHost->Config)
+			// The level host may contain a stale serialized Config from an
+			// earlier preview. PIE must use the GameMode's current DataAsset.
+			if (CourseConfig)
 			{
 				ExistingHost->Config = CourseConfig;
 			}

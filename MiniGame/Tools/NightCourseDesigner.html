@@ -221,6 +221,20 @@
       <button id="btnImport">导入 JSON 文件</button>
       <input id="fileImport" type="file" accept="application/json,.json" hidden />
     </div>
+    <label>Atom Rule（策划规则：只写 AtomKey + Actions）</label>
+    <textarea id="atomRuleJson" rows="8" spellcheck="false">{
+  "seed": 1001,
+  "route": [
+    { "atomKey": "A", "actions": ["Jump", "Kill", "Kill"] },
+    { "atomKey": "B", "actions": ["Kill", "Jump", "Kill"] }
+  ],
+  "transitionAction": "Jump"
+}</textarea>
+    <div class="actions">
+      <button id="btnExportAtomRule">导出 Atom Rule JSON</button>
+      <button id="btnImportAtomRule">导入 Atom Rule JSON</button>
+      <input id="fileAtomRuleImport" type="file" accept="application/json,.json" hidden />
+    </div>
     <label>最近导出 / 导入</label>
     <textarea id="jsonOut" rows="8" spellcheck="false"></textarea>
   </aside>
@@ -523,9 +537,66 @@ function exportBakedJson() {
   return lastJson;
 }
 
+function normalizeAtomRule(value) {
+  if (!value || typeof value !== "object") throw new Error("Atom Rule 必须是 JSON 对象");
+  const seed = Number(value.seed);
+  if (!Number.isFinite(seed)) throw new Error("Atom Rule.seed 必须是数字");
+  if (!Array.isArray(value.route) || value.route.length === 0) {
+    throw new Error("Atom Rule.route 必须是非空数组");
+  }
+  const seen = new Set();
+  const route = value.route.map((entry, index) => {
+    if (!entry || typeof entry.atomKey !== "string" || !entry.atomKey.trim()) {
+      throw new Error(`route[${index}].atomKey 必须是非空字符串`);
+    }
+    const atomKey = entry.atomKey.trim();
+    if (seen.has(atomKey)) throw new Error(`AtomKey 重复：${atomKey}`);
+    seen.add(atomKey);
+    if (!Array.isArray(entry.actions)) {
+      throw new Error(`route[${index}].actions 必须是数组`);
+    }
+    const actions = entry.actions.map((action, actionIndex) => {
+      const normalized = String(action).trim().toLowerCase();
+      if (normalized === "jump" || normalized === "hazard") return "Jump";
+      if (normalized === "kill" || normalized === "attack" || normalized === "enemy") return "Kill";
+      throw new Error(`route[${index}].actions[${actionIndex}] 不支持：${action}`);
+    });
+    return { atomKey, actions };
+  });
+  const transitionAction = String(value.transitionAction || "Jump").trim().toLowerCase();
+  if (transitionAction !== "jump" && transitionAction !== "hazard") {
+    throw new Error("transitionAction 只能是 Jump");
+  }
+  return { seed: Math.trunc(seed), route, transitionAction: "Jump" };
+}
+
+function exportAtomRuleJson() {
+  const parsed = normalizeAtomRule(JSON.parse(document.getElementById("atomRuleJson").value));
+  lastJson = JSON.stringify(parsed, null, 2);
+  document.getElementById("atomRuleJson").value = lastJson;
+  document.getElementById("jsonOut").value = lastJson;
+  return lastJson;
+}
+
+function importAtomRuleObject(obj, rawText = "") {
+  const normalized = normalizeAtomRule(obj);
+  const text = JSON.stringify(normalized, null, 2);
+  document.getElementById("atomRuleJson").value = text;
+  document.getElementById("jsonOut").value = rawText || text;
+  lastJson = text;
+  return normalized;
+}
+
 document.getElementById("btnRegen").onclick = draw;
 document.getElementById("btnExportParams").onclick = exportParamsJson;
 document.getElementById("btnExportBaked").onclick = exportBakedJson;
+document.getElementById("btnExportAtomRule").onclick = () => {
+  try {
+    exportAtomRuleJson();
+  } catch (error) {
+    document.getElementById("jsonOut").value = `Atom Rule 导出失败：${error.message}`;
+  }
+};
 document.getElementById("btnCopy").onclick = async () => {
   if (!lastJson) exportParamsJson();
   await navigator.clipboard.writeText(lastJson);
@@ -536,9 +607,24 @@ document.getElementById("fileImport").onchange = async (e) => {
   if (!file) return;
   const text = await file.text();
   const obj = JSON.parse(text);
-  applyParams(obj);
+  if (Array.isArray(obj.route) && obj.route.some(entry => entry && Object.prototype.hasOwnProperty.call(entry, "atomKey"))) {
+    importAtomRuleObject(obj, text);
+  } else {
+    applyParams(obj);
+  }
   document.getElementById("jsonOut").value = text;
   draw();
+};
+document.getElementById("btnImportAtomRule").onclick = () => document.getElementById("fileAtomRuleImport").click();
+document.getElementById("fileAtomRuleImport").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  try {
+    importAtomRuleObject(JSON.parse(text), text);
+  } catch (error) {
+    document.getElementById("jsonOut").value = `Atom Rule 导入失败：${error.message}`;
+  }
 };
 
 ["totalNodes","maxYawDeltaDeg","forkNodeMin","forkNodeMax","forkEnv","forkPair","seed",

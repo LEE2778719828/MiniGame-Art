@@ -1,8 +1,7 @@
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMesh.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -18,8 +17,8 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	PlatformMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlatformMesh"));
 	PlatformMesh->SetupAttachment(ArtRoot);
 	PlatformMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PlatformMesh->SetRelativeLocation(FVector(0.f, 0.f, 18.f));
-	PlatformMesh->SetRelativeScale3D(FVector(1.8f, 1.8f, 0.35f));
+	PlatformMesh->SetRelativeLocation(FVector::ZeroVector);
+	PlatformMesh->SetRelativeScale3D(FVector::OneVector);
 	// Course footholds are rendered by bridge segments; this component remains
 	// only as a compatibility hook for old stone-chain layouts.
 	PlatformMesh->SetHiddenInGame(true);
@@ -28,36 +27,17 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	FoeCapsule = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FoeCapsule"));
 	FoeCapsule->SetupAttachment(ArtRoot);
 	FoeCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 95.f));
-	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
+	FoeCapsule->SetRelativeLocation(FVector::ZeroVector);
+	FoeCapsule->SetRelativeScale3D(FVector::OneVector);
 	FoeCapsule->SetHiddenInGame(true);
 	FoeCapsule->SetVisibility(false);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CapsuleMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> FishMesh(
-		TEXT("/Game/Night/Course/Art/Foe/fish.fish"));
-	if (CubeMesh.Succeeded())
-	{
-		PlatformMesh->SetStaticMesh(CubeMesh.Object);
-	}
-	if (CapsuleMesh.Succeeded())
-	{
-		FoeCapsule->SetStaticMesh(CapsuleMesh.Object);
-	}
-	if (FishMesh.Succeeded())
-	{
-		FoeCapsule->SetStaticMesh(FishMesh.Object);
-		FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-		FoeCapsule->SetRelativeScale3D(FVector(0.35f));
-	}
+	FoeSkeletalMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FoeSkeletalMesh"));
+	FoeSkeletalMeshComponent->SetupAttachment(ArtRoot);
+	FoeSkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoeSkeletalMeshComponent->SetHiddenInGame(true);
+	FoeSkeletalMeshComponent->SetVisibility(false);
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
-	if (UnlitMat.Succeeded())
-	{
-		PlatformMesh->SetMaterial(0, UnlitMat.Object);
-		FoeCapsule->SetMaterial(0, UnlitMat.Object);
-	}
 }
 
 void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& InSpec)
@@ -66,12 +46,86 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	Spec = InSpec;
 	bClearingFoe = false;
 	FoeClearAlpha = 1.f;
+	ApplyConfiguredFoeVisual();
 
 	const bool bShowFoe = Spec.bHasFoe;
-	FoeCapsule->SetHiddenInGame(!bShowFoe);
-	FoeCapsule->SetVisibility(bShowFoe);
-	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
+	const bool bUseSkeletalFoe =
+		FoeSkeletalMeshComponent && FoeSkeletalMeshComponent->GetSkeletalMeshAsset();
+	FoeCapsule->SetHiddenInGame(!bShowFoe || bUseSkeletalFoe);
+	FoeCapsule->SetVisibility(bShowFoe && !bUseSkeletalFoe);
+	if (!bUseSkeletalFoe &&
+		(!FoeCapsule->GetStaticMesh()) &&
+		(!FMath::IsNearlyEqual(FoeScale, 0.6f) ||
+			!FMath::IsNearlyEqual(FoeYawOffsetDeg, 90.f) ||
+			!FMath::IsNearlyEqual(FoeHeightOffsetCm, 70.f) ||
+			!FoePivotOffsetCm.IsNearlyZero()))
+	{
+		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
+	}
+	if (FoeSkeletalMeshComponent)
+	{
+		FoeSkeletalMeshComponent->SetHiddenInGame(!bShowFoe || !bUseSkeletalFoe);
+		FoeSkeletalMeshComponent->SetVisibility(bShowFoe && bUseSkeletalFoe);
+	}
+	FoeRuntimeBaseScale = FoeCapsule
+		? FoeCapsule->GetRelativeScale3D()
+		: FVector::OneVector;
 	ApplyColors();
+}
+
+void ANightCourseStoneActor::ApplyConfiguredFoeVisual()
+{
+	const bool bExplicitTransform =
+		!FMath::IsNearlyEqual(FoeScale, 0.6f) ||
+		!FMath::IsNearlyEqual(FoeYawOffsetDeg, 90.f) ||
+		!FMath::IsNearlyEqual(FoeHeightOffsetCm, 70.f) ||
+		!FoePivotOffsetCm.IsNearlyZero();
+
+	const bool bHadComponentSkeletalMesh =
+		FoeSkeletalMeshComponent && FoeSkeletalMeshComponent->GetSkeletalMeshAsset();
+	if (FoeSkeletalMeshComponent)
+	{
+		if (!FoeSkeletalMeshComponent->GetSkeletalMeshAsset() && FoeSkeletalMesh)
+		{
+			FoeSkeletalMeshComponent->SetSkeletalMesh(FoeSkeletalMesh);
+		}
+		if (FoeSkeletalMeshComponent->GetSkeletalMeshAsset())
+		{
+			if (!bHadComponentSkeletalMesh && (FoeSkeletalMesh || bExplicitTransform))
+			{
+				FoeSkeletalMeshComponent->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
+				FoeSkeletalMeshComponent->SetRelativeScale3D(FVector(FoeScale));
+				FoeSkeletalMeshComponent->SetRelativeLocation(
+					FVector(0.f, 0.f, FoeHeightOffsetCm) + FoePivotOffsetCm);
+			}
+			if (FoeMaterial)
+			{
+				FoeSkeletalMeshComponent->SetMaterial(0, FoeMaterial);
+			}
+			FoeCapsule->SetVisibility(false);
+			FoeCapsule->SetHiddenInGame(true);
+			return;
+		}
+	}
+
+	// A mesh assigned directly on the BP's inherited component is authoritative.
+	// This prevents the optional profile slot from overwriting an editor change.
+	if (FoeCapsule && FoeCapsule->GetStaticMesh())
+	{
+		if (FoeMaterial)
+		{
+			for (int32 MaterialIndex = 0; MaterialIndex < FoeCapsule->GetNumMaterials(); ++MaterialIndex)
+			{
+				FoeCapsule->SetMaterial(MaterialIndex, FoeMaterial);
+			}
+		}
+		return;
+	}
+
+	if (FoeStaticMesh)
+	{
+		ApplyFoeMesh(FoeStaticMesh, FoeMaterial);
+	}
 }
 
 void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride)
@@ -91,12 +145,6 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface*
 		FVector(0.f, 0.f, FoeHeightOffsetCm)
 		+ FoeRotation.RotateVector(-MeshCenter * FoeScale));
 	UMaterialInterface* FoeMat = MaterialOverride;
-	if (!FoeMat)
-	{
-		FoeMat = LoadObject<UMaterialInterface>(
-			nullptr,
-			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	}
 	if (FoeMat)
 	{
 		for (int32 MaterialIndex = 0; MaterialIndex < FoeCapsule->GetNumMaterials(); ++MaterialIndex)
@@ -132,6 +180,7 @@ void ANightCourseStoneActor::SetFoeArtTransform(
 			FVector(0.f, 0.f, FoeHeightOffsetCm)
 			+ FoeRotation.RotateVector((FoePivotOffsetCm - MeshCenter) * FoeScale));
 		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
+		FoeRuntimeBaseScale = FoeCapsule->GetRelativeScale3D();
 	}
 }
 
@@ -143,7 +192,6 @@ void ANightCourseStoneActor::ShowFoe()
 	}
 
 	Spec.bHasFoe = true;
-	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	FoeCapsule->SetHiddenInGame(false);
 	FoeCapsule->SetVisibility(true);
 	ApplyColors();
@@ -197,7 +245,7 @@ void ANightCourseStoneActor::Tick(float DeltaSeconds)
 
 	FoeClearAlpha -= DeltaSeconds * 2.5f;
 	const float Alpha = FMath::Clamp(FoeClearAlpha, 0.f, 1.f);
-		FoeCapsule->SetRelativeScale3D(FVector(FoeScale) * Alpha);
+	FoeCapsule->SetRelativeScale3D(FoeRuntimeBaseScale * Alpha);
 	FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
 
 	if (Alpha <= 0.01f)
