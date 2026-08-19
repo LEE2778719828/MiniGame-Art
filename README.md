@@ -13,6 +13,10 @@
 | **场景 / 雾 / 瘴气** | `ArtSubmit/Environment/` | B 路「只压可见」雾皮 |
 | **特效**（砍中、怪消失、掉料） | `ArtSubmit/VFX/` | 石 Actor：`PlaySlashVFX` / `PlayFoeClearedVFX` / `PlayDropBurst` |
 | **UI**（岔口左右牌、键位图标） | `ArtSubmit/UI/` | HUD 岔口牌；换键图标 |
+| **动画**（跳/砍等动作 FBX） | `ArtSubmit/Animation/` | 导入 `/Game/Night/Character/Anims/` 等 |
+| **顾客立绘**（普通 / 特殊 NPC） | `ArtSubmit/Character/npc/` | Day 立绘 → `/Game/Day/Art/npc/` |
+| **道具 / 食材图标** | `ArtSubmit/Props/` | Day 食材与委托道具 → `/Game/Day/Art/food/`、`/Game/Day/Art/props/` |
+| **烹饪 UI**（分层贴图） | `ArtSubmit/UI/cook/` | Day 经营界面 → `/Game/Day/Art/cookingUI/` |
 | **还没分类** | `ArtSubmit/_incoming/` | 程序再分拣 |
 | **本批已归档白模** | `ArtSubmit/Character/`、`ArtSubmit/Stones/Bridge/`、`ArtSubmit/Foes/`、`ArtSubmit/Environment/` | 导入 `/Game/Night/Course/Art/**`，见 `ArtSubmit/README.md` |
 
