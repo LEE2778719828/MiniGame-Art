@@ -12,6 +12,7 @@ class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
 class UStaticMesh;
+class UMaterialInterface;
 class USkeletalMeshComponent;
 class UAnimSequence;
 
@@ -110,7 +111,10 @@ public:
 	void ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompressSeconds);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void ApplyHeroMesh(UStaticMesh* Mesh);
+	void ApplyHeroMesh(
+		UStaticMesh* Mesh,
+		UMaterialInterface* MaterialOverride = nullptr,
+		const FVector& PivotOffsetCm = FVector::ZeroVector);
 
 	/**
 	 * add by K2 (R1): 判定成功时播对应动作，bAttack=false 播跳跃。

@@ -39,7 +39,7 @@ ANightBridgeSegmentActor::ANightBridgeSegmentActor()
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> NightMat(
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (NightMat.Succeeded())
 	{
 		BridgeMesh->SetMaterial(0, NightMat.Object);
@@ -54,21 +54,50 @@ void ANightBridgeSegmentActor::ApplyMesh(UStaticMesh* Mesh)
 	}
 }
 
-void ANightBridgeSegmentActor::SetupBridge(const FNightBridgeSpec& InSpec, UStaticMesh* MeshOverride)
+void ANightBridgeSegmentActor::SetupBridge(
+	const FNightBridgeSpec& InSpec,
+	UStaticMesh* MeshOverride,
+	UMaterialInterface* MaterialOverride,
+	const FVector& PivotOffsetCm,
+	float GlobalScaleMultiplier)
 {
 	Spec = InSpec;
-	if (MeshOverride)
+	if (BridgeMeshOverride)
+	{
+		ApplyMesh(BridgeMeshOverride);
+	}
+	else if (MeshOverride)
 	{
 		ApplyMesh(MeshOverride);
 	}
 	SetActorLocationAndRotation(Spec.WorldLocation, FRotator(0.f, Spec.YawDeg, 0.f));
 	if (BridgeMesh)
 	{
-		const FVector Base = FVector::OneVector;
-		BridgeMesh->SetRelativeScale3D(FVector(
-			12.f * Base.X,
-			FMath::Max(0.05f, Spec.LengthScale) * Base.Y,
-			4.f * Base.Z));
+		const float GlobalScale = FMath::Max(
+			0.01f,
+			FMath::Max(0.01f, GlobalScaleMultiplier)
+			* FMath::Max(0.01f, BridgeScaleMultiplier));
+		const FVector MeshScale(GlobalScale);
+		BridgeMesh->SetRelativeScale3D(MeshScale);
+		BridgeMesh->SetCollisionEnabled(
+			bBridgeCollisionEnabled
+				? ECollisionEnabled::QueryAndPhysics
+				: ECollisionEnabled::NoCollision);
+		const FVector MeshCenter = BridgeMesh->GetStaticMesh()
+			? BridgeMesh->GetStaticMesh()->GetBounds().Origin
+			: FVector::ZeroVector;
+		BridgeMesh->SetRelativeLocation(
+			BridgeMesh->GetRelativeRotation().RotateVector(
+				(BridgePivotOffsetCm + PivotOffsetCm - MeshCenter) * MeshScale));
+		UMaterialInterface* EffectiveMaterial =
+			BridgeMaterialOverride.Get() ? BridgeMaterialOverride.Get() : MaterialOverride;
+		if (EffectiveMaterial)
+		{
+			for (int32 MaterialIndex = 0; MaterialIndex < BridgeMesh->GetNumMaterials(); ++MaterialIndex)
+			{
+				BridgeMesh->SetMaterial(MaterialIndex, EffectiveMaterial);
+			}
+		}
 		if (UMaterialInstanceDynamic* MID =
 			BridgeMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, BridgeMesh->GetMaterial(0)))
 		{

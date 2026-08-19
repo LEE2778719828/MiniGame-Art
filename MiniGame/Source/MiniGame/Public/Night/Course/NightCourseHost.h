@@ -12,6 +12,10 @@ class ANightCoursePawn;
 class UStaticMesh;
 class UMaterialInterface;
 class UExponentialHeightFogComponent;
+class UInstancedStaticMeshComponent;
+class UDirectionalLightComponent;
+class AStaticMeshActor;
+class AActor;
 
 #pragma region K2 moonyfli
 /**
@@ -43,14 +47,72 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Presentation")
 	TObjectPtr<UExponentialHeightFogComponent> NightFog;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewBridgeA;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewBridgeB;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM01;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM02;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM03;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM04;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UInstancedStaticMeshComponent> PreviewFoeM05;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TObjectPtr<UDirectionalLightComponent> PreviewKeyLight;
+
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Night|Editor Preview")
+	TArray<TObjectPtr<AActor>> EditorPreviewMeshActors;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	float RuntimeKeyLightIntensity = 5000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	FLinearColor RuntimeKeyLightColor = FLinearColor(0.72f, 0.82f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Lighting")
+	float RuntimeFogDensity = 0.003f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	TSoftObjectPtr<UMaterialInterface> EditorPreviewMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewBridgeColorA = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewBridgeColorB = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM01 = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM02 = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Editor Preview|Material")
+	FLinearColor EditorPreviewFoeColorM03 = FLinearColor::White;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartCourse();
+
+	UFUNCTION(CallInEditor, Category = "Night|Editor Preview")
+	void RebuildEditorPreview();
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugDumpState() const;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	UFUNCTION()
 	void HandleFinished(const FNightResult& Result);

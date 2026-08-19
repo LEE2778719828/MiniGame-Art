@@ -70,11 +70,11 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	const bool bShowFoe = Spec.bHasFoe;
 	FoeCapsule->SetHiddenInGame(!bShowFoe);
 	FoeCapsule->SetVisibility(bShowFoe);
-	FoeCapsule->SetRelativeScale3D(FVector(0.35f));
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	ApplyColors();
 }
 
-void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
+void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride)
 {
 	if (!FoeCapsule || !Mesh)
 	{
@@ -83,19 +83,55 @@ void ANightCourseStoneActor::ApplyFoeMesh(UStaticMesh* Mesh)
 
 	FoeCapsule->SetStaticMesh(Mesh);
 	// ArtSubmit models use a different forward axis than the course lane.
-	FoeCapsule->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
-	FoeCapsule->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
-	if (UMaterialInterface* NightMat = LoadObject<UMaterialInterface>(
-		nullptr,
-		TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor")))
+	FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
+	const FVector MeshCenter = Mesh->GetBounds().Origin;
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
+	const FRotator FoeRotation(0.f, FoeYawOffsetDeg, 0.f);
+	FoeCapsule->SetRelativeLocation(
+		FVector(0.f, 0.f, FoeHeightOffsetCm)
+		+ FoeRotation.RotateVector(-MeshCenter * FoeScale));
+	UMaterialInterface* FoeMat = MaterialOverride;
+	if (!FoeMat)
 	{
-		FoeCapsule->SetMaterial(0, NightMat);
+		FoeMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+	if (FoeMat)
+	{
+		for (int32 MaterialIndex = 0; MaterialIndex < FoeCapsule->GetNumMaterials(); ++MaterialIndex)
+		{
+			FoeCapsule->SetMaterial(MaterialIndex, FoeMat);
+		}
 		if (UMaterialInstanceDynamic* MID =
-			FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, NightMat))
+			FoeCapsule->CreateAndSetMaterialInstanceDynamicFromMaterial(0, FoeMat))
 		{
 			MID->SetVectorParameterValue(TEXT("Color"), FoeColor);
 		}
+	}
+}
+
+void ANightCourseStoneActor::SetFoeArtTransform(
+	float YawOffsetDeg,
+	float Scale,
+	float HeightOffsetCm,
+	const FVector& PivotOffsetCm)
+{
+	FoeYawOffsetDeg = YawOffsetDeg;
+	FoeScale = FMath::Max(0.01f, Scale);
+	FoeHeightOffsetCm = HeightOffsetCm;
+	FoePivotOffsetCm = PivotOffsetCm;
+	if (FoeCapsule)
+	{
+		FoeCapsule->SetRelativeRotation(FRotator(0.f, FoeYawOffsetDeg, 0.f));
+		const FVector MeshCenter = FoeCapsule->GetStaticMesh()
+			? FoeCapsule->GetStaticMesh()->GetBounds().Origin
+			: FVector::ZeroVector;
+		const FRotator FoeRotation(0.f, FoeYawOffsetDeg, 0.f);
+		FoeCapsule->SetRelativeLocation(
+			FVector(0.f, 0.f, FoeHeightOffsetCm)
+			+ FoeRotation.RotateVector((FoePivotOffsetCm - MeshCenter) * FoeScale));
+		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	}
 }
 
@@ -107,7 +143,7 @@ void ANightCourseStoneActor::ShowFoe()
 	}
 
 	Spec.bHasFoe = true;
-	FoeCapsule->SetRelativeScale3D(FVector(0.6f));
+	FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 	FoeCapsule->SetHiddenInGame(false);
 	FoeCapsule->SetVisibility(true);
 	ApplyColors();
@@ -161,7 +197,7 @@ void ANightCourseStoneActor::Tick(float DeltaSeconds)
 
 	FoeClearAlpha -= DeltaSeconds * 2.5f;
 	const float Alpha = FMath::Clamp(FoeClearAlpha, 0.f, 1.f);
-		FoeCapsule->SetRelativeScale3D(FVector(0.35f) * Alpha);
+		FoeCapsule->SetRelativeScale3D(FVector(FoeScale) * Alpha);
 	FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
 
 	if (Alpha <= 0.01f)

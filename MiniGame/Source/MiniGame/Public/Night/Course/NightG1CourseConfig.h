@@ -8,6 +8,8 @@
 #include "NightG1CourseConfig.generated.h"
 
 class UStaticMesh;
+class UMaterialInterface;
+class ANightBridgeSegmentActor;
 
 #pragma region K2 moonyfli
 /**
@@ -83,6 +85,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> BridgeMeshB;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Classes")
+	TSubclassOf<ANightBridgeSegmentActor> BridgeClassA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Classes")
+	TSubclassOf<ANightBridgeSegmentActor> BridgeClassB;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> HeroMesh;
 
@@ -95,10 +103,67 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TSoftObjectPtr<UStaticMesh> FoeMeshM03;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM04;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TSoftObjectPtr<UStaticMesh> FoeMeshM05;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> DefaultArtMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> BridgeMaterialA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> BridgeMaterialB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> HeroMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM01;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM02;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM03;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM04;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Materials")
+	TSoftObjectPtr<UMaterialInterface> FoeMaterialM05;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeYawOffsetDeg = 90.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeScale = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	float FoeHeightOffsetCm = 70.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Foe Transform")
+	FVector FoePivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Hero Transform")
+	FVector HeroPivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Transform")
+	FVector BridgePivotOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Bridge Transform")
+	float BridgeGlobalScale = 1.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Debug")
 	FNightG1DebugSettings Debug;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|G1")
 	void BuildCourse(TArray<FNightStoneSpec>& OutStones, TArray<FNightBeatSpec>& OutBeats) const;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Night|G1|Editor")
+	void MarkPackageDirtyForEditor();
 };
 #pragma endregion K2 moonyfli

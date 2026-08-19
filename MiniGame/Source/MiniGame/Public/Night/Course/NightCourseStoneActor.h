@@ -8,6 +8,7 @@
 class UStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
+class UMaterialInterface;
 
 #pragma region K2 moonyfli
 /** Single stepping stone; optional foe capsule on top (刃心 whitebox). */
@@ -40,14 +41,33 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
 	FLinearColor FoeColor = FLinearColor(0.95f, 0.2f, 0.18f);
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	float FoeYawOffsetDeg = 90.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	float FoeScale = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	float FoeHeightOffsetCm = 70.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	FVector FoePivotOffsetCm = FVector::ZeroVector;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetupStone(int32 InIndex, const FNightStoneSpec& InSpec);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
-	void ApplyFoeMesh(UStaticMesh* Mesh);
+	void ApplyFoeMesh(UStaticMesh* Mesh, UMaterialInterface* MaterialOverride = nullptr);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ShowFoe();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void SetFoeArtTransform(
+		float YawOffsetDeg,
+		float Scale,
+		float HeightOffsetCm,
+		const FVector& PivotOffsetCm = FVector::ZeroVector);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation);
