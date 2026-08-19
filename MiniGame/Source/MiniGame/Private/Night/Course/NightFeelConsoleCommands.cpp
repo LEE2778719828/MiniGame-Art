@@ -1,11 +1,16 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightFeelTuningData.h" //add by K2
 #include "Animation/AnimSequence.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "UObject/Package.h" //add by K2
+#if WITH_EDITOR
+#include "FileHelpers.h" //add by K2
+#endif
 
 #pragma region K2 (R1)
 namespace NightFeelConsole_Private
@@ -84,7 +89,9 @@ static FAutoConsoleCommandWithWorld GNightFeelStatusCmd(
 		UE_LOG(LogTemp, Warning, TEXT("  按错扣魂(hazard/enemy)=%.0f/%.0f invuln=%.0f | 呼吸扣血 on=%d rate=%.2f/s"),
 			Feel->SoulPenaltyHazard, Feel->SoulPenaltyEnemy, Feel->HitInvulnMs,
 			Feel->bEnableBreathDecay ? 1 : 0, Feel->BreathDecayPerSecond);
-		UE_LOG(LogTemp, Warning, TEXT("  logHud=%d"), Feel->bLogHudLines ? 1 : 0);
+		UE_LOG(LogTemp, Warning, TEXT("  logHud=%d  手感表=%s"),
+			Feel->bLogHudLines ? 1 : 0,
+			Feel->Tuning ? *Feel->Tuning->GetName() : TEXT("<未挂>"));
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GNightFeelSetCmd(
@@ -126,6 +133,65 @@ static FAutoConsoleCommandWithWorldAndArgs GNightFeelSetCmd(
 			return;
 		}
 		UE_LOG(LogTemp, Warning, TEXT("[NightFeel] set %s = %.2f"), *Key, Value);
+	}));
+
+// add by K2 (R1)
+// 手感表的读写两头。调参回路：Night.Feel.Set 现调 → 满意了 Save 落档；
+// 在 Content Browser 里直接改了表 → Reload 套用，不用重开 PIE。
+static FAutoConsoleCommandWithWorld GNightFeelReloadCmd(
+	TEXT("Night.Feel.Reload"),
+	TEXT("Re-apply the FeelStub's Tuning DataAsset to the running session"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		UNightFeelStubComponent* Feel = NightFeelConsole_Private::FindFeel(World);
+		if (!Feel)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] no FeelStub found (PIE running?)"));
+			return;
+		}
+		if (!Feel->ApplyTuning())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] FeelStub 上没挂 Tuning 表，无表可读"));
+			return;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("[NightFeel] 已从 %s 重新套用，用 Night.Feel.Status 核对"),
+			*Feel->Tuning->GetName());
+	}));
+
+// add by K2 (R1)
+static FAutoConsoleCommandWithWorld GNightFeelSaveCmd(
+	TEXT("Night.Feel.Save"),
+	TEXT("Write the currently running feel values back into the Tuning DataAsset and save it"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		UNightFeelStubComponent* Feel = NightFeelConsole_Private::FindFeel(World);
+		if (!Feel)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] no FeelStub found (PIE running?)"));
+			return;
+		}
+		if (!Feel->Tuning)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] FeelStub 上没挂 Tuning 表，无处可写"));
+			return;
+		}
+
+		Feel->Tuning->CaptureFrom(*Feel, NightFeelConsole_Private::FindPawn(World));
+		Feel->Tuning->MarkPackageDirty();
+
+#if WITH_EDITOR
+		// PIE 里拿到的是编辑器那份资产本体，所以直接存盘即可
+		TArray<UPackage*> Packages;
+		Packages.Add(Feel->Tuning->GetOutermost());
+		if (UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] 当前手感已写回 %s 并保存"), *Feel->Tuning->GetName());
+			return;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("[NightFeel] 已写入 %s 但存盘失败，请手动 Ctrl+S"), *Feel->Tuning->GetName());
+#else
+		UE_LOG(LogTemp, Warning, TEXT("[NightFeel] 已写入 %s（非编辑器构建，不落盘）"), *Feel->Tuning->GetName());
+#endif
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GNightFeelPressCmd(
@@ -245,6 +311,46 @@ static FAutoConsoleCommandWithWorldAndArgs GNightAnimDriveCmd(
 
 		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] 动画驱动位移 = %d  锚点 jump=%.0fms attack=%.0fms (下一次移动生效)"),
 			CoursePawn->bAnimDrivenAdvance ? 1 : 0, CoursePawn->JumpAnchorMs, CoursePawn->AttackAnchorMs);
+	}));
+
+// add by K2 (R1)
+// 落脚高度是从桥资产量出来的常数（见 HeroMeshOffset 注释），美术一换就得重调。
+// 放控制台是为了不用为了几厘米重编译。
+static FAutoConsoleCommandWithWorldAndArgs GNightAnimMeshCmd(
+	TEXT("Night.Anim.Mesh"),
+	TEXT("Night.Anim.Mesh <OffsetZ> [Yaw] [Scale] — nudge the skeletal hero's stand height / facing / size live"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		ANightCoursePawn* CoursePawn = NightFeelConsole_Private::FindPawn(World);
+		if (!CoursePawn || !CoursePawn->HeroSkelMesh)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] no course pawn / skeletal hero found (PIE running?)"));
+			return;
+		}
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] 当前 offsetZ=%.2f yaw=%.1f scale=%.2f"),
+				CoursePawn->HeroMeshOffset.Z, CoursePawn->HeroMeshRotation.Yaw, CoursePawn->HeroScale);
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] usage: Night.Anim.Mesh <OffsetZ> [Yaw] [Scale]"));
+			return;
+		}
+
+		CoursePawn->HeroMeshOffset.Z = FCString::Atof(*Args[0]);
+		if (Args.Num() >= 2)
+		{
+			CoursePawn->HeroMeshRotation.Yaw = FCString::Atof(*Args[1]);
+		}
+		if (Args.Num() >= 3)
+		{
+			CoursePawn->HeroScale = FMath::Max(0.01f, FCString::Atof(*Args[2]));
+			CoursePawn->HeroSkelMesh->SetRelativeScale3D(FVector(CoursePawn->HeroScale));
+		}
+
+		// ResolveHeroArt 负责把 offset / rotation 写进组件，顺带保持与静态模的互斥
+		CoursePawn->ResolveHeroArt();
+
+		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] offsetZ=%.2f yaw=%.1f scale=%.2f （桥面顶实测 79.37）"),
+			CoursePawn->HeroMeshOffset.Z, CoursePawn->HeroMeshRotation.Yaw, CoursePawn->HeroScale);
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GNightAnimRateCmd(

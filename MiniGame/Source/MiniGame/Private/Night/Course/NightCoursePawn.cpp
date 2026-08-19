@@ -3,6 +3,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/MeshComponent.h" //add by K2
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
@@ -178,6 +179,31 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	bTrackAdvancing = true;
 }
 
+#pragma region K2 moonyfli
+/**
+ * 把主角材质铺到网格的每一个槽上。静态模 kat 只有一个槽，骨骼 SK_Hero 有两个，
+ * 所以「只设槽 0」这种写法在骨骼上会漏掉一半。MID 也逐槽建：只给槽 0 调色会让
+ * 两半颜色不一致，比不调色更难看。
+ */
+static void ApplyHeroMaterial(UMeshComponent* Component, UMaterialInterface* Material)
+{
+	if (!Component || !Material)
+	{
+		return;
+	}
+
+	for (int32 SlotIndex = 0; SlotIndex < Component->GetNumMaterials(); ++SlotIndex)
+	{
+		Component->SetMaterial(SlotIndex, Material);
+		if (UMaterialInstanceDynamic* MID =
+			Component->CreateAndSetMaterialInstanceDynamicFromMaterial(SlotIndex, Material))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
+		}
+	}
+}
+#pragma endregion K2 moonyfli
+
 void ANightCoursePawn::ApplyHeroMesh(
 	UStaticMesh* Mesh,
 	UMaterialInterface* MaterialOverride,
@@ -199,18 +225,7 @@ void ANightCoursePawn::ApplyHeroMesh(
 	BodyMesh->SetRelativeScale3D(FVector(AppliedHeroScale));
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
-	if (MaterialOverride)
-	{
-		for (int32 MaterialIndex = 0; MaterialIndex < BodyMesh->GetNumMaterials(); ++MaterialIndex)
-		{
-			BodyMesh->SetMaterial(MaterialIndex, MaterialOverride);
-		}
-		if (UMaterialInstanceDynamic* MID =
-			BodyMesh->CreateAndSetMaterialInstanceDynamicFromMaterial(0, MaterialOverride))
-		{
-			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
-		}
-	}
+	ApplyHeroMaterial(BodyMesh, MaterialOverride); //add by K2
 }
 
 void ANightCoursePawn::ApplyConfiguredHeroVisual()
@@ -221,10 +236,10 @@ void ANightCoursePawn::ApplyConfiguredHeroVisual()
 		HeroSkelMesh->SetRelativeLocation(
 			HeroMeshOffset + HeroPivotOffsetCm * HeroScale);
 		HeroSkelMesh->SetRelativeScale3D(FVector(FMath::Max(0.01f, HeroScale)));
-		if (HeroMaterial)
-		{
-			HeroSkelMesh->SetMaterial(0, HeroMaterial);
-		}
+		// add by K2 (R1): SK_Hero 有两个槽（blinn3_002 / pasted__blinn3_002，源模型在 Maya 里
+		// 粘贴几何体留下的重复材质），只喂槽 0 会让另一半留着导入时的灰色默认材质。
+		// 逐槽覆盖并按静态模那条路同样建 MID，两条路径的着色保持一致。
+		ApplyHeroMaterial(HeroSkelMesh, HeroMaterial);
 		bPreferSkeletalHero = true;
 		ResolveHeroArt();
 		return;

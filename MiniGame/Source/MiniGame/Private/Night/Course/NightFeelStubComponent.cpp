@@ -1,5 +1,6 @@
 ﻿#include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightFeelTuningData.h" //add by K2
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/Engine.h"
@@ -20,10 +21,25 @@ void UNightFeelStubComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	ApplyTuning(); //add by K2
+
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
 	{
 		SetupInput(Cast<APlayerController>(Pawn->GetController()));
 	}
+}
+
+// add by K2 (R1)
+bool UNightFeelStubComponent::ApplyTuning()
+{
+	if (!Tuning)
+	{
+		return false;
+	}
+
+	Tuning->ApplyTo(*this, Cast<ANightCoursePawn>(GetOwner()));
+	UE_LOG(LogTemp, Log, TEXT("[NightFeel] 已套用手感表 %s"), *Tuning->GetName());
+	return true;
 }
 
 void UNightFeelStubComponent::SetupInput(APlayerController* PC)

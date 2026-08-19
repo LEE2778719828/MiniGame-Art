@@ -66,8 +66,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
 	FRotator HeroMeshRotation = FRotator(0.f, -90.f, 0.f);
 
+	/**
+	 * 骨骼主角相对 ArtRoot 的落脚偏移。
+	 *
+	 * Z 默认 79.37 = 桥面顶高：muban1 局部顶面 5.29 × 桥的缩放 15。SK_Hero 与 kat 的原点
+	 * 都在脚底，所以这个值就是「脚踩在桥面上」所需的抬升，Z=0 会让角色陷进桥里一半。
+	 *
+	 * 隐患：这是从 R2 当前的桥资产量出来的常数，他换网格或改缩放就会失准。
+	 * 正解是让石头/桥自报落脚面高度，由 Director 转给主角——待与 R2 收口。
+	 * 在那之前用 Night.Anim.Mesh 现调。
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
-	FVector HeroMeshOffset = FVector::ZeroVector;
+	FVector HeroMeshOffset = FVector(0.f, 0.f, 79.37f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
 	TObjectPtr<UAnimSequence> JumpAnim;
@@ -183,14 +193,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Anim")
 	float GetHeroActionRemainingSeconds() const;
 
+	/** 骨骼主角在场时隐藏静态白模，两套美术只显示一套；改完 HeroMeshOffset 等外观参数后调它生效。 */
+	void ResolveHeroArt(); //add by K2
+
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
 	void ApplyAvatarColor(FLinearColor Color);
 	void ApplyRearElevatedCamera();
-
-	/** 骨骼主角在场时隐藏静态白模，两套美术只显示一套。 */
-	void ResolveHeroArt();
 
 	FVector AdvanceTargetLocation = FVector::ZeroVector;
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;

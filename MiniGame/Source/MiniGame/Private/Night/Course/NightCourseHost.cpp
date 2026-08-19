@@ -7,6 +7,7 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h" //add by K2
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
@@ -527,6 +528,13 @@ void ANightCourseHost::WireFeelFromPlayer()
 			if (HeroDefaults)
 			{
 				CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
+				// add by K2 (R1): HeroClass 只有属性会被拷过来，蓝图里直接挂在
+				// HeroSkelMesh 组件上的网格传不过去，结果是配了骨骼却退到静态模、
+				// 动画播在隐藏组件上。属性为空时回退去读组件，让蓝图里看到的即生效。
+				if (!CoursePawn->HeroSkeletalMesh && HeroDefaults->HeroSkelMesh)
+				{
+					CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkelMesh->GetSkeletalMeshAsset();
+				}
 				CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
 				CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
 				CoursePawn->HeroScale = HeroDefaults->HeroScale;

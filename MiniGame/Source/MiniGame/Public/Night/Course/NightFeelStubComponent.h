@@ -7,6 +7,7 @@
 
 class UInputAction;
 class UInputMappingContext;
+class UNightFeelTuningData; //add by K2
 struct FInputActionValue;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNightFeelDebug, float, Soul, ENightJudgeOutcome, LastOutcome);
@@ -48,6 +49,14 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Feel|Input")
 	TObjectPtr<UInputAction> AttackAction;
+
+	// add by K2 (R1) —— 手感参数表
+	/**
+	 * 挂上后 BeginPlay 会用表里的值覆盖下面所有手感参数，让调参集中在一个资产里。
+	 * 留空则用组件上的默认值（旧行为）。运行中改表用 Night.Feel.Reload 重新套用。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel|Tuning")
+	TObjectPtr<UNightFeelTuningData> Tuning;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel")
 	float Soul = 100.f;
@@ -168,6 +177,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Feel")
 	void SetupInput(APlayerController* PC);
+
+	/** add by K2 (R1)：套用 Tuning 表。没挂表返回 false。 */
+	UFUNCTION(BlueprintCallable, Category = "Night|Feel|Tuning")
+	bool ApplyTuning();
 
 	virtual void NotifyJudgeRequest_Implementation(const FNightJudgeRequest& Request) override;
 	virtual void ClearJudgeRequest_Implementation(int32 NodeIndex) override;
