@@ -29,6 +29,83 @@
 
 即使上述资产缺失，原生 C++ 会使用 Engine BasicShapes 生成可玩的白模。
 
+### 餐馆环境绑定
+
+`L_S_DayWhitebox` 中的餐馆美术通过 Actor Tag 与运行时逻辑绑定：
+
+- `SDay.Board`：`ENV_Canguan_pan`，作为原画坐标基准。模型里的孔是美术构图，
+  不要求与逻辑格数量相同；25 个逻辑格仍由 `DT_SDayBoardLayout` 决定，并映射到
+  `pan` 的当前边界。
+- `SDay.Bin.0`～`SDay.Bin.4`：依次绑定 `box6`、`box7`、`box8`、`box9`、
+  `polySurface6`，对应灵谷、阴山菌、赤焰椒、月鳞鱼、玄羽禽。
+- `SDay.Counter`：绑定 `tai1`，当前仅用于环境语义，不承担交互。
+- `SDay.CustomerPlates`：绑定 `kepan`（顶部四个顾客餐盘）。餐馆模式下座位不再用白盒
+  的那一排坐标，而是由这排餐盘解算：横向对齐到餐盘格中心，纵向让立绘**下边框正好落在
+  餐盘上沿**，深度压到摊面之后，于是顾客整体站在摊面上沿之上、从餐盘后面露出。
+  座位数少于 4 时不再在整排里居中：开局随机抽不重复的餐盘格，之后每次刷新都会把空座
+  （不可见）随机挪到没人用的餐盘上，所以下一位客人是随机占座；已入座的客人保持不动，
+  只会跟着相机/美术改动重新贴到当前餐盘格。立绘按贴图高度归一化到同一世界高度
+  （`DayArtPortraitSpriteHeight`），PNG 共享底边基准，所以角色本身的高矮差异会保留。
+  各张 PNG 底部的透明留白并不一样（普通顾客约 12%，特殊 NPC 约 4.5%），只对齐图片边框
+  会让一部分顾客悬在摊面上方，所以运行时会扫一遍贴图 alpha（每张只扫一次并缓存），把立绘
+  按自己的留白下移，落地的是**画面内容**的下沿而不是图片下沿。因此新立绘不需要统一留白，
+  但底部留白必须是完全透明（alpha ≤ 8）。
+- `SDay.Environment`：所有 `ENV_Canguan_*` Actor 与背景平面；Presenter 在运行时统一关闭其
+  碰撞，防止家具先于逻辑代理截获点击。
+- `Mesh_0` 暂不认定为厨师，不配置角色 Tag；餐馆模式不生成白盒厨师。
+
+找到 `SDay.Board` 时，Presenter 会关闭旧棋盘方块、柜台方块和装饰圆柱；逻辑格、
+食材箱和座位保留不可见的 `Visibility` 查询碰撞，座位的查询代理会放大到覆盖立绘，
+保证点到看得见的顾客就能交付。座位的世界文字标签在餐馆模式下隐藏（它是为旧俯视机位
+做的平躺文字，在当前机位近乎侧视），订单信息仍在 HUD 上。
+缺少上述 Tag 时仍回退为完整可玩的白盒。重新摆放环境后运行
+`Tools/ConfigureDayArtBindings.py` 恢复 Tag；`PlaceCanguanPreview.py` 新生成的 Actor
+也会自动带上这些 Tag。
+
+### 画面背景（取景框参考）
+
+- `SDay.Backdrop`：`ENV_FrameBackdrop`，一块正对相机、**刚好等于相机取景框**的平面，
+  深度压在所有 `SDay.Environment` 之后。餐馆美术之前悬在纯黑虚空里，而竖屏画面在横向
+  窗口里的黑边也是纯黑，看不出画面边界在哪；现在「背景色 ↔ 黑」的分界线就是出画边界
+  （正交构图时在 1920×1151 的 PIE 窗口里量到 x 700..1219，正好是 9:20 的 520px 宽）。
+- 取景框宽度按投影方式解算（`DayCameraFrameWidthAtDepth`）：正交是 `OrthoWidth`（与距离
+  无关），透视是 `2 * 深度 * tan(FOV/2)`——项目锁横向 FOV（`MAINTAIN_XFOV`），所以
+  `FieldOfView` 是横向角；高度一律是宽度 / `AspectRatio`。平面只在单一深度上，所以透视下
+  也能严丝合缝。
+- 材质 `M_SDayFrameBackdrop` 是 Unlit 深蓝灰：调灯或改曝光都不会改变这条边界的样子，
+  也不会跟灰色占位模型混在一起。
+- 相机改完构图后要重跑 `Tools/AddDayFrameBackdrop.py` 刷新编辑器视口里的平面；PIE 不
+  依赖它，Presenter 在 `BeginPlay` 用实时相机重算一遍平面（`FitDayArtBackdrop`），
+  所以运行时看到的边界永远是真的。用 `Tools/DumpBackdropFraming.py` 可以核对平面在
+  相机空间的四角。
+
+### 相机
+
+- `Day_CompositionCamera`（Tag `SDayCamera`）是构图的唯一来源：Presenter 找到它就原样
+  当作 PIE 视角，不覆盖投影、位置或缩放，所以构图完全在编辑器里手调。
+- 当前状态：**Perspective**、`FieldOfView 90`、`ConstrainAspectRatio` + `AspectRatio 0.45`，
+  位置 `(10.3, -3000.0, -137.3)`、pitch -6 / yaw 90。这套位置当初是在正交下调的（正交里
+  距离不影响构图），换到透视后主体在画面里偏小，需要重新手调距离或 FOV。
+- 切投影只用 `Tools/SetDayCameraProjection.py perspective|orthographic`：它只改投影模式，
+  不动位置和缩放。`Tools/FitDayCameraToResolution.py` 是正交专用的缩放/居中解算，遇到
+  透视相机会直接报错退出——它以前会顺手把相机改回正交，把手动切换的透视覆盖掉。
+- 当前状态用 `Tools/DumpDayCameraState.py` 查（含相机 Actor 落在 `__ExternalActors__`
+  的哪个包）。
+
+### 光照与曝光
+
+- 画面唯一的运行时光源是 Presenter 的 `WhiteboxKeyLight`：顺相机方向从后往前照
+  （`AimKeyLightAlongCamera`），颜色接近中性白（`DayArtKeyLightColor`）。餐馆材质目前是
+  FBX 带来的灰色占位（DiffuseColor 0.4，无贴图），之前那股「木头黄」其实全来自暖色灯，
+  所以灯一中性化画面就回到灰白模。
+- 项目关掉了自动曝光（`r.DefaultFeature.AutoExposure=False`），画面亮度只由灯强度决定：
+  `DayArtKeyLightIntensity = 0.7` 让灰模落在中灰（截图灰度均值约 137，峰值 149，不过曝）。
+  不要在相机上打开 `AutoExposureMethod` 之类的覆盖，否则自动曝光会被重新打开，
+  竖屏画面在横向编辑器窗口里的黑边会把直方图带偏、整帧过曝。
+- `Tools/AddDayWhiteboxEditorLights.py` 生成的两盏预览灯既是 editor-only 又
+  `HiddenInGame`：`is_editor_only_actor` 只在 Cook 时剔除，PIE 里仍然会照，之前 PIE 就是
+  被「预览灯 + 运行时灯」照了两遍，比出包更亮更黄。现在 PIE 看到的就是出包的光照。
+
 ## 3. 模型规范
 
 - UE 单位：厘米；导入比例 1.0。

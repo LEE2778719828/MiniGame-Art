@@ -12,6 +12,7 @@
 #include "SStandaloneSandbox.generated.h"
 
 class UTextBlock;
+class UTexture2D;
 class UUniformGridPanel;
 class ASMergeBoard;
 class USDebugPanel;
@@ -171,6 +172,12 @@ struct FSIngredientDefRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString ShortName;
+
+#pragma region K2 moonyfli
+	/** Shared inventory/bin/HUD artwork for this Lv0 ingredient. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSoftObjectPtr<UTexture2D> Icon;
+#pragma endregion K2 moonyfli
 };
 
 /** DT_SpecialNpcs 行：特殊顾客委托规则、谢礼与对白。 */
@@ -219,6 +226,12 @@ struct FSSpecialNpcDefRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString Dialogue;
+
+#pragma region K2 moonyfli
+	/** Camera-facing portrait used by the Day service seat and order HUD. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSoftObjectPtr<UTexture2D> Portrait;
+#pragma endregion K2 moonyfli
 };
 
 /** DT_Gifts 行：谢礼显示、Buff 开关与下局自动效果数值。 */
@@ -265,6 +278,12 @@ struct FSCustomerNameRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString DisplayName;
+
+#pragma region K2 moonyfli
+	/** Portrait assigned with this ordinary customer identity. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSoftObjectPtr<UTexture2D> Portrait;
+#pragma endregion K2 moonyfli
 };
 #pragma endregion K2 moonyfli
 

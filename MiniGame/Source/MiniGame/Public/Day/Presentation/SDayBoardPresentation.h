@@ -8,6 +8,7 @@
 #include "SDayBoardPresentation.generated.h"
 
 class ASMergeBoard;
+class UBillboardComponent;
 class UBorder;
 class UButton;
 class UCanvasPanelSlot;
@@ -20,6 +21,7 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UTextBlock;
 class UTextRenderComponent;
+class UTexture2D;
 class USChefGameInstance;
 class UScrollBox;
 class USizeBox;
@@ -109,6 +111,15 @@ public:
 
 	void SetLabelFont(UFont* InFont);
 
+#pragma region K2 moonyfli
+	/**
+	 * Seat dishes on the cell origin instead of lifting them clear of a whitebox disc. The art
+	 * pan puts the origin at a well floor, and the well is tilted toward the camera, so any lift
+	 * projects on screen as the dish sliding out of its hole.
+	 */
+	void SetSeatedInWell(bool bInSeated);
+#pragma endregion K2 moonyfli
+
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
 	void RefreshVisual();
 
@@ -141,6 +152,10 @@ public:
 
 	void SetLabelFont(UFont* InFont);
 
+#pragma region K2 moonyfli
+	void SetIngredientIcon(UTexture2D* InTexture);
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	FName IngredientId = NAME_None;
 
@@ -149,6 +164,11 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> Label;
+
+#pragma region K2 moonyfli
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UBillboardComponent> IngredientIcon;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -165,6 +185,10 @@ public:
 	void SetHeadline(const FString& InText, const FLinearColor& InColor);
 
 	void SetLabelFont(UFont* InFont);
+
+#pragma region K2 moonyfli
+	void SetPortrait(UTexture2D* InTexture);
+#pragma endregion K2 moonyfli
 
 	/** None while empty or taken by a walk-in guest; set to ALing/SangPo when an NPC sits down. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
@@ -192,6 +216,11 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> Label;
+
+#pragma region K2 moonyfli
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UBillboardComponent> Portrait;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
