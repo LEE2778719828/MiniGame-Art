@@ -339,15 +339,6 @@ void ANightCourseHost::RebuildEditorPreview()
 	TSet<int32> ArtStoneIndexes;
 	for (const FNightAtomVisualBinding& Binding : VisualBindings)
 	{
-		if (Binding.bIsBridge)
-		{
-			ArtBridgeIndexes.Add(Binding.BridgeIndex);
-		}
-		else
-		{
-			ArtStoneIndexes.Add(Binding.StoneIndex);
-		}
-
 		TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
 		if (!Binding.bIsBridge
 			&& Preview.Stones.IsValidIndex(Binding.StoneIndex)
@@ -355,6 +346,31 @@ void ANightCourseHost::RebuildEditorPreview()
 			&& Binding.AlternateVisualPrefabClass)
 		{
 			VisualClass = Binding.AlternateVisualPrefabClass;
+		}
+		if (Binding.bIsBridge)
+		{
+			ArtBridgeIndexes.Add(Binding.BridgeIndex);
+		}
+		else if (VisualClass)
+		{
+			ArtStoneIndexes.Add(Binding.StoneIndex);
+		}
+		if (!VisualClass)
+		{
+			// A landing point's normal character preview is editor-only. If
+			// this point is not an Enemy beat, there is no runtime/Host
+			// landing actor to spawn.
+			continue;
+		}
+		if (!Binding.bIsBridge
+			&& VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse] LandingPoint preview binding %d resolves to a Bridge BP; configure a character/enemy BP."),
+				Binding.StoneIndex);
+			continue;
 		}
 		AActor* Actor = nullptr;
 		if (Binding.bIsBridge && Preview.Bridges.IsValidIndex(Binding.BridgeIndex))
