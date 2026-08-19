@@ -2,6 +2,9 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCourseDirector.h"
@@ -52,6 +55,36 @@ ANightCoursePawn::ANightCoursePawn()
 		BodyMesh->SetRelativeScale3D(FVector(0.75f));
 		HeadMesh->SetVisibility(false);
 		HeadMesh->SetHiddenInGame(true);
+	}
+
+	// add by K2 (R1): 骨骼主角。单节点播放，不挂 AnimBP —— 这一层只要「按一下动一下」，
+	// 状态机等 idle 动画到位后再说。
+	HeroSkelMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeroSkelMesh"));
+	HeroSkelMesh->SetupAttachment(ArtRoot);
+	HeroSkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HeroSkelMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	HeroSkelMesh->SetRelativeRotation(HeroMeshRotation);
+	HeroSkelMesh->SetRelativeLocation(HeroMeshOffset);
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> HeroSkeletal(
+		TEXT("/Game/Night/Character/SK_Hero.SK_Hero"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpClip(
+		TEXT("/Game/Night/Character/Anims/Jump_noknife2.Jump_noknife2"));
+	// 常速斩击尚未到位（源文件的动画取不出来，见任务清单第 22 轮），暂用 200ms 的快版顶替
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> AttackClip(
+		TEXT("/Game/Night/Character/Anims/Slash_fast_Armature_Armature_kan.Slash_fast_Armature_Armature_kan"));
+
+	if (HeroSkeletal.Succeeded())
+	{
+		HeroSkelMesh->SetSkeletalMeshAsset(HeroSkeletal.Object);
+	}
+	if (JumpClip.Succeeded())
+	{
+		JumpAnim = JumpClip.Object;
+	}
+	if (AttackClip.Succeeded())
+	{
+		AttackAnim = AttackClip.Object;
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> UnlitMat(TEXT("/Game/Night/Course/Materials/M_NightUnlitColor.M_NightUnlitColor"));
@@ -130,6 +163,7 @@ void ANightCoursePawn::BeginPlay()
 	Super::BeginPlay();
 	ApplyRearElevatedCamera();
 	ApplyAvatarColor(FLinearColor(0.95f, 0.9f, 0.75f));
+	ResolveHeroArt();
 	if (UWorld* World = GetWorld())
 	{
 		if (APlayerController* PC = World->GetFirstPlayerController())
@@ -184,6 +218,50 @@ void ANightCoursePawn::ApplyHeroMesh(UStaticMesh* Mesh)
 			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.72f, 0.28f));
 		}
 	}
+}
+
+// add by K2 (R1)
+void ANightCoursePawn::ResolveHeroArt()
+{
+	const bool bSkeletalReady =
+		bPreferSkeletalHero && HeroSkelMesh && HeroSkelMesh->GetSkeletalMeshAsset() != nullptr;
+
+	if (HeroSkelMesh)
+	{
+		HeroSkelMesh->SetRelativeRotation(HeroMeshRotation);
+		HeroSkelMesh->SetRelativeLocation(HeroMeshOffset);
+		HeroSkelMesh->SetVisibility(bSkeletalReady);
+		HeroSkelMesh->SetHiddenInGame(!bSkeletalReady);
+	}
+
+	if (!bSkeletalReady)
+	{
+		return;
+	}
+
+	for (UStaticMeshComponent* Mesh : { BodyMesh.Get(), HeadMesh.Get() })
+	{
+		if (Mesh)
+		{
+			Mesh->SetVisibility(false);
+			Mesh->SetHiddenInGame(true);
+		}
+	}
+}
+
+// add by K2 (R1)
+void ANightCoursePawn::PlayHeroAction(bool bAttack)
+{
+	UAnimSequence* Clip = bAttack ? AttackAnim : JumpAnim;
+	if (!HeroSkelMesh || !Clip || HeroSkelMesh->GetSkeletalMeshAsset() == nullptr)
+	{
+		return;
+	}
+
+	HeroAnimPlayRate = 1.f;
+	// 不循环：跳/斩都是一次性动作，播完停在末帧等下一次输入（idle 动画到位前的权宜）
+	HeroSkelMesh->PlayAnimation(Clip, false);
+	HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
 }
 
 void ANightCoursePawn::Tick(float DeltaSeconds)
@@ -302,6 +380,13 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 
 	// 只影响剩余这一段；下次 BeginTrackAdvance 会用配置速度重置
 	AdvanceSpeed = Remaining / TargetTime;
+
+	// add by K2 (R1): 表现时钟跟着判定走 —— 位移压缩多少倍，正在播的动作就加速多少倍
+	if (HeroSkelMesh && HeroSkelMesh->GetSkeletalMeshAsset())
+	{
+		HeroAnimPlayRate *= BaseTime / TargetTime;
+		HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+	}
 }
 
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)

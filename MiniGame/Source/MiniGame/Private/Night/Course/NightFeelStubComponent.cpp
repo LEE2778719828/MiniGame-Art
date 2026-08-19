@@ -394,8 +394,14 @@ void UNightFeelStubComponent::ApplySoulPenalty_Implementation(float Amount, ENig
 
 void UNightFeelStubComponent::PlaySuccessFeedback_Implementation(ENightNodeKind Kind)
 {
-	PushHudLine(9912, 1.2f, FColor::Green,
-		Kind == ENightNodeKind::Enemy ? TEXT("HIT OK") : TEXT("JUMP OK"));
+	const bool bAttack = (Kind == ENightNodeKind::Enemy);
+	PushHudLine(9912, 1.2f, FColor::Green, bAttack ? TEXT("HIT OK") : TEXT("JUMP OK"));
+
+	// add by K2 (R1): 判定成功即起表现时钟，动作与随后的石间位移同时开始
+	if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwner()))
+	{
+		CoursePawn->PlayHeroAction(bAttack);
+	}
 }
 
 void UNightFeelStubComponent::PlayFailFeedback_Implementation(ENightJudgeOutcome Outcome, ENightNodeKind Kind)

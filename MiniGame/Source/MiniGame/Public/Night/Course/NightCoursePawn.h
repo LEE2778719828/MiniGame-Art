@@ -12,6 +12,8 @@ class UInputMappingContext;
 class UInputAction;
 class UStaticMeshComponent;
 class UStaticMesh;
+class USkeletalMeshComponent;
+class UAnimSequence;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -31,6 +33,30 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> HeadMesh;
+
+	// add by K2 (R1) —— 骨骼网格主角
+	/**
+	 * 骨骼主角。加载成功时接管显示，R2 的静态网格随即隐藏（两者互斥，不做混排）。
+	 * 想退回静态白模，把 bPreferSkeletalHero 关掉即可。
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TObjectPtr<USkeletalMeshComponent> HeroSkelMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
+	bool bPreferSkeletalHero = true;
+
+	/** 落点之间的朝向修正：美术资产的正面轴与赛道前进方向不一定一致。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
+	FRotator HeroMeshRotation = FRotator(0.f, -90.f, 0.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
+	FVector HeroMeshOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
+	TObjectPtr<UAnimSequence> JumpAnim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
+	TObjectPtr<UAnimSequence> AttackAnim;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Camera")
 	TObjectPtr<USpringArmComponent> SpringArm;
@@ -86,16 +112,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ApplyHeroMesh(UStaticMesh* Mesh);
 
+	/**
+	 * add by K2 (R1): 判定成功时播对应动作，bAttack=false 播跳跃。
+	 * 表现时钟从这里起算：随后的 ApplyAdvanceCatchUp 会按同样倍率把它一起加速。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Night|Anim")
+	void PlayHeroAction(bool bAttack);
+
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
 	void ApplyAvatarColor(FLinearColor Color);
 	void ApplyRearElevatedCamera();
 
+	/** 骨骼主角在场时隐藏静态白模，两套美术只显示一套。 */
+	void ResolveHeroArt();
+
 	FVector AdvanceTargetLocation = FVector::ZeroVector;
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;
 	float AdvanceSpeed = 1400.f;
 	bool bTrackAdvancing = false;
 	bool bUsingHeroArt = false;
+
+	/** 当前动作的播放倍率，追赶加速时在此基础上再乘。 */
+	float HeroAnimPlayRate = 1.f;
 };
 #pragma endregion K2 moonyfli
