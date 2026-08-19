@@ -1,0 +1,18 @@
+{
+  "seed": 1001,
+  "route": [
+    {
+      "atomKey": "A",
+      "actions": ["Jump", "Kill", "Kill"]
+    },
+    {
+      "atomKey": "B",
+      "actions": ["Kill", "Jump", "Kill"]
+    },
+    {
+      "atomKey": "C",
+      "actions": ["Jump", "Kill", "Jump"]
+    }
+  ],
+  "transitionAction": "Jump"
+}

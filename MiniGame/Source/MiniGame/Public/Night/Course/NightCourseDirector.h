@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "Night/Course/NightCourseAtomActor.h"
 #include "Night/Shared/NightSharedTypes.h"
 #include "NightCourseDirector.generated.h"
 
@@ -10,6 +11,8 @@ class UNightG1CourseConfig;
 class ANightCourseStoneActor;
 class ANightBridgeSegmentActor;
 class ANightCoursePawn;
+class AActor;
+class UBoxComponent;
 class INightFeelBridge;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseFinished, const FNightResult&, Result);
@@ -60,6 +63,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void BindRunnerPawn(ANightCoursePawn* InPawn);
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Layout")
+	void SetLayoutBoundsComponent(UBoxComponent* InBoundsComponent, bool bInEnforceBounds);
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void NotifyFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome);
 
@@ -68,6 +74,17 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugSkipToExit();
+
+	bool BuildCourseForPreview(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges) const;
+
+	bool BuildCourseForPreview(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges,
+		TArray<FNightAtomVisualBinding>& OutVisualBindings) const;
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsRunning() const { return bRunning; }
@@ -126,11 +143,17 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FNightBridgeSpec> BridgeSpecs;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Visual")
+	TArray<FNightAtomVisualBinding> VisualBindings;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<TObjectPtr<ANightCourseStoneActor>> SpawnedStones;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<TObjectPtr<ANightBridgeSegmentActor>> SpawnedBridges;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Visual")
+	TArray<TObjectPtr<AActor>> SpawnedVisualActors;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
@@ -147,13 +170,34 @@ protected:
 	bool bWindowOpen = false;
 	bool bAdvancing = false;
 
+	UPROPERTY()
+	TObjectPtr<UBoxComponent> LayoutBoundsComponent;
+
+	UPROPERTY()
+	bool bEnforceLayoutBounds = false;
+
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
 	void SetPhase(ENightCoursePhase NewPhase);
 	void FinishNight(const FNightResult& Result);
 	void EnsureCourse();
+	bool BuildAtomRouteCourse(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges) const;
+	bool BuildAtomRouteCourse(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges,
+		TArray<FNightAtomVisualBinding>& OutVisualBindings) const;
 	void SpawnStoneActor(int32 Index);
 	void SpawnBridgeActor(int32 Index);
+	void SpawnVisualBinding(int32 BindingIndex);
+	void SetStoneVisualVisibility(int32 StoneIndex, bool bVisible);
+	bool IsAtomTransformInsideLayoutBounds(
+		const ANightCourseAtomActor* AtomDefaults,
+		const FTransform& AtomWorld) const;
+	bool HasVisualBindingForStone(int32 StoneIndex) const;
 	void TryOpenBeat(int32 BeatIndex);
 	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginAdvanceToStone(int32 StoneIndex);
