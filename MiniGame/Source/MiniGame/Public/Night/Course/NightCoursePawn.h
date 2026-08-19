@@ -59,6 +59,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
 	TObjectPtr<UAnimSequence> AttackAnim;
 
+	/**
+	 * 动作播放倍率（<1 变慢、>1 变快）。常速斩击到位前，用它把快版拨到能接受的节奏。
+	 * 追赶加速在此基础上再乘，所以这里改的是「基准速度」，不影响双时钟的压缩逻辑。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "0.05", ClampMax = "4.0"))
+	float JumpAnimRate = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "0.05", ClampMax = "4.0"))
+	float AttackAnimRate = 1.f;
+
+	// add by K2 (R1) —— 动画驱动位移
+	/**
+	 * 开启后石间移动的时长由动画锚点决定，而不是 R2 配的 AdvanceSpeed。
+	 * 好处是倍率一改，动作与位移一起缩放、永远同步；代价是移动速度随石距变化，
+	 * 且石距不再影响节奏。默认关，先用 Night.Anim.Drive 1 对比过再决定。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
+	bool bAnimDrivenAdvance = false;
+
+	/**
+	 * 动作与位移的对齐锚点（ms，倍率 1.0 下的值）。位移在锚点这一刻结束，锚点之后是收尾。
+	 * 跳跃取落地帧、斩击取接触帧，由 Tools/MeasureAnimAnchors.py 量出。
+	 * 等 TA 在接触帧打上 AnimNotify 后，这两个值应改为运行时读取。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
+	float JumpAnchorMs = 266.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
+	float AttackAnchorMs = 179.f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Camera")
 	TObjectPtr<USpringArmComponent> SpringArm;
 
@@ -123,6 +153,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Anim")
 	void PlayHeroAction(bool bAttack);
 
+	/** 正在生效的播放倍率（基准 × 追赶加速）。 */
+	UFUNCTION(BlueprintPure, Category = "Night|Anim")
+	float GetHeroAnimPlayRate() const { return HeroAnimPlayRate; }
+
+	/**
+	 * add by K2 (R1): 当前动作还要播多久（秒），已计入播放倍率；没在播返回 0。
+	 * 裁定 R-007 用它把「挂机扣血」的起算点推到动画播完之后。
+	 */
+	UFUNCTION(BlueprintPure, Category = "Night|Anim")
+	float GetHeroActionRemainingSeconds() const;
+
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
@@ -140,5 +181,11 @@ protected:
 
 	/** 当前动作的播放倍率，追赶加速时在此基础上再乘。 */
 	float HeroAnimPlayRate = 1.f;
+
+	/**
+	 * 最近一次动作是不是斩击。PlayHeroAction 早于 Director 的 BeginTrackAdvance，
+	 * 所以动画驱动模式靠它选锚点——Director 传进来的只有位置和速度，认不出节点类型。
+	 */
+	bool bLastActionWasAttack = false;
 };
 #pragma endregion K2 moonyfli

@@ -93,6 +93,17 @@ public:
 	float TutorialAttackWindowMs = 520.f;
 
 	// add by K2 (R1) —— 呼吸扣血（裁定 R-006）
+	/**
+	 * add by K2 (R1) 裁定 R-007：空档期从上一个动作播完之后才起算。
+	 * 关掉则退回旧口径（落地即起算），仅用于对比。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel|Soul")
+	bool bGraceWaitsForAnim = true;
+
+	/** 上一拍等了多久动画收尾（秒），仅调试可视。 */
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel|Debug")
+	float LastAnimTailSeconds = 0.f;
+
 	/** 是否启用呼吸扣血（关掉则发呆完全免费，仅用于调试）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel|Soul")
 	bool bEnableBreathDecay = true;
@@ -182,6 +193,10 @@ protected:
 	};
 
 	float GetWorldTimeSeconds() const;
+
+	/** 主角当前动作还剩多久（秒）；拿不到 Pawn 或没在播返回 0。 */
+	float GetHeroActionRemainingSeconds() const;
+
 	ENightJudgeOutcome JudgeInput(ENightFeelInput Input);
 
 	/** 空档期结束、转入呼吸扣血（只在转入的那一下调一次）。 */

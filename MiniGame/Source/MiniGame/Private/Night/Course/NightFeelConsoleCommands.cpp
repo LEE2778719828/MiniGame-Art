@@ -1,6 +1,7 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Animation/AnimSequence.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -34,6 +35,21 @@ namespace NightFeelConsole_Private
 		return nullptr;
 	}
 
+	static ANightCoursePawn* FindPawn(UWorld* World)
+	{
+		if (!World)
+		{
+			return nullptr;
+		}
+		if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(UGameplayStatics::GetPlayerPawn(World, 0)))
+		{
+			return CoursePawn;
+		}
+		TArray<AActor*> Pawns;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCoursePawn::StaticClass(), Pawns);
+		return Pawns.Num() > 0 ? Cast<ANightCoursePawn>(Pawns[0]) : nullptr;
+	}
+
 	static const TCHAR* PhaseName(ENightFeelPhase Phase)
 	{
 		switch (Phase)
@@ -63,6 +79,8 @@ static FAutoConsoleCommandWithWorld GNightFeelStatusCmd(
 			Feel->bUseTutorialWindows ? 1 : 0, Feel->TutorialJumpWindowMs, Feel->TutorialAttackWindowMs);
 		UE_LOG(LogTemp, Warning, TEXT("  early=%.0f catchUp=%.2f maxCompress=%.0f"),
 			Feel->EarlyAcceptMs, Feel->CatchUpPlayRate, Feel->MaxCatchUpCompressMs);
+		UE_LOG(LogTemp, Warning, TEXT("  空档等动画 on=%d 上一拍等了 %.0fms（裁定 R-007）"),
+			Feel->bGraceWaitsForAnim ? 1 : 0, Feel->LastAnimTailSeconds * 1000.f);
 		UE_LOG(LogTemp, Warning, TEXT("  按错扣魂(hazard/enemy)=%.0f/%.0f invuln=%.0f | 呼吸扣血 on=%d rate=%.2f/s"),
 			Feel->SoulPenaltyHazard, Feel->SoulPenaltyEnemy, Feel->HitInvulnMs,
 			Feel->bEnableBreathDecay ? 1 : 0, Feel->BreathDecayPerSecond);
@@ -71,7 +89,7 @@ static FAutoConsoleCommandWithWorld GNightFeelStatusCmd(
 
 static FAutoConsoleCommandWithWorldAndArgs GNightFeelSetCmd(
 	TEXT("Night.Feel.Set"),
-	TEXT("Night.Feel.Set <Param> <Value> — live-tune feel params. Params: Jump, Attack, Tutorial, Early, CatchUp, MaxCompress, Hazard, Enemy, Invuln, Soul, Breath, BreathOn, LogHud"),
+	TEXT("Night.Feel.Set <Param> <Value> — live-tune feel params. Params: Jump, Attack, Tutorial, Early, CatchUp, MaxCompress, Hazard, Enemy, Invuln, Soul, Breath, BreathOn, LogHud, GraceWaitsAnim"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 	{
 		UNightFeelStubComponent* Feel = NightFeelConsole_Private::FindFeel(World);
@@ -101,6 +119,7 @@ static FAutoConsoleCommandWithWorldAndArgs GNightFeelSetCmd(
 		else if (Key.Equals(TEXT("Breath"), ESearchCase::IgnoreCase))      { Feel->BreathDecayPerSecond = Value; }
 		else if (Key.Equals(TEXT("BreathOn"), ESearchCase::IgnoreCase))    { Feel->bEnableBreathDecay = (Value != 0.f); }
 		else if (Key.Equals(TEXT("LogHud"), ESearchCase::IgnoreCase))      { Feel->bLogHudLines = (Value != 0.f); }
+		else if (Key.Equals(TEXT("GraceWaitsAnim"), ESearchCase::IgnoreCase)) { Feel->bGraceWaitsForAnim = (Value != 0.f); }
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[NightFeel] unknown param '%s'"), *Key);
@@ -158,5 +177,108 @@ static FAutoConsoleCommandWithWorldAndArgs GNightFeelPressCmd(
 				IntervalSeconds * Index,
 				false);
 		}
+	}));
+
+// add by K2 (R1)
+// 常速斩击缺位期间，快版要拨到多慢才顺，只能按出来。放控制台省去每次改参数重编译。
+static FAutoConsoleCommandWithWorld GNightAnimStatusCmd(
+	TEXT("Night.Anim.Status"),
+	TEXT("Dump hero animation clips, base play rates and the resulting durations"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		ANightCoursePawn* CoursePawn = NightFeelConsole_Private::FindPawn(World);
+		if (!CoursePawn)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] no course pawn found (PIE running?)"));
+			return;
+		}
+
+		auto Describe = [](const TCHAR* Label, UAnimSequence* Clip, float Rate)
+		{
+			if (!Clip)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("  %s: <none>"), Label);
+				return;
+			}
+			const float RawMs = Clip->GetPlayLength() * 1000.f;
+			const float SafeRate = FMath::Max(0.05f, Rate);
+			UE_LOG(LogTemp, Warning, TEXT("  %s: %s  raw=%.0fms  rate=%.2f  ->  %.0fms"),
+				Label, *Clip->GetName(), RawMs, SafeRate, RawMs / SafeRate);
+		};
+
+		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] currently playing at rate %.2f (base x catch-up), %.0fms left"),
+			CoursePawn->GetHeroAnimPlayRate(), CoursePawn->GetHeroActionRemainingSeconds() * 1000.f);
+		Describe(TEXT("Jump  "), CoursePawn->JumpAnim, CoursePawn->JumpAnimRate);
+		Describe(TEXT("Attack"), CoursePawn->AttackAnim, CoursePawn->AttackAnimRate);
+		UE_LOG(LogTemp, Warning, TEXT("  动画驱动位移 on=%d  锚点 jump=%.0fms attack=%.0fms"),
+			CoursePawn->bAnimDrivenAdvance ? 1 : 0, CoursePawn->JumpAnchorMs, CoursePawn->AttackAnchorMs);
+	}));
+
+// add by K2 (R1)
+static FAutoConsoleCommandWithWorldAndArgs GNightAnimDriveCmd(
+	TEXT("Night.Anim.Drive"),
+	TEXT("Night.Anim.Drive <0|1> [JumpAnchorMs] [AttackAnchorMs] — 1 makes the stone-to-stone move last "
+		 "as long as the animation's anchor (landing / contact) instead of using the configured AdvanceSpeed"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		ANightCoursePawn* CoursePawn = NightFeelConsole_Private::FindPawn(World);
+		if (!CoursePawn)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] no course pawn found (PIE running?)"));
+			return;
+		}
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] usage: Night.Anim.Drive <0|1> [JumpAnchorMs] [AttackAnchorMs]"));
+			return;
+		}
+
+		CoursePawn->bAnimDrivenAdvance = (FCString::Atof(*Args[0]) != 0.f);
+		if (Args.Num() >= 2)
+		{
+			CoursePawn->JumpAnchorMs = FMath::Max(10.f, FCString::Atof(*Args[1]));
+		}
+		if (Args.Num() >= 3)
+		{
+			CoursePawn->AttackAnchorMs = FMath::Max(10.f, FCString::Atof(*Args[2]));
+		}
+
+		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] 动画驱动位移 = %d  锚点 jump=%.0fms attack=%.0fms (下一次移动生效)"),
+			CoursePawn->bAnimDrivenAdvance ? 1 : 0, CoursePawn->JumpAnchorMs, CoursePawn->AttackAnchorMs);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GNightAnimRateCmd(
+	TEXT("Night.Anim.Rate"),
+	TEXT("Night.Anim.Rate <Jump|Attack> <Rate> — set the base play rate (<1 slower, >1 faster). Takes effect on the next action."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		ANightCoursePawn* CoursePawn = NightFeelConsole_Private::FindPawn(World);
+		if (!CoursePawn)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] no course pawn found (PIE running?)"));
+			return;
+		}
+		if (Args.Num() < 2)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NightAnim] usage: Night.Anim.Rate <Jump|Attack> <Rate>"));
+			return;
+		}
+
+		const bool bAttack = Args[0].Equals(TEXT("Attack"), ESearchCase::IgnoreCase);
+		const float Rate = FMath::Clamp(FCString::Atof(*Args[1]), 0.05f, 4.f);
+		UAnimSequence* Clip = bAttack ? CoursePawn->AttackAnim : CoursePawn->JumpAnim;
+
+		if (bAttack)
+		{
+			CoursePawn->AttackAnimRate = Rate;
+		}
+		else
+		{
+			CoursePawn->JumpAnimRate = Rate;
+		}
+
+		const float RawMs = Clip ? Clip->GetPlayLength() * 1000.f : 0.f;
+		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] %s rate = %.2f  (%.0fms -> %.0fms)"),
+			bAttack ? TEXT("Attack") : TEXT("Jump"), Rate, RawMs, RawMs / Rate);
 	}));
 #pragma endregion K2 (R1)

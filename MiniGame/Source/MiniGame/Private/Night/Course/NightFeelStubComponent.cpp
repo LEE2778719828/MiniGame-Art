@@ -90,22 +90,33 @@ float UNightFeelStubComponent::GetWorldTimeSeconds() const
 	return World ? World->GetTimeSeconds() : 0.f;
 }
 
+// add by K2 (R1)
+float UNightFeelStubComponent::GetHeroActionRemainingSeconds() const
+{
+	const ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwner());
+	return CoursePawn ? CoursePawn->GetHeroActionRemainingSeconds() : 0.f;
+}
+
 void UNightFeelStubComponent::NotifyJudgeRequest_Implementation(const FNightJudgeRequest& Request)
 {
 	ActiveRequest = Request;
 	bHasActiveRequest = true;
 
-	// add by K2 (R1): 空档从「到石那一刻」起算，宽度按动作类型取
+	// add by K2 (R1): 输入窗从「到石那一刻」起算，此刻起按对即命中。
+	// 但空档期（挂机扣血的起算点）按裁定 R-007 要等上一个动作播完 —— 动画还在播，
+	// 角色就还在执行，这时候判玩家发呆是拿动画长度惩罚他。
 	const float Now = GetWorldTimeSeconds();
 	const float WindowSeconds = GetWindowSeconds(Request.Kind);
+	const float AnimTail = bGraceWaitsForAnim ? GetHeroActionRemainingSeconds() : 0.f;
 	WindowOpenWorldTime = Now;
-	WindowCloseWorldTime = Now + WindowSeconds;
-	WindowRemainingSeconds = WindowSeconds;
+	WindowCloseWorldTime = Now + AnimTail + WindowSeconds;
+	WindowRemainingSeconds = AnimTail + WindowSeconds;
+	LastAnimTailSeconds = AnimTail;
 	bBreathing = false;
 	BreathLoggedAccum = 0.f;
 	Phase = ENightFeelPhase::WindowOpen;
 
-	ShowWindowDebug(Request.Kind, WindowSeconds);
+	ShowWindowDebug(Request.Kind, AnimTail + WindowSeconds);
 
 	// 负反应缓存留给下一帧 Tick 兑现：此处仍在 Director 的 TryOpenBeat 调用栈里，
 	// 立即结算会再入它的 ResolveBeat。
@@ -228,8 +239,9 @@ void UNightFeelStubComponent::BeginBreathing()
 
 	if (bLogJudge)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[NightFeel] idx=%d 空档期结束（%.0fms），开始呼吸扣血 %.2f/s"),
-			ActiveRequest.NodeIndex, GetWindowSeconds(ActiveRequest.Kind) * 1000.f, BreathDecayPerSecond);
+		UE_LOG(LogTemp, Log, TEXT("[NightFeel] idx=%d 空档期结束（等动画 %.0fms + 宽限 %.0fms），开始呼吸扣血 %.2f/s"),
+			ActiveRequest.NodeIndex, LastAnimTailSeconds * 1000.f,
+			GetWindowSeconds(ActiveRequest.Kind) * 1000.f, BreathDecayPerSecond);
 	}
 
 	const bool bAttack = (ActiveRequest.Kind == ENightNodeKind::Enemy);

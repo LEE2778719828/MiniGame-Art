@@ -5,6 +5,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCourseDirector.h"
@@ -70,9 +71,10 @@ ANightCoursePawn::ANightCoursePawn()
 		TEXT("/Game/Night/Character/SK_Hero.SK_Hero"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpClip(
 		TEXT("/Game/Night/Character/Anims/Jump_noknife2.Jump_noknife2"));
-	// 常速斩击尚未到位（源文件的动画取不出来，见任务清单第 22 轮），暂用 200ms 的快版顶替
+	// 常速斩击（美术 0819 重导）。200ms 的 Slash_fast_Armature_Armature_kan 留作追赶加速的备选：
+	// 姿势与这条相同，但出刀提前到 36%，天生适合赶拍。
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> AttackClip(
-		TEXT("/Game/Night/Character/Anims/Slash_fast_Armature_Armature_kan.Slash_fast_Armature_Armature_kan"));
+		TEXT("/Game/Night/Character/Anims/Slash.Slash"));
 
 	if (HeroSkeletal.Succeeded())
 	{
@@ -191,6 +193,21 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 	AdvanceTargetLocation = WorldLocation;
 	AdvanceTargetRotation = WorldRotation;
 	AdvanceSpeed = FMath::Max(100.f, SpeedCmPerSec);
+
+	// add by K2 (R1): 动画驱动模式下丢掉 Director 传来的速度，改由锚点反推——
+	// 这样位移在动作的关键帧（落地 / 接触）那一刻结束，倍率一改两者一起缩放。
+	if (bAnimDrivenAdvance)
+	{
+		const float AnchorSeconds =
+			FMath::Max(10.f, bLastActionWasAttack ? AttackAnchorMs : JumpAnchorMs)
+			* 0.001f / FMath::Max(0.05f, HeroAnimPlayRate);
+		const float Distance = FVector::Dist(GetActorLocation(), AdvanceTargetLocation);
+		if (Distance > KINDA_SMALL_NUMBER)
+		{
+			AdvanceSpeed = FMath::Max(100.f, Distance / AnchorSeconds);
+		}
+	}
+
 	bTrackAdvancing = true;
 }
 
@@ -272,10 +289,30 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 		return;
 	}
 
-	HeroAnimPlayRate = 1.f;
+	bLastActionWasAttack = bAttack;
+	HeroAnimPlayRate = FMath::Max(0.05f, bAttack ? AttackAnimRate : JumpAnimRate);
 	// 不循环：跳/斩都是一次性动作，播完停在末帧等下一次输入（idle 动画到位前的权宜）
 	HeroSkelMesh->PlayAnimation(Clip, false);
 	HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+}
+
+// add by K2 (R1)
+float ANightCoursePawn::GetHeroActionRemainingSeconds() const
+{
+	if (!HeroSkelMesh || !HeroSkelMesh->GetSkeletalMeshAsset())
+	{
+		return 0.f;
+	}
+
+	UAnimSingleNodeInstance* Single = HeroSkelMesh->GetSingleNodeInstance();
+	if (!Single || !Single->GetAnimationAsset())
+	{
+		return 0.f;
+	}
+
+	const float Rate = FMath::Max(0.05f, FMath::Abs(Single->GetPlayRate()));
+	const float Left = Single->GetLength() - Single->GetCurrentTime();
+	return FMath::Max(0.f, Left) / Rate;
 }
 
 void ANightCoursePawn::Tick(float DeltaSeconds)
