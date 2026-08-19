@@ -181,9 +181,9 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 
 #pragma region K2 moonyfli
 /**
- * 把主角材质铺到网格的每一个槽上。静态模 kat 只有一个槽，骨骼 SK_Hero 有两个，
- * 所以「只设槽 0」这种写法在骨骼上会漏掉一半。MID 也逐槽建：只给槽 0 调色会让
- * 两半颜色不一致，比不调色更难看。
+ * Spreads the configured hero material across every slot of the mesh. Setting slot 0
+ * alone would leave any remaining slot on the import default, and tinting slot 0 alone
+ * would split the hero into two colours, so the MID is built per slot as well.
  */
 static void ApplyHeroMaterial(UMeshComponent* Component, UMaterialInterface* Material)
 {
@@ -236,10 +236,10 @@ void ANightCoursePawn::ApplyConfiguredHeroVisual()
 		HeroSkelMesh->SetRelativeLocation(
 			HeroMeshOffset + HeroPivotOffsetCm * HeroScale);
 		HeroSkelMesh->SetRelativeScale3D(FVector(FMath::Max(0.01f, HeroScale)));
-		// add by K2 (R1): SK_Hero 有两个槽（blinn3_002 / pasted__blinn3_002，源模型在 Maya 里
-		// 粘贴几何体留下的重复材质），只喂槽 0 会让另一半留着导入时的灰色默认材质。
-		// 逐槽覆盖并按静态模那条路同样建 MID，两条路径的着色保持一致。
-		ApplyHeroMaterial(HeroSkelMesh, HeroMaterial);
+		// add by K2 (R1): the skeletal hero keeps whatever materials the mesh asset carries.
+		// HeroMaterial is baked against the static kat atlas, and the two meshes have
+		// different UV layouts, so forcing it here would sample the wrong atlas.
+
 		bPreferSkeletalHero = true;
 		ResolveHeroArt();
 		return;
