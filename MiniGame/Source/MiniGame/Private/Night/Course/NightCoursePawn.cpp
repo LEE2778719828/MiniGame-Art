@@ -7,6 +7,8 @@
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
+#include "Animation/AnimInstance.h" //add by K2
+#include "Animation/AnimMontage.h" //add by K2
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCourseDirector.h"
@@ -21,6 +23,26 @@
 #include "Materials/MaterialInstanceDynamic.h"
 
 #pragma region K2 moonyfli
+namespace
+{
+	/**
+	 * Returns the anim instance only when an animation blueprint is actually driving the mesh.
+	 * The fallback single-node path has no slot node, so nothing can be played into it, and the
+	 * caller has to fall back to component-level PlayAnimation.
+	 *
+	 * Which mode is live is decided by the AnimClass set on BP_NightCoursePawn's HeroSkelMesh,
+	 * not by code, so the two paths have to coexist.
+	 */
+	UAnimInstance* GetSlotDrivenInstance(USkeletalMeshComponent* Mesh)
+	{
+		if (!Mesh || Mesh->GetAnimationMode() != EAnimationMode::AnimationBlueprint)
+		{
+			return nullptr;
+		}
+		return Mesh->GetAnimInstance();
+	}
+}
+
 ANightCoursePawn::ANightCoursePawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -321,6 +343,19 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 
 	bLastActionWasAttack = bAttack;
 	HeroAnimPlayRate = FMath::Max(0.05f, bAttack ? AttackAnimRate : JumpAnimRate);
+
+	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
+	{
+		// Zero blend on both ends. The clips are only ~370ms, so the montage defaults (250ms in,
+		// 250ms out) would still be fading the slash in at its 179ms contact frame and would
+		// already have started fading it out before reaching it. Playing the sequence as a
+		// dynamic montage keeps the sequence's own notifies, so Contact / Land stay where they
+		// were measured, and it avoids having to maintain montage assets for two one-shot clips.
+		Instance->PlaySlotAnimationAsDynamicMontage(
+			Clip, TEXT("DefaultSlot"), 0.f, 0.f, HeroAnimPlayRate, 1, -1.f, 0.f);
+		return;
+	}
+
 	// 不循环：跳/斩都是一次性动作，播完停在末帧等下一次输入（idle 动画到位前的权宜）
 	HeroSkelMesh->PlayAnimation(Clip, false);
 	HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
@@ -332,6 +367,19 @@ float ANightCoursePawn::GetHeroActionRemainingSeconds() const
 	if (!HeroSkelMesh || !HeroSkelMesh->GetSkeletalMeshAsset())
 	{
 		return 0.f;
+	}
+
+	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
+	{
+		UAnimMontage* Active = Instance->GetCurrentActiveMontage();
+		if (!Active)
+		{
+			return 0.f;
+		}
+
+		const float MontageRate = FMath::Max(0.05f, FMath::Abs(Instance->Montage_GetPlayRate(Active)));
+		const float MontageLeft = Active->GetPlayLength() - Instance->Montage_GetPosition(Active);
+		return FMath::Max(0.f, MontageLeft) / MontageRate;
 	}
 
 	UAnimSingleNodeInstance* Single = HeroSkelMesh->GetSingleNodeInstance();
@@ -466,7 +514,17 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 	if (HeroSkelMesh && HeroSkelMesh->GetSkeletalMeshAsset())
 	{
 		HeroAnimPlayRate *= BaseTime / TargetTime;
-		HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+		if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
+		{
+			if (UAnimMontage* Active = Instance->GetCurrentActiveMontage())
+			{
+				Instance->Montage_SetPlayRate(Active, HeroAnimPlayRate);
+			}
+		}
+		else
+		{
+			HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+		}
 	}
 }
 
