@@ -11,6 +11,8 @@
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "Factories/TrueTypeFontFactory.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Materials/Material.h" //add by K2
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h" //add by K2
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
@@ -95,6 +97,57 @@ namespace
 		}
 		return WidgetBlueprint;
 	}
+
+#pragma region K2 moonyfli
+	/**
+	 * Unlit masked quad material for plated dishes. The food PNGs carry their silhouette in
+	 * alpha, so masking keeps the well readable without paying for translucent sorting against
+	 * the pan.
+	 */
+	UMaterial* CreateDishIconMaterial()
+	{
+		const FString PackagePath(TEXT("/Game/Day/Materials/M_SDayDishIcon"));
+		const FString AssetName(TEXT("M_SDayDishIcon"));
+		if (UMaterial* Existing = Cast<UMaterial>(LoadAssetByPackage(PackagePath, AssetName)))
+		{
+			return Existing;
+		}
+
+		UPackage* Package = CreatePackage(*PackagePath);
+		UMaterial* Material = NewObject<UMaterial>(
+			Package,
+			*AssetName,
+			RF_Public | RF_Standalone);
+		if (!Material)
+		{
+			return nullptr;
+		}
+
+		UMaterialExpressionTextureSampleParameter2D* Sample =
+			NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
+		Sample->ParameterName = TEXT("Tex");
+		Sample->SamplerType = SAMPLERTYPE_Color;
+		Sample->Texture = LoadObject<UTexture2D>(
+			nullptr,
+			TEXT("/Game/Day/Art/food/food_rice_V0.food_rice_V0"));
+		Sample->MaterialExpressionEditorX = -400;
+		Material->GetExpressionCollection().AddExpression(Sample);
+
+		UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
+		// Output pins are RGB, R, G, B, A, RGBA; alpha is index 4.
+		Data->EmissiveColor.Connect(0, Sample);
+		Data->OpacityMask.Connect(4, Sample);
+
+		Material->BlendMode = BLEND_Masked;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->TwoSided = true;
+		Material->PostEditChange();
+
+		FAssetRegistryModule::AssetCreated(Material);
+		SaveAsset(Material);
+		return Material;
+	}
+#pragma endregion K2 moonyfli
 
 	UMaterialInstanceConstant* CreatePlaceholderMaterial(
 		const FString& AssetName,
@@ -234,12 +287,35 @@ namespace
 		return Table;
 	}
 
+	UDataTable* CreateDishIconTuneTable()
+	{
+		const FString PackagePath(TEXT("/Game/Day/Data/DT_SDayDishIconTune"));
+		const FString AssetName(TEXT("DT_SDayDishIconTune"));
+		UDataTable* Table = Cast<UDataTable>(LoadAssetByPackage(PackagePath, AssetName));
+		if (!Table)
+		{
+			UPackage* Package = CreatePackage(*PackagePath);
+			Table = NewObject<UDataTable>(
+				Package,
+				*AssetName,
+				RF_Public | RF_Standalone);
+			FAssetRegistryModule::AssetCreated(Table);
+		}
+
+		Table->RowStruct = FSDayDishIconTuneRow::StaticStruct();
+		FSDayDishIconTuneRow Row;
+		Table->AddRow(TEXT("Default"), Row);
+		SaveAsset(Table);
+		return Table;
+	}
+
 	USDayBoardVisualConfig* CreateVisualConfig(
 		UBlueprint* PresenterBlueprint,
 		UBlueprint* CellBlueprint,
 		UBlueprint* BinBlueprint,
 		UBlueprint* CharacterBlueprint,
 		UDataTable* LayoutTable,
+		UDataTable* DishIconTuneTable,
 		UMaterialInterface* BoardMaterial,
 		UMaterialInterface* CellMaterial,
 		UMaterialInterface* PieceMaterial,
@@ -270,6 +346,7 @@ namespace
 		Config->CellMaterial = CellMaterial;
 		Config->PieceMaterial = PieceMaterial;
 		Config->CellLayout = LayoutTable;
+		Config->DishIconTune = DishIconTuneTable;
 		Config->LabelFont = LabelFont;
 		Config->CellVisualClass = ASDayCellVisual::StaticClass();
 		Config->IngredientBinClass = ASDayIngredientBinVisual::StaticClass();
@@ -286,6 +363,18 @@ namespace
 		{
 			Config->CharacterStandInClass = CharacterBlueprint->GeneratedClass;
 		}
+#pragma region K2 moonyfli
+		// Written out so the mapping is visible and editable in the data asset; the same
+		// pairs live in code as the fallback for a config that never went through here.
+		Config->DishArtStemByIngredient.Reset();
+		Config->DishArtStemByIngredient.Add(TEXT("LingGu"), TEXT("rice"));
+		Config->DishArtStemByIngredient.Add(TEXT("YinShanJun"), TEXT("egg"));
+		Config->DishArtStemByIngredient.Add(TEXT("ChiYanJiao"), TEXT("hand"));
+		Config->DishArtStemByIngredient.Add(TEXT("YueLinYu"), TEXT("fish"));
+		Config->DishArtStemByIngredient.Add(TEXT("XuanYuQin"), TEXT("leg"));
+		Config->DishIconMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+		Config->DishIconMaterial = CreateDishIconMaterial();
+#pragma endregion K2 moonyfli
 		SaveAsset(Config);
 		return Config;
 	}
@@ -305,8 +394,30 @@ USDayWhiteboxAssetsCommandlet::USDayWhiteboxAssetsCommandlet()
 
 int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 {
-	(void)Params;
 #if WITH_EDITOR
+#pragma region K2 moonyfli
+	// Most whitebox assets are already authored and checked in read-only, so re-running the full
+	// pass fails on save. -DishIconOnly adds just the dish material to an existing project.
+	if (Params.Contains(TEXT("DishIconOnly")))
+	{
+		UMaterial* DishIcon = CreateDishIconMaterial();
+		UE_LOG(LogTemp, Display, TEXT("S Day dish icon material: %s"), DishIcon ? TEXT("ready") : TEXT("failed"));
+		return DishIcon ? 0 : 1;
+	}
+	if (Params.Contains(TEXT("DishIconTuneOnly")))
+	{
+		UDataTable* Tune = CreateDishIconTuneTable();
+		if (USDayBoardVisualConfig* Config = Cast<USDayBoardVisualConfig>(
+			LoadAssetByPackage(TEXT("/Game/Day/Data/DA_SDayBoardVisualConfig"), TEXT("DA_SDayBoardVisualConfig"))))
+		{
+			Config->DishIconTune = Tune;
+			SaveAsset(Config);
+		}
+		UE_LOG(LogTemp, Display, TEXT("S Day dish icon tune table: %s"), Tune ? TEXT("ready") : TEXT("failed"));
+		return Tune ? 0 : 1;
+	}
+#pragma endregion K2 moonyfli
+
 	UBlueprint* Presenter = CreateActorBlueprint(
 		TEXT("/Game/Day/Board/BP_SDayBoardPresenter"),
 		TEXT("BP_SDayBoardPresenter"),
@@ -332,6 +443,7 @@ int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 	UMaterialInstanceConstant* PieceMaterial =
 		CreatePlaceholderMaterial(TEXT("MI_SDayPiece_Placeholder"), FLinearColor(0.95f, 0.18f, 0.30f));
 	UDataTable* Layout = CreateLayoutTable();
+	UDataTable* DishIconTune = CreateDishIconTuneTable();
 	UFont* LabelFont = CreateLabelFont();
 	USDayBoardVisualConfig* Config = CreateVisualConfig(
 		Presenter,
@@ -339,15 +451,17 @@ int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 		Bin,
 		Character,
 		Layout,
+		DishIconTune,
 		BoardMaterial,
 		CellMaterial,
 		PieceMaterial,
 		LabelFont);
 
-	const bool bOk = Presenter && Cell && Bin && Character && Hud && Layout && Config && LabelFont;
+	const bool bOk = Presenter && Cell && Bin && Character && Hud && Layout && DishIconTune && Config && LabelFont;
 	UE_LOG(LogTemp, Display, TEXT("S Day whitebox assets: %s"), bOk ? TEXT("created") : TEXT("failed"));
 	return bOk ? 0 : 1;
 #else
+	(void)Params;
 	return 1;
 #endif
 }

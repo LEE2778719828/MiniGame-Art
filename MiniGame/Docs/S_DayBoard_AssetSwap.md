@@ -18,7 +18,8 @@
 | `BP_SDayBoardPresenter` | 竖屏构图、相机、棋盘框、柜台和各锚点 | `DA_SDayBoardVisualConfig` |
 | `BP_SDayCellVisual` | 可玩孔位、点击碰撞、棋子挂点 | `CellMesh` / `PieceMesh` |
 | `BP_SDayIngredientBinVisual` | 底部五类食材箱；五箱及间隙共同构成高级食材分解区 | `IngredientBinMesh` |
-| `BP_SDayCharacterStandIn` | 厨师、顾客、NPC 的占位壳；顶部共享座位（数量=`CustomerConcurrentMax`）同时是交付目标 | `ChefMesh` / `CustomerMesh` / `NpcMesh` |
+| `BP_SDayCustomerSeat` | 场景内可见的顾客/NPC 座位；负责立绘预览、交付碰撞和后续吃饭/谢礼表现 | 关卡 Transform / `PortraitWorldHeight` / `PortraitLocalOffset` |
+| `BP_SDayCharacterStandIn` | 缺少场景座位时的白盒回退壳 | `CustomerMesh` / `NpcMesh` |
 | `WBP_SDayHUD` | 顶部订单/交付、营业额与开店倒计时、库存、谢礼页签、流程按钮 | Widget Blueprint 外观 |
 | `DT_SDayBoardLayout` | `/Game/Day/Data/` | 12 个逻辑格的世界位置与视觉半径 | 仅允许调 Transform/VisualRadius |
 | `DT_GameStages` | `/Game/Shared/Data/` | 关卡时长/目标/`CustomerConcurrentMax`（真实座位数）/刷客间隔/NPC 规则 | Day/Night 共用 |
@@ -57,17 +58,19 @@ canguan.fbx 的每块网格都以同一原点为枢轴导出，所以 12 个网�
 - `SDay.Bin.0`～`SDay.Bin.4`：依次绑定组件 `box6`、`box7`、`box8`、`box9`、
   `polySurface6`，对应灵谷、阴山菌、赤焰椒、月鳞鱼、玄羽禽。
 - `SDay.Counter`：绑定组件 `tai1`，当前仅用于环境语义，不承担交互。
-- `SDay.CustomerPlates`：绑定组件 `kepan`（顶部四个顾客餐盘）。餐馆模式下座位不再用白盒
-  的那一排坐标，而是由这排餐盘解算：横向对齐到餐盘格中心，纵向让立绘**下边框正好落在
-  餐盘上沿**，深度压到摊面之后，于是顾客整体站在摊面上沿之上、从餐盘后面露出。
-  座位数少于 4 时不再在整排里居中：开局随机抽不重复的餐盘格，之后每次刷新都会把空座
-  （不可见）随机挪到没人用的餐盘上，所以下一位客人是随机占座；已入座的客人保持不动，
-  只会跟着相机/美术改动重新贴到当前餐盘格。立绘按贴图高度归一化到同一世界高度
-  （`DayArtPortraitSpriteHeight`），PNG 共享底边基准，所以角色本身的高矮差异会保留。
-  各张 PNG 底部的透明留白并不一样（普通顾客约 12%，特殊 NPC 约 4.5%），只对齐图片边框
-  会让一部分顾客悬在摊面上方，所以运行时会扫一遍贴图 alpha（每张只扫一次并缓存），把立绘
-  按自己的留白下移，落地的是**画面内容**的下沿而不是图片下沿。因此新立绘不需要统一留白，
-  但底部留白必须是完全透明（alpha ≤ 8）。
+- `SDay.CustomerPlates`：绑定组件 `kepan`（顶部四个顾客餐盘），仍是座位美术对齐基准。
+  `L_S_DayWhitebox` 已直接摆放 `SDay_Seat_0`～`SDay_Seat_3` 四个
+  `BP_SDayCustomerSeat`；它们在编辑器里显示预览立绘，因此位置和大小直接改关卡 Actor 的
+  Transform、`PortraitWorldHeight`、`PortraitLocalOffset`，不再改 C++ 常数，也不再由
+  Presenter 在运行时移动。`AuthoredSeatSlot` 按画面从左到右为 0～3，逻辑仍按
+  `CustomerConcurrentMax` 只启用需要的前 N 个座位，其余座位运行时隐藏但编辑器内保留。
+  若关卡提供的场景座位少于当前阶段需求，Presenter 会隐藏这些不完整座位并回退到旧的运行时
+  StandIn 生成方式，保证白盒和测试关卡仍可玩。
+- `BP_SDayCustomerSeat` 的 `VisualRoot` 承载立绘/未来骨骼表现；`EatEffectAnchor` 和
+  `GiftEffectAnchor` 预留给吃饭与谢礼特效。`OnSeatOccupied`、`OnSeatVacated`、
+  `OnServeSucceeded` 是蓝图表现事件，不能在其中复制扣库存、订单匹配或谢礼数值逻辑。
+  普通顾客贴图仍来自 `DT_CustomerNames.Portrait`，特殊 NPC 来自
+  `DT_SpecialNpcs.Portrait`。
 - `SDay.Environment`：`ENV_Canguan`（Actor Tag，覆盖整个蓝图，含分层平面）；Presenter 在运行时
   统一关闭其碰撞，防止家具先于逻辑代理截获点击。
 - 组件 `Mesh_0` 暂不认定为厨师，不配置角色 Tag；餐馆模式不生成白盒厨师。
@@ -158,7 +161,14 @@ CanvasPanel + Image 控件铺满整个画布，直接引用对应 PNG 贴图。
 - 孔位和棋子默认面向顶视相机；孔位 Mesh 不负责逻辑碰撞，碰撞由 `ASDayCellVisual` 管理。
 - 棋子模型建议直径 100 cm、高度 40–90 cm；等级尺寸由表现层统一缩放。
 - 食材箱建议 120×80×70 cm；母棋子点击仍依赖箱体碰撞，高级食材分解使用覆盖整个食材区的共享屏幕区域。
-- 角色占位建议原点在脚底，朝向 Y-；厨师与顾客/NPC 可分别替换 Mesh 和 AnimClass。
+- 场景座位的原点是**立绘的垂直中心**，即餐盘上沿再加半个 `PortraitWorldHeight`；默认高度
+  330 时 Z 比餐盘上沿高 165。`SDay_Seat_0`～`SDay_Seat_3` 可在关卡中直接移动。
+  立绘大小改座位实例的 `PortraitWorldHeight`；因为立绘以原点为中心上下对称展开，改完需要把
+  Z 补上高度变化量的一半，脚下位置才不变。厘米级修正用 `PortraitLocalOffset`。
+- 各张 PNG 底部的透明留白并不一样（普通顾客约 12%，特殊 NPC 约 4.5%），`SetPortrait` 会扫一遍
+  贴图 alpha（每张只扫一次并缓存），按各自留白把立绘沿座位局部 -Z 下移，落地的是**画面内容**
+  的下沿而不是图片下沿，`PortraitLocalOffset` 叠加在这个补偿之上。因此新立绘不需要统一留白，
+  但底部留白必须是完全透明（alpha ≤ 8）。
 - 顶部共享座位数量由 `DT_GameStages.CustomerConcurrentMax`（经 GI `GetServiceSeatCount`）驱动，普通顾客与特殊 NPC 到店时按空位入座、订单完成后立即离店空出；每个空座各自维护补客倒计时，归零后独立从统一订单队列补下一位，不等待其他座位完成。Mesh 必须响应 `Visibility` Trace；厨师不接收交付。
 - 座位名牌是 `Label` TextRender，挂在角色下方（屏幕方向），最多三行：姓名 / 需求 / 等待状态或谢礼；空座显示座位编号及该座独立补客倒计时。
 - 所有可交互组件必须响应 `Visibility` Trace；装饰孔位必须关闭碰撞。
