@@ -30,6 +30,7 @@
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "TextureResource.h" //add by K2
+#include "Day/Input/SDayPlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
@@ -150,7 +151,23 @@ namespace DayBoardPresentationPrivate
 
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			if (It->ActorHasTag(DayArtEnvironmentTag))
+			bool bIsDayArt = It->ActorHasTag(DayArtEnvironmentTag);
+			for (UActorComponent* Component : It->GetComponents())
+			{
+				for (const FName Tag : Component->ComponentTags)
+				{
+					if (Tag.ToString().StartsWith(TEXT("SDay.")))
+					{
+						bIsDayArt = true;
+						break;
+					}
+				}
+				if (bIsDayArt)
+				{
+					break;
+				}
+			}
+			if (bIsDayArt)
 			{
 				It->SetActorEnableCollision(false);
 			}
@@ -1239,6 +1256,12 @@ void ASDayBoardPresenter::BeginPlay()
 		GameInstance->OnSandboxStateChanged.AddUniqueDynamic(this, &ASDayBoardPresenter::RefreshFromLogic);
 	}
 
+	if (ASDayPlayerController* DayPlayerController =
+		Cast<ASDayPlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
+	{
+		DayPlayerController->RegisterBoardPresenter(this);
+	}
+
 	if (bTakeCameraOnBeginPlay)
 	{
 		if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
@@ -1289,6 +1312,11 @@ void ASDayBoardPresenter::Tick(const float DeltaSeconds)
 	{
 		SeatRefreshCountdown = 0.25f;
 		RefreshFromLogic();
+	}
+
+	if (bUseExternalPointerDriver)
+	{
+		return;
 	}
 
 	FVector2D ScreenPosition;
@@ -1831,18 +1859,16 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 	{
 		if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
 		{
-			Director->TryDeliverFromCellToCustomer(
+			return Director->TryDeliverFromCellToCustomer(
 				Board->GetActiveDragCellIndex(),
 				Character->CustomerId);
-			return true;
 		}
 		return false;
 	}
 
 	if (ASSpecialNpcDirector* Director = ASSpecialNpcDirector::FindDirector(this))
 	{
-		Director->TryDeliverToNpc(Character->NpcId);
-		return true;
+		return Director->TryDeliverToNpc(Character->NpcId);
 	}
 	return false;
 }
@@ -1894,6 +1920,26 @@ void ASDayBoardPresenter::SimulatePointerEvent(const FVector2D ScreenPosition, c
 	else
 	{
 		HandlePointerReleased(ScreenPosition);
+	}
+}
+
+void ASDayBoardPresenter::SetUseExternalPointerDriver(const bool bEnabled)
+{
+	bUseExternalPointerDriver = bEnabled;
+}
+
+void ASDayBoardPresenter::CancelPointerInteraction()
+{
+	ASMergeBoard* Board = LogicBoard.Get();
+	if (!Board)
+	{
+		Board = ASMergeBoard::FindBoard(this);
+		LogicBoard = Board;
+	}
+	if (Board && Board->IsDragging())
+	{
+		Board->CancelPieceDrag(0);
+		RefreshFromLogic();
 	}
 }
 

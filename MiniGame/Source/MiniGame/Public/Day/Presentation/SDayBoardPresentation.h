@@ -263,6 +263,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
 	void SimulatePointerEvent(FVector2D ScreenPosition, bool bPressed);
 
+	void SetUseExternalPointerDriver(bool bEnabled); //add by K2
+	void CancelPointerInteraction(); //add by K2
+
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	ASDayCellVisual* GetCellVisual(int32 CellIndex) const;
 
@@ -329,6 +332,7 @@ private:
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
 
 	bool bPointerWasDown = false;
+	bool bUseExternalPointerDriver = false; //add by K2
 	bool bDropHandledOnPress = false;
 	float SeatRefreshCountdown = 0.0f;
 	FVector2D LastPointerPosition = FVector2D::ZeroVector;

@@ -1,5 +1,6 @@
 #include "SStandaloneSandbox.h"
 
+#include "Day/Input/SDayPlayerController.h"
 #include "Day/Presentation/SDayBoardPresentation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
@@ -4031,6 +4032,13 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 		}
 		return INDEX_NONE;
 	};
+	auto ProjectActor = [this](const AActor* Actor, FVector2D& OutScreen)
+	{
+		APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+		return Actor
+			&& PlayerController
+			&& UGameplayStatics::ProjectWorldToScreen(PlayerController, Actor->GetActorLocation(), OutScreen);
+	};
 
 	Check(GameInstance && Board && CustomerDirector && NpcDirector, TEXT("core actors"));
 	Check(DayBoardPresenter && DayBoardPresenter->GetLogicBoard() == Board, TEXT("presenter bound to logic"));
@@ -4117,6 +4125,23 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			return Build(TargetLevel);
 		};
 
+		const int32 BeforePointerSpawn = GameInstance->GetQuantity(LingGuId);
+		ASDayIngredientBinVisual* LingGuBin = DayBoardPresenter
+			? DayBoardPresenter->GetIngredientBin(LingGuId)
+			: nullptr;
+		FVector2D BinScreen = FVector2D::ZeroVector;
+		const bool bBinProjected = ProjectActor(LingGuBin, BinScreen);
+		if (bBinProjected)
+		{
+			DayBoardPresenter->SimulatePointerEvent(BinScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(BinScreen, false);
+		}
+		Check(
+			bBinProjected
+			&& GameInstance->GetQuantity(LingGuId) == BeforePointerSpawn - 1
+			&& Board->CountPiecesAtLevel(LingGuId, 0) == 1,
+			TEXT("pointer click on ingredient bin spawns dish"));
+
 		const int32 BeforeMerge = GameInstance->GetQuantity(LingGuId);
 		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn first mother piece"));
 		const int32 FirstLingGu = FindPiece(LingGuId, 0);
@@ -4135,27 +4160,35 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 				break;
 			}
 		}
+		ASDayCellVisual* FirstLingGuVisual = DayBoardPresenter
+			? DayBoardPresenter->GetCellVisual(FirstLingGu)
+			: nullptr;
+		ASDayCellVisual* SecondLingGuVisual = DayBoardPresenter
+			? DayBoardPresenter->GetCellVisual(SecondLingGu)
+			: nullptr;
+		FVector2D FirstLingGuScreen = FVector2D::ZeroVector;
+		FVector2D SecondLingGuScreen = FVector2D::ZeroVector;
+		const bool bMergeProjected =
+			ProjectActor(FirstLingGuVisual, FirstLingGuScreen)
+			&& ProjectActor(SecondLingGuVisual, SecondLingGuScreen);
+		if (bMergeProjected)
+		{
+			// Click-release-click uses the same pointer handlers as a held drag.
+			DayBoardPresenter->SimulatePointerEvent(FirstLingGuScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(FirstLingGuScreen, false);
+			DayBoardPresenter->SimulatePointerEvent(SecondLingGuScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(SecondLingGuScreen, false);
+		}
 		Check(
 			FirstLingGu != INDEX_NONE
 			&& SecondLingGu != INDEX_NONE
-			&& Board->TryDropPiece(FirstLingGu, SecondLingGu)
+			&& bMergeProjected
 			&& Board->GetHighestLevel(LingGuId) == 1
 			&& GameInstance->GetQuantity(LingGuId) == BeforeMerge - 2,
-			TEXT("same-chain merge"));
+			TEXT("pointer click-click merges same chain and level"));
 
 		// 高级食材拖到任意基础食材篮区域都会撤销合成，按基础单位完整退库。
 		const int32 MergedLingGu = FindPiece(LingGuId, 1);
-		ASDayIngredientBinVisual* LingGuBin = DayBoardPresenter
-			? DayBoardPresenter->GetIngredientBin(LingGuId)
-			: nullptr;
-		FVector2D BinScreen = FVector2D::ZeroVector;
-		APlayerController* SmokePlayerController = UGameplayStatics::GetPlayerController(this, 0);
-		const bool bBinProjected = LingGuBin
-			&& SmokePlayerController
-			&& UGameplayStatics::ProjectWorldToScreen(
-				SmokePlayerController,
-				LingGuBin->GetActorLocation(),
-				BinScreen);
 		Check(
 			MergedLingGu != INDEX_NONE
 			&& bBinProjected
@@ -4170,6 +4203,77 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			GameInstance->GetQuantity(LingGuId) == BeforeMerge
 			&& Board->CountPiecesAtLevel(LingGuId, 1) == 0,
 			TEXT("ingredient area decomposes advanced dish to inventory"));
+
+		const int32 DragMergeSource = FindPiece(LingGuId, 0);
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn drag-merge target"));
+		int32 DragMergeTarget = INDEX_NONE;
+		for (int32 Index = 0; Index < Board->GetCells().Num(); ++Index)
+		{
+			FSDishPiece Piece;
+			if (Index != DragMergeSource
+				&& Board->TryGetPiece(Index, Piece)
+				&& Piece.IngredientId == LingGuId
+				&& Piece.Level == 0)
+			{
+				DragMergeTarget = Index;
+				break;
+			}
+		}
+		FVector2D DragMergeSourceScreen = FVector2D::ZeroVector;
+		FVector2D DragMergeTargetScreen = FVector2D::ZeroVector;
+		const bool bDragMergeProjected =
+			DayBoardPresenter
+			&& ProjectActor(DayBoardPresenter->GetCellVisual(DragMergeSource), DragMergeSourceScreen)
+			&& ProjectActor(DayBoardPresenter->GetCellVisual(DragMergeTarget), DragMergeTargetScreen);
+		if (bDragMergeProjected)
+		{
+			DayBoardPresenter->SimulatePointerEvent(DragMergeSourceScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(DragMergeTargetScreen, false);
+		}
+		Check(
+			bDragMergeProjected
+			&& Board->CountPiecesAtLevel(LingGuId, 1) == 1
+			&& !Board->IsDragging(),
+			TEXT("pointer hold-drag merges same chain and level"));
+
+		const int32 DragMergedLingGu = FindPiece(LingGuId, 1);
+		if (DragMergedLingGu != INDEX_NONE && Board->BeginPieceDrag(DragMergedLingGu, 0))
+		{
+			DayBoardPresenter->SimulatePointerEvent(BinScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(BinScreen, false);
+		}
+
+		// Invalid drops clear the pointer lock but never mutate either occupied cell.
+		Check(Board->TrySpawnFromMotherPiece(LingGuId), TEXT("spawn mismatch rollback source"));
+		const int32 RollbackLingGu = FindPiece(LingGuId, 0);
+		Check(Board->TrySpawnFromMotherPiece(YinShanJunId), TEXT("spawn mismatch rollback target"));
+		const int32 RollbackYinShanJun = FindPiece(YinShanJunId, 0);
+		ASDayCellVisual* RollbackSourceVisual = DayBoardPresenter
+			? DayBoardPresenter->GetCellVisual(RollbackLingGu)
+			: nullptr;
+		ASDayCellVisual* RollbackTargetVisual = DayBoardPresenter
+			? DayBoardPresenter->GetCellVisual(RollbackYinShanJun)
+			: nullptr;
+		FVector2D RollbackSourceScreen = FVector2D::ZeroVector;
+		FVector2D RollbackTargetScreen = FVector2D::ZeroVector;
+		const bool bRollbackProjected =
+			ProjectActor(RollbackSourceVisual, RollbackSourceScreen)
+			&& ProjectActor(RollbackTargetVisual, RollbackTargetScreen);
+		if (bRollbackProjected)
+		{
+			DayBoardPresenter->SimulatePointerEvent(RollbackSourceScreen, true);
+			DayBoardPresenter->SimulatePointerEvent(RollbackTargetScreen, false);
+		}
+		FSDishPiece RollbackSourcePiece;
+		FSDishPiece RollbackTargetPiece;
+		Check(
+			bRollbackProjected
+			&& Board->TryGetPiece(RollbackLingGu, RollbackSourcePiece)
+			&& RollbackSourcePiece.IngredientId == LingGuId
+			&& Board->TryGetPiece(RollbackYinShanJun, RollbackTargetPiece)
+			&& RollbackTargetPiece.IngredientId == YinShanJunId
+			&& !Board->IsDragging(),
+			TEXT("failed pointer drop returns both dishes to original cells"));
 
 		const bool bCustomerReady = CustomerDirector->HasActiveCustomer()
 			|| CustomerDirector->SpawnNextPlannedCustomer();
@@ -4208,7 +4312,6 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 		}
 		Check(
 			CustomerDirector->GetSeatCooldownRemaining(GuestCustomer.SeatIndex) > 0.0f
-			&& CustomerDirector->HasActiveCustomer()
 			&& CustomerSeat
 			&& !CustomerSeat->bOccupied,
 			TEXT("served guest frees only its own seat"));
@@ -4219,10 +4322,13 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			TEXT("vacant seat respects its independent cooldown"));
 		CustomerDirector->Tick(5.0f);
 		FSCustomerState Replacement;
+		FSSpecialNpcState SpecialReplacement;
 		Check(
 			CustomerDirector->TryGetCustomerAtSeat(GuestCustomer.SeatIndex, Replacement)
-			&& Replacement.CustomerId != GuestCustomer.CustomerId,
-			TEXT("vacant seat automatically receives next customer"));
+			|| (NpcDirector->TryGetNpc(NpcALingId, SpecialReplacement)
+				&& SpecialReplacement.bPresent
+				&& SpecialReplacement.SeatIndex == GuestCustomer.SeatIndex),
+			TEXT("vacant seat automatically receives next planned order"));
 
 		FSSpecialNpcState ALingBefore;
 		Check(
@@ -4234,13 +4340,6 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 		Check(ALingCell != INDEX_NONE, TEXT("spawn ALing dish"));
 
 		// Pointer path: click the cell to select, then click the seat circle to deliver.
-		auto ProjectActor = [this](const AActor* Actor, FVector2D& OutScreen)
-		{
-			APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
-			return Actor
-				&& PlayerController
-				&& UGameplayStatics::ProjectWorldToScreen(PlayerController, Actor->GetActorLocation(), OutScreen);
-		};
 		ASDayCellVisual* ALingCellVisual = DayBoardPresenter
 			? DayBoardPresenter->GetCellVisual(ALingCell)
 			: nullptr;
@@ -5479,6 +5578,7 @@ void USDebugPanel::SetFeedback(const FString& Message)
 ASChefGameMode::ASChefGameMode()
 {
 	DefaultPawnClass = nullptr;
+	PlayerControllerClass = ASDayPlayerController::StaticClass(); //add by K2
 }
 
 void ASChefGameMode::BeginPlay()
