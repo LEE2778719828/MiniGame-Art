@@ -21,6 +21,23 @@ MODES = {
 }
 
 
+def find_camera_component(actor_subsystem):
+    """The composition camera, whether it is a tagged actor or a tagged component of one.
+
+    BP_SDayCanguan packs the camera as its StageCamera component. Setting the mode there is an
+    instance override; rerun Tools/MakeDayCanguanBlueprint.py to bake it into the Blueprint.
+    """
+    for actor in actor_subsystem.get_all_level_actors():
+        component = actor.get_component_by_class(unreal.CameraComponent)
+        if component is None:
+            continue
+        if CAMERA_TAG in [str(tag) for tag in actor.get_editor_property("tags")]:
+            return actor, component
+        if component.component_has_tag(CAMERA_TAG):
+            return actor, component
+    return None, None
+
+
 def describe(actor, component):
     return "{} mode={} fov={:.1f} ortho={:.1f} aspect={:.4f} constrain={}".format(
         actor.get_actor_label(),
@@ -47,25 +64,20 @@ def main():
         return
 
     actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    for actor in actor_subsystem.get_all_level_actors():
-        if CAMERA_TAG not in [str(tag) for tag in actor.get_editor_property("tags")]:
-            continue
-        component = actor.get_component_by_class(unreal.CameraComponent)
-        if component is None:
-            continue
-
-        unreal.log("[DayCamera] before: " + describe(actor, component))
-        if requested is None:
-            return
-        component.set_editor_property("projection_mode", MODES[requested])
-        unreal.log("[DayCamera] after:  " + describe(actor, component))
-        unreal.log("[DayCamera] loc={} rot={} (untouched)".format(
-            actor.get_actor_location(), actor.get_actor_rotation()))
-        unreal.log("[DayCamera] saved={}".format(
-            unreal.EditorLoadingAndSavingUtils.save_current_level()))
+    actor, component = find_camera_component(actor_subsystem)
+    if component is None:
+        unreal.log_error("[DayCamera] nothing tagged " + CAMERA_TAG)
         return
 
-    unreal.log_error("[DayCamera] no actor tagged " + CAMERA_TAG)
+    unreal.log("[DayCamera] before: " + describe(actor, component))
+    if requested is None:
+        return
+    component.set_editor_property("projection_mode", MODES[requested])
+    unreal.log("[DayCamera] after:  " + describe(actor, component))
+    unreal.log("[DayCamera] loc={} rot={} (untouched)".format(
+        component.get_world_location(), component.get_world_rotation()))
+    unreal.log("[DayCamera] saved={}".format(
+        unreal.EditorLoadingAndSavingUtils.save_current_level()))
 
 
 main()

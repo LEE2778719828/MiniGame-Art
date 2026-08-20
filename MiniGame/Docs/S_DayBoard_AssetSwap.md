@@ -31,15 +31,33 @@
 
 ### 餐馆环境绑定
 
-`L_S_DayWhitebox` 中的餐馆美术通过 Actor Tag 与运行时逻辑绑定：
+餐馆网格和构图相机现在是两个独立蓝图：`BP_SDayCanguan` 与
+`BP_SDayCompositionCamera`。关卡中分别是 `ENV_Canguan` 和 `Day_CompositionCamera`；
+相机可以独立移动，不会带动餐馆模型。餐馆实例位置仍为 `(44.81, -600.89, -1276.70)`、
+Yaw 180、**缩放 1**。层级：
 
-- `SDay.Board`：`ENV_Canguan_pan`，作为原画坐标基准。模型里的孔是美术构图，
-  不要求与逻辑格数量相同；25 个逻辑格仍由 `DT_SDayBoardLayout` 决定，并映射到
-  `pan` 的当前边界。
-- `SDay.Bin.0`～`SDay.Bin.4`：依次绑定 `box6`、`box7`、`box8`、`box9`、
+```
+BP_SDayCanguan
+└─ DefaultSceneRoot
+   ├─ Stall  (SceneComponent, 等比 3.89192)
+   │  └─ 12 个 StaticMeshComponent（相对单位变换，带 SDay.* 组件 Tag）
+```
+
+canguan.fbx 的每块网格都以同一原点为枢轴导出，所以 12 个网格保持相对单位变换即可复现原
+摆放。相机和 CookingUI 位于独立的 `BP_SDayCompositionCamera` 中，根节点位置就是相机位置。
+重建/提取用 `Tools/ExtractDayCompositionCameraBlueprint.py`。
+
+绑定 Tag 因此下移到**组件**上：`SDay.Environment` 留在 Actor 上（整座餐馆一次性关碰撞），
+各功能位挂在对应组件的 `ComponentTags` 上。C++ 侧 `FindDayArtPiece` 会先按 Actor Tag 再按
+组件 Tag 解析，所以白盒和早期「一块一个 Actor」的摆法都仍然可用。
+
+- `SDay.Board`：组件 `pan`（网格 `/Game/Day/Art/canguan/pan`），作为原画坐标基准。模型里的
+  孔是美术构图，不要求与逻辑格数量相同；25 个逻辑格仍由 `DT_SDayBoardLayout` 决定，并映射
+  到 `pan` 的当前边界。
+- `SDay.Bin.0`～`SDay.Bin.4`：依次绑定组件 `box6`、`box7`、`box8`、`box9`、
   `polySurface6`，对应灵谷、阴山菌、赤焰椒、月鳞鱼、玄羽禽。
-- `SDay.Counter`：绑定 `tai1`，当前仅用于环境语义，不承担交互。
-- `SDay.CustomerPlates`：绑定 `kepan`（顶部四个顾客餐盘）。餐馆模式下座位不再用白盒
+- `SDay.Counter`：绑定组件 `tai1`，当前仅用于环境语义，不承担交互。
+- `SDay.CustomerPlates`：绑定组件 `kepan`（顶部四个顾客餐盘）。餐馆模式下座位不再用白盒
   的那一排坐标，而是由这排餐盘解算：横向对齐到餐盘格中心，纵向让立绘**下边框正好落在
   餐盘上沿**，深度压到摊面之后，于是顾客整体站在摊面上沿之上、从餐盘后面露出。
   座位数少于 4 时不再在整排里居中：开局随机抽不重复的餐盘格，之后每次刷新都会把空座
@@ -50,47 +68,74 @@
   会让一部分顾客悬在摊面上方，所以运行时会扫一遍贴图 alpha（每张只扫一次并缓存），把立绘
   按自己的留白下移，落地的是**画面内容**的下沿而不是图片下沿。因此新立绘不需要统一留白，
   但底部留白必须是完全透明（alpha ≤ 8）。
-- `SDay.Environment`：所有 `ENV_Canguan_*` Actor 与背景平面；Presenter 在运行时统一关闭其
-  碰撞，防止家具先于逻辑代理截获点击。
-- `Mesh_0` 暂不认定为厨师，不配置角色 Tag；餐馆模式不生成白盒厨师。
+- `SDay.Environment`：`ENV_Canguan`（Actor Tag，覆盖整个蓝图，含分层平面）；Presenter 在运行时
+  统一关闭其碰撞，防止家具先于逻辑代理截获点击。
+- 组件 `Mesh_0` 暂不认定为厨师，不配置角色 Tag；餐馆模式不生成白盒厨师。
 
 找到 `SDay.Board` 时，Presenter 会关闭旧棋盘方块、柜台方块和装饰圆柱；逻辑格、
 食材箱和座位保留不可见的 `Visibility` 查询碰撞，座位的查询代理会放大到覆盖立绘，
 保证点到看得见的顾客就能交付。座位的世界文字标签在餐馆模式下隐藏（它是为旧俯视机位
 做的平躺文字，在当前机位近乎侧视），订单信息仍在 HUD 上。
-缺少上述 Tag 时仍回退为完整可玩的白盒。重新摆放环境后运行
-`Tools/ConfigureDayArtBindings.py` 恢复 Tag；`PlaceCanguanPreview.py` 新生成的 Actor
-也会自动带上这些 Tag。
+缺少上述 Tag 时仍回退为完整可玩的白盒。Tag 现在随蓝图一起交付，重建蓝图用
+  `Tools/ExtractDayCompositionCameraBlueprint.py`。`PlaceCanguanPreview.py` 与
+`ConfigureDayArtBindings.py` 是合并前「一块一个 Actor」时代的工具，只在需要重新从 FBX
+铺一遍散件时使用，之后仍需跑一次 `ExtractDayCompositionCameraBlueprint.py` 收回蓝图。
 
-### 画面背景（取景框参考）
+### 画面背景 / 前景（cookingUI 分层）
 
-- `SDay.Backdrop`：`ENV_FrameBackdrop`，一块正对相机、**刚好等于相机取景框**的平面，
-  深度压在所有 `SDay.Environment` 之后。餐馆美术之前悬在纯黑虚空里，而竖屏画面在横向
-  窗口里的黑边也是纯黑，看不出画面边界在哪；现在「背景色 ↔ 黑」的分界线就是出画边界
-  （正交构图时在 1920×1151 的 PIE 窗口里量到 x 700..1219，正好是 9:20 的 520px 宽）。
+cookingUI 原画是按整幅（3146×6980，比例 0.45，与相机 `AspectRatio` 一致）切成的 7 层：
+4 张背景压在 3D 摊子之后，3 张前景（Overlay）盖在摊子之前。现在使用两个控件蓝图：
+`WBP_SDayCookingBackground` 和 `WBP_SDayCookingForeground`，每个控件蓝图内部用
+CanvasPanel + Image 控件铺满整个画布，直接引用对应 PNG 贴图。
+
+两个控件蓝图分别由 `CookingUI_Background` 和 `CookingUI_Foreground` 这两个
+`WidgetComponent` 挂在 `StageCamera` 下。WidgetComponent 使用 World Space，并按相机的深度
+和取景框尺寸缩放，因此相机移动/旋转时，控件蓝图整体跟随且不再依赖 StaticMesh 平面材质。
+
+- **背景（组件 Tag `SDay.Backdrop`）**：`CookingUI_Background`，深度压在
+  所有 `SDay.Environment` 之后。order 0（`Background_01` 街景）最远，往后每层朝相机迈一
+  小步（`DayArtBackdropLayerStep`）：01 街景 → 02 人群 → 03 店面 → 04 内景。半透明按距离
+  排序即可正确叠加。
+- **前景（组件 Tag `SDay.Foreground`）**：`CookingUI_Foreground`，深度压在
+  最近一件 `SDay.Environment` 之前（`DayArtForegroundDepthMargin`）。order 0（`Overlay_01`
+  铜钱）最靠后，02（`Overlay_03` 红绳）最靠前，压在铜钱上。中央镂空透明，不遮挡锅台/
+  食材箱；可玩 HUD 是 UMG，永远在这些世界平面之上，点击不受影响。
+- 深度包围盒按餐馆各网格边界解算，不用 Actor 的合并边界——整座餐馆现在是一个 Actor，合并
+  边界会松得没有意义。WidgetComponent 不参与餐馆包围盒测量。
+- 餐馆带有几乎伸到相机脚下的地面/墙面平面，所以"最近一件装饰"可能只有两米远。前景基准
+  深度会保底到 `DayArtForegroundMinDepth + 最大 order × 层间距`，否则整叠前景会一起夹到
+  近裁剪同一深度上打架。
 - 取景框宽度按投影方式解算（`DayCameraFrameWidthAtDepth`）：正交是 `OrthoWidth`（与距离
   无关），透视是 `2 * 深度 * tan(FOV/2)`——项目锁横向 FOV（`MAINTAIN_XFOV`），所以
-  `FieldOfView` 是横向角；高度一律是宽度 / `AspectRatio`。平面只在单一深度上，所以透视下
+  `FieldOfView` 是横向角；高度一律是宽度 / `AspectRatio`。每层只在单一深度上，所以透视下
   也能严丝合缝。
-- 材质 `M_SDayFrameBackdrop` 是 Unlit 深蓝灰：调灯或改曝光都不会改变这条边界的样子，
-  也不会跟灰色占位模型混在一起。
-- 相机改完构图后要重跑 `Tools/AddDayFrameBackdrop.py` 刷新编辑器视口里的平面；PIE 不
-  依赖它，Presenter 在 `BeginPlay` 用实时相机重算一遍平面（`FitDayArtBackdrop`），
-  所以运行时看到的边界永远是真的。用 `Tools/DumpBackdropFraming.py` 可以核对平面在
-  相机空间的四角。
+- `T_CookingUI_Concept` 仅作参考，不进运行时。
+- 控件蓝图和 WidgetComponent 由 `Tools/ConvertDayCookingUIToWidgets.py` 生成；Presenter 在
+  `BeginPlay` 用 `FitDayArtLayers` 重新计算 WidgetComponent 的深度和缩放，所以改 FOV /
+  比例 / 投影方式不会留下过期的贴合。
 
 ### 相机
 
-- `Day_CompositionCamera`（Tag `SDayCamera`）是构图的唯一来源：Presenter 找到它就原样
-  当作 PIE 视角，不覆盖投影、位置或缩放，所以构图完全在编辑器里手调。
-- 当前状态：**Perspective**、`FieldOfView 90`、`ConstrainAspectRatio` + `AspectRatio 0.45`，
-  位置 `(10.3, -3000.0, -137.3)`、pitch -6 / yaw 90。这套位置当初是在正交下调的（正交里
-  距离不影响构图），换到透视后主体在画面里偏小，需要重新手调距离或 FOV。
+- 相机是独立蓝图 `/Game/Day/Blueprints/BP_DayCamera` 的 `Camera` 组件（组件 Tag
+  `SDayCamera`）。关卡实例名为 `Day_Camera`。Presenter 找到它就把**它的 Owner** 设为 PIE
+  视角（`AActor::CalcCamera` 会自动采用第一个激活的 CameraComponent），不覆盖投影、位置或
+  缩放。移动这个 Actor 只会移动相机和挂在相机下的 CookingUI，不会移动 `ENV_Canguan`。
+- **全关卡只能有一个带 `SDayCamera` 的相机**，多于一个视角就是抽签。换相机蓝图跑
+  `Tools/SwitchDayStageCamera.py`：它把当前带标签相机的取景（Actor 变换 + 相机相对变换 +
+  投影/FOV/比例/锁比例）搬进 `BP_DayCamera`，把 `background` 挂到相机下并打
+  `SDay.Backdrop`，放好新实例后删掉旧的。旧的 `BP_SDayCompositionCamera` 及其生成脚本
+  `Tools/ConvertDayCookingUIToWidgets.py` 已被取代，别再跑，否则会往关卡里塞回第二台相机。
+- 当前状态：**Perspective**、`FieldOfView ≈19.6`、`ConstrainAspectRatio` + `AspectRatio 0.45`
+  （1440x3200 竖屏），Actor 位置约 `(30.3, -2752.5, 131.9)`、pitch -11 / yaw 90，相机组件相对
+  位置 `X ≈ -397`（沿视线向后退）。
+- 调构图：在关卡中选中 `Day_Camera`，移动/旋转 Actor；或选中其 `Camera` 组件调整相对参数。
+  要把调整写回蓝图，重跑 `Tools/SwitchDayStageCamera.py`。
 - 切投影只用 `Tools/SetDayCameraProjection.py perspective|orthographic`：它只改投影模式，
   不动位置和缩放。`Tools/FitDayCameraToResolution.py` 是正交专用的缩放/居中解算，遇到
-  透视相机会直接报错退出——它以前会顺手把相机改回正交，把手动切换的透视覆盖掉。
-- 当前状态用 `Tools/DumpDayCameraState.py` 查（含相机 Actor 落在 `__ExternalActors__`
-  的哪个包）。
+  透视相机会直接报错退出。
+- 当前状态用 `Tools/DumpDayCameraState.py` 查。
+- 写 Python 时注意 `unreal.Rotator` 的位置参数是 `(roll, pitch, yaw)`：把 180 写到 pitch 上会
+  经四元数归一化成「yaw 180 + roll 180」，等于绕 Y 轴翻转 180°，整座摊子会翻出画面。
 
 ### 光照与曝光
 

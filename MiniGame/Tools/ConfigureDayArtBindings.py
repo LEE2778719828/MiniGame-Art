@@ -3,7 +3,7 @@
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 LABEL_TO_TAG = {
     "ENV_Canguan_pan": "SDay.Board",
     "ENV_Canguan_box6": "SDay.Bin.0",

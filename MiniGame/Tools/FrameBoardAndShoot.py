@@ -3,7 +3,7 @@
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 BOARD_TAG = "SDay.Board"
 # The plane fit says the pan faces pitch -34.9 / yaw 90, so view it head-on.
 VIEW_PITCH = -34.9

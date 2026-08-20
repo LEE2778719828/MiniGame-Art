@@ -223,6 +223,25 @@ public:
 #pragma endregion K2 moonyfli
 };
 
+#pragma region K2 moonyfli
+/**
+ * Owner of the composition camera and of the cookingUI layers hanging off it.
+ * BP_DayCamera currently subclasses this. Layer transforms stay authored: do not solve
+ * them from OnConstruction or BeginPlay, or the editor camera preview and PIE diverge.
+ */
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayCameraRig : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "S Day Board")
+	void RefitDayArt();
+};
+#pragma endregion K2 moonyfli
+
 UCLASS(Blueprintable)
 class MINIGAME_API ASDayBoardPresenter : public AActor
 {
@@ -243,6 +262,9 @@ public:
 	/** Feeds a synthetic screen position through the same handlers the pointer tick uses. */
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
 	void SimulatePointerEvent(FVector2D ScreenPosition, bool bPressed);
+
+	void SetUseExternalPointerDriver(bool bEnabled); //add by K2
+	void CancelPointerInteraction(); //add by K2
 
 	UFUNCTION(BlueprintPure, Category = "S Day Board")
 	ASDayCellVisual* GetCellVisual(int32 CellIndex) const;
@@ -310,6 +332,7 @@ private:
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
 
 	bool bPointerWasDown = false;
+	bool bUseExternalPointerDriver = false; //add by K2
 	bool bDropHandledOnPress = false;
 	float SeatRefreshCountdown = 0.0f;
 	FVector2D LastPointerPosition = FVector2D::ZeroVector;

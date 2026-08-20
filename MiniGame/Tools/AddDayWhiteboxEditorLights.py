@@ -12,7 +12,7 @@
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 LABEL_PREFIX = "EDITORONLY_Light_"
 ACTOR_FOLDER = "Environment/EditorOnlyLighting"
 
@@ -64,11 +64,28 @@ def mark_editor_only(actor):
         return False
 
 
-def camera_rotation(actor_subsystem):
+def find_camera_component(actor_subsystem):
+    """The composition camera, whether it is a tagged actor or a tagged component of one.
+
+    BP_SDayCanguan packs the camera as its StageCamera component, so the actor's own rotation is
+    the restaurant's, not the framing's; the component transform is the only honest source.
+    """
     for actor in actor_subsystem.get_all_level_actors():
+        component = actor.get_component_by_class(unreal.CameraComponent)
+        if component is None:
+            continue
         if CAMERA_TAG in [str(tag) for tag in actor.get_editor_property("tags")]:
-            rotation = actor.get_actor_rotation()
-            return rotation.pitch, rotation.yaw
+            return component
+        if component.component_has_tag(CAMERA_TAG):
+            return component
+    return None
+
+
+def camera_rotation(actor_subsystem):
+    component = find_camera_component(actor_subsystem)
+    if component is not None:
+        rotation = component.get_world_rotation()
+        return rotation.pitch, rotation.yaw
     unreal.log_warning("[EditorLights] no camera tagged {}; using fallback key angle".format(
         CAMERA_TAG))
     return KEY_ROTATION_FALLBACK
@@ -145,11 +162,10 @@ def main():
     viewport_location = unreal.Vector(*VIEWPORT_LOCATION)
     viewport_rotation = unreal.Rotator(
         roll=0.0, pitch=VIEWPORT_ROTATION[0], yaw=VIEWPORT_ROTATION[1])
-    for actor in actor_subsystem.get_all_level_actors():
-        if CAMERA_TAG in [str(tag) for tag in actor.get_editor_property("tags")]:
-            viewport_location = actor.get_actor_location()
-            viewport_rotation = actor.get_actor_rotation()
-            break
+    stage_camera = find_camera_component(actor_subsystem)
+    if stage_camera is not None:
+        viewport_location = stage_camera.get_world_location()
+        viewport_rotation = stage_camera.get_world_rotation()
 
     editor = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
     editor.set_level_viewport_camera_info(viewport_location, viewport_rotation)
