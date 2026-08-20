@@ -16,7 +16,7 @@ import math
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 TABLE_PATH = "/Game/Day/Data/DT_SDayBoardLayout"
 BOARD_TAG = "SDay.Board"
 

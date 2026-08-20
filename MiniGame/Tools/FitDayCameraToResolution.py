@@ -13,7 +13,7 @@ import math
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 CAMERA_TAG = "SDayCamera"
 ENV_PREFIX = "ENV_Canguan_"
 EXCLUDED_LABELS = {"ENV_Canguan_pPlane1"}

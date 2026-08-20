@@ -26,7 +26,7 @@
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 ART_DIR = "/Game/Day/Art/canguan"
 LABEL_PREFIX = "ENV_Canguan_"
 ACTOR_FOLDER = "Environment/CanguanPreview"

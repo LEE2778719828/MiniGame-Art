@@ -13,14 +13,20 @@ def main():
         unreal.log_error("[DayCamera] no world")
         return
 
-    for actor in unreal.GameplayStatics.get_all_actors_of_class(world, unreal.CameraActor):
-        if CAMERA_TAG not in [str(tag) for tag in actor.get_editor_property("tags")]:
+    # BP_SDayCanguan packs the camera as its StageCamera component, so the tag can be on either the
+    # actor or the component, and only the component transform is the framing.
+    for actor in unreal.GameplayStatics.get_all_actors_of_class(world, unreal.Actor):
+        component = actor.get_component_by_class(unreal.CameraComponent)
+        if component is None:
             continue
-        component = actor.camera_component
-        unreal.log("[DayCamera] label={} package={}".format(
-            actor.get_actor_label(), actor.get_package().get_path_name()))
+        tagged_actor = CAMERA_TAG in [str(tag) for tag in actor.get_editor_property("tags")]
+        if not tagged_actor and not component.component_has_tag(CAMERA_TAG):
+            continue
+        unreal.log("[DayCamera] label={} component={} package={}".format(
+            actor.get_actor_label(), component.get_name(),
+            actor.get_package().get_path_name()))
         unreal.log("[DayCamera] location={} rotation={}".format(
-            actor.get_actor_location(), actor.get_actor_rotation()))
+            component.get_world_location(), component.get_world_rotation()))
         for name in ("projection_mode", "ortho_width", "field_of_view",
                      "constrain_aspect_ratio", "aspect_ratio",
                      "aspect_ratio_axis_constraint",

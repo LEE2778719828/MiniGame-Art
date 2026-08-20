@@ -223,6 +223,25 @@ public:
 #pragma endregion K2 moonyfli
 };
 
+#pragma region K2 moonyfli
+/**
+ * Owner of the composition camera and of the cookingUI layers hanging off it.
+ * BP_DayCamera currently subclasses this. Layer transforms stay authored: do not solve
+ * them from OnConstruction or BeginPlay, or the editor camera preview and PIE diverge.
+ */
+UCLASS(Blueprintable)
+class MINIGAME_API ASDayCameraRig : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "S Day Board")
+	void RefitDayArt();
+};
+#pragma endregion K2 moonyfli
+
 UCLASS(Blueprintable)
 class MINIGAME_API ASDayBoardPresenter : public AActor
 {

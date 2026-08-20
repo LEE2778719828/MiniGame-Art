@@ -7,7 +7,7 @@ currently derives from SDay.Board, so the numbers can be compared without guessi
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 CAMERA_LABEL = "Day_CompositionCamera"
 
 # Mirrors DayBoardPresentationPrivate in SDayBoardPresentation.cpp.

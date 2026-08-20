@@ -8,7 +8,7 @@ placed actor and reports a height map plus the centre of every depression it fin
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 BOARD_TAG = "SDay.Board"
 COLUMNS = 61
 ROWS = 47

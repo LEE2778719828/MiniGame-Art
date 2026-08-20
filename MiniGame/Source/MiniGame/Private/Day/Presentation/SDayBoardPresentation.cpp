@@ -3,7 +3,6 @@
 #include "../../../SStandaloneSandbox.h"
 
 #include "Blueprint/WidgetTree.h"
-#include "Camera/CameraActor.h" //add by K2
 #include "Camera/CameraComponent.h"
 #include "EngineUtils.h" //add by K2
 #include "Components/Border.h"
@@ -26,6 +25,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WrapBox.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -51,9 +51,10 @@ namespace DayBoardPresentationPrivate
 
 #pragma region K2 moonyfli
 	/**
-	 * Tag on the level CameraActor that frames the board. A tagged camera becomes the view
-	 * target verbatim, so framing is dialled in the editor viewport instead of recompiled.
-	 * Keep in sync with CAMERA_TAG in Tools/AddDayCompositionCamera.py.
+	 * Tag on the camera that frames the board, carried by BP_DayCamera's Camera component.
+	 * A tagged camera becomes the view target verbatim, so framing is dialled in the editor
+	 * viewport instead of recompiled, and swapping in another camera Blueprint is a matter of
+	 * moving the tag (see Tools/SwitchDayStageCamera.py). Exactly one camera may carry it.
 	 */
 	const FName DayLevelCameraTag(TEXT("SDayCamera"));
 	const FName DayArtEnvironmentTag(TEXT("SDay.Environment"));
@@ -68,21 +69,76 @@ namespace DayBoardPresentationPrivate
 	/** Shipping target is a 1440x3200 portrait phone panel. */
 	constexpr float DayPortraitAspectRatio = 1440.0f / 3200.0f;
 
-	AActor* FindActorWithTag(UWorld* World, const FName Tag)
+	/**
+	 * A tagged piece of dressing, resolved from either an actor tag or a component tag. The
+	 * canguan restaurant ships as one Blueprint whose meshes carry the SDay.* tags per component,
+	 * while the whitebox and older setups tag standalone actors; the layout code only ever needs
+	 * a transform and world bounds, so both spellings answer the same questions.
+	 */
+	struct FDayArtPiece
 	{
+		const AActor* Actor = nullptr;
+		const UPrimitiveComponent* Component = nullptr;
+
+		bool IsValid() const
+		{
+			return Component != nullptr || Actor != nullptr;
+		}
+
+		FTransform GetTransform() const
+		{
+			if (Component)
+			{
+				return Component->GetComponentTransform();
+			}
+			return Actor ? Actor->GetActorTransform() : FTransform::Identity;
+		}
+
+		void GetBounds(FVector& OutCenter, FVector& OutExtent) const
+		{
+			OutCenter = FVector::ZeroVector;
+			OutExtent = FVector::ZeroVector;
+			if (Component)
+			{
+				const FBoxSphereBounds ComponentBounds = Component->Bounds;
+				OutCenter = ComponentBounds.Origin;
+				OutExtent = ComponentBounds.BoxExtent;
+				return;
+			}
+			if (Actor)
+			{
+				Actor->GetActorBounds(false, OutCenter, OutExtent);
+			}
+		}
+	};
+
+	FDayArtPiece FindDayArtPiece(UWorld* World, const FName Tag)
+	{
+		FDayArtPiece Piece;
 		if (!World || Tag.IsNone())
 		{
-			return nullptr;
+			return Piece;
 		}
 
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			if (It->ActorHasTag(Tag))
 			{
-				return *It;
+				Piece.Actor = *It;
+				return Piece;
+			}
+			for (const UActorComponent* Component : It->GetComponents())
+			{
+				const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+				if (Primitive && Primitive->ComponentHasTag(Tag))
+				{
+					Piece.Actor = *It;
+					Piece.Component = Primitive;
+					return Piece;
+				}
 			}
 		}
-		return nullptr;
+		return Piece;
 	}
 
 	void DisableDayArtCollision(UWorld* World)
@@ -148,18 +204,34 @@ namespace DayBoardPresentationPrivate
 		}
 	}
 
-	ACameraActor* FindDayLevelCamera(UWorld* World)
+	/**
+	 * The composition camera. It ships as a component of the canguan Blueprint, so that the
+	 * cookingUI layers can hang off it and follow every re-frame, but a standalone tagged
+	 * ACameraActor still answers for the whitebox and for older levels.
+	 */
+	UCameraComponent* FindDayCameraComponent(UWorld* World)
 	{
 		if (!World)
 		{
 			return nullptr;
 		}
 
-		for (TActorIterator<ACameraActor> It(World); It; ++It)
+		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			if (It->ActorHasTag(DayLevelCameraTag))
 			{
-				return *It;
+				if (UCameraComponent* Camera = It->FindComponentByClass<UCameraComponent>())
+				{
+					return Camera;
+				}
+			}
+			for (UActorComponent* Component : It->GetComponents())
+			{
+				UCameraComponent* Camera = Cast<UCameraComponent>(Component);
+				if (Camera && Camera->ComponentHasTag(DayLevelCameraTag))
+				{
+					return Camera;
+				}
 			}
 		}
 		return nullptr;
@@ -187,8 +259,7 @@ namespace DayBoardPresentationPrivate
 
 	bool TryGetDayCameraFrame(UWorld* World, FDayCameraFrame& OutFrame)
 	{
-		ACameraActor* CameraActor = FindDayLevelCamera(World);
-		const UCameraComponent* CameraComponent = CameraActor ? CameraActor->GetCameraComponent() : nullptr;
+		const UCameraComponent* CameraComponent = FindDayCameraComponent(World);
 		if (!CameraComponent)
 		{
 			return false;
@@ -208,6 +279,35 @@ namespace DayBoardPresentationPrivate
 	/** The engine plane mesh is 100 x 100 cm at scale 1. */
 	constexpr float DayArtBackdropPlaneSize = 100.0f;
 
+	/** Depth between stacked layers; higher order steps toward the camera in both roles. */
+	constexpr float DayArtBackdropLayerStep = 15.0f;
+
+	/** Clearance the foreground overlay keeps in front of the nearest piece of dressing. */
+	constexpr float DayArtForegroundDepthMargin = 120.0f;
+
+	/** Never let a foreground plane drift behind the camera's near clip. */
+	constexpr float DayArtForegroundMinDepth = 60.0f;
+
+	/** Backdrop layers sit behind the stall; tag "SDay.BackdropOrder.N", 0 = furthest street. */
+	const FString DayArtBackdropOrderPrefix(TEXT("SDay.BackdropOrder."));
+
+	/** Overlay layers sit in front of the stall; tag "SDay.ForegroundOrder.N", higher = nearer. */
+	const FName DayArtForegroundTag(TEXT("SDay.Foreground"));
+	const FString DayArtForegroundOrderPrefix(TEXT("SDay.ForegroundOrder."));
+
+	int32 DayArtLayerOrder(const TArray<FName>& Tags, const FString& Prefix)
+	{
+		for (const FName& Tag : Tags)
+		{
+			const FString TagString = Tag.ToString();
+			if (TagString.StartsWith(Prefix))
+			{
+				return FCString::Atoi(*TagString.Mid(Prefix.Len()));
+			}
+		}
+		return 0;
+	}
+
 	/**
 	 * How wide the camera's frame is at a given distance along the view axis. Orthographic zoom
 	 * is distance-independent; a perspective camera widens with distance, and the project
@@ -223,20 +323,20 @@ namespace DayBoardPresentationPrivate
 	}
 
 	/**
-	 * Refit the backdrop plane to the camera's frame. The restaurant art otherwise floats in a
-	 * void that is the same black as the letterbox around the portrait frame, so there is no
-	 * telling where the rendered picture ends; sizing the plane to the frame makes that edge the
-	 * boundary between backdrop and black. Solved at runtime so re-framing the camera in the
-	 * editor, or switching it between perspective and orthographic, cannot leave the plane lying
-	 * about where the edge is.
+	 * Refit the cookingUI layers inside the camera. The art is authored as full-frame slices: four
+	 * backdrops (street -> crowd -> storefront -> interior) behind the 3D stall, and three overlays
+	 * (coins, tally, red rope) in front of it. The planes are components of the camera, so panning
+	 * or re-rotating the camera carries the whole picture with it and nothing can drift out of
+	 * register. Depth and fill can be solved in camera-local space so each layer covers the frame
+	 * and the stall stays sandwiched, but that solve must stay opt-in: the editor camera preview
+	 * shows the authored component transforms, and PIE has to use those same numbers. Invoking this
+	 * from BeginPlay or OnConstruction rewrites the stack and makes the two views disagree.
 	 */
-	void FitDayArtBackdrop(UWorld* World)
+	void FitDayArtLayers(UWorld* World)
 	{
-		AActor* Backdrop = FindActorWithTag(World, DayArtBackdropTag);
-		const ACameraActor* CameraActor = FindDayLevelCamera(World);
-		const UCameraComponent* CameraComponent = CameraActor ? CameraActor->GetCameraComponent() : nullptr;
+		UCameraComponent* CameraComponent = FindDayCameraComponent(World);
 		FDayCameraFrame Frame;
-		if (!Backdrop || !CameraComponent || !TryGetDayCameraFrame(World, Frame))
+		if (!CameraComponent || !TryGetDayCameraFrame(World, Frame))
 		{
 			return;
 		}
@@ -247,33 +347,121 @@ namespace DayBoardPresentationPrivate
 			return;
 		}
 
-		float Depth = 0.0f;
+		// Everything hanging off the camera has to be out of the measurement below: the layer planes
+		// themselves, but also the camera's own editor proxy mesh and frustum, whose bounds sit at
+		// the camera and would peg the near edge of the bracket to nothing.
+		auto RidesTheCamera = [CameraComponent](const USceneComponent* Component)
+		{
+			for (const USceneComponent* Node = Component; Node; Node = Node->GetAttachParent())
+			{
+				if (Node == CameraComponent)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+
+		// Bracket the real dressing along the view axis: backdrops go behind the furthest piece,
+		// overlays in front of the nearest. Measured per mesh rather than per actor, because the
+		// whole restaurant is now one actor whose union bounds would be far looser than the
+		// individual pieces.
+		float FarDepth = 0.0f;
+		float NearDepth = TNumericLimits<float>::Max();
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			if (*It == Backdrop || !It->ActorHasTag(DayArtEnvironmentTag))
+			// Pre-Blueprint levels dressed the layers as standalone actors that also carry the
+			// environment tag; they are art, not dressing to bracket against.
+			if (!It->ActorHasTag(DayArtEnvironmentTag)
+				|| It->ActorHasTag(DayArtBackdropTag)
+				|| It->ActorHasTag(DayArtForegroundTag))
 			{
 				continue;
 			}
-			FVector Center = FVector::ZeroVector;
-			FVector Extent = FVector::ZeroVector;
-			It->GetActorBounds(false, Center, Extent);
-			Depth = FMath::Max(Depth, Frame.ToFrame(Center).Z + Extent.Size());
+			for (const UActorComponent* Component : It->GetComponents())
+			{
+				const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+				if (!Primitive || RidesTheCamera(Primitive))
+				{
+					continue;
+				}
+				const FBoxSphereBounds Bounds = Primitive->Bounds;
+				const float Along = Frame.ToFrame(Bounds.Origin).Z;
+				const float Radius = Bounds.BoxExtent.Size();
+				FarDepth = FMath::Max(FarDepth, Along + Radius);
+				NearDepth = FMath::Min(NearDepth, Along - Radius);
+			}
 		}
-		Depth += DayArtBackdropDepthMargin;
-
-		const float FrameWidth = DayCameraFrameWidthAtDepth(*CameraComponent, Depth);
-		if (FrameWidth <= 0.0f)
+		if (NearDepth == TNumericLimits<float>::Max())
 		{
-			return;
+			NearDepth = FarDepth;
 		}
+		FarDepth += DayArtBackdropDepthMargin;
 
-		// The plane's normal is local +Z and its surface spans local X and Y.
-		Backdrop->SetActorTransform(FTransform(
-			FRotationMatrix::MakeFromZX(-Frame.Forward, Frame.Right).Rotator(),
-			Frame.ToWorld(FVector(0.0f, 0.0f, Depth)),
-			FVector(FrameWidth / DayArtBackdropPlaneSize,
-				FrameWidth / AspectRatio / DayArtBackdropPlaneSize,
-				1.0f)));
+		// The restaurant includes wide floor and wall planes that reach most of the way back to
+		// the camera, so the nearest dressing can be only a couple of metres out. Reserve room for
+		// the whole overlay stack above the near clip, or the deepest layers would all clamp to the
+		// same depth and z-fight.
+		int32 DeepestOverlayOrder = 0;
+		for (const USceneComponent* Child : CameraComponent->GetAttachChildren())
+		{
+			if (Child && Child->ComponentHasTag(DayArtForegroundTag))
+			{
+				DeepestOverlayOrder = FMath::Max(DeepestOverlayOrder,
+					DayArtLayerOrder(Child->ComponentTags, DayArtForegroundOrderPrefix));
+			}
+		}
+		NearDepth = FMath::Max(NearDepth - DayArtForegroundDepthMargin,
+			DayArtForegroundMinDepth + DeepestOverlayOrder * DayArtBackdropLayerStep);
+
+		// Camera-local: +X is the view axis, +Y screen right, +Z screen up. A mesh plane's normal
+		// is its local +Z; a UMG quad's is its local +X, so each kind needs its own facing and
+		// only the Widget's baked rotation is trusted here.
+		const FRotator FaceCamera =
+			FRotationMatrix::MakeFromZX(FVector(-1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f)).Rotator();
+		auto PlaceLayer = [&](USceneComponent& Layer, const float Depth)
+		{
+			const float FrameWidth = DayCameraFrameWidthAtDepth(*CameraComponent, Depth);
+			if (FrameWidth <= 0.0f)
+			{
+				return;
+			}
+			// A UMG layer's quad is its draw size in local centimetres, and the setup script
+			// already aimed its one visible face at the camera, so only depth and fill are left.
+			const UWidgetComponent* Widget = Cast<UWidgetComponent>(&Layer);
+			const FVector2D WidgetPage = Widget ? Widget->GetCurrentDrawSize() : FVector2D::ZeroVector;
+			const float LayerWidth = WidgetPage.X > 0.0f ? WidgetPage.X : DayArtBackdropPlaneSize;
+			const float LayerHeight = WidgetPage.Y > 0.0f ? WidgetPage.Y : DayArtBackdropPlaneSize;
+			const FRotator LayerRotation = Widget ? Layer.GetRelativeRotation() : FaceCamera;
+			Layer.SetRelativeTransform(FTransform(
+				LayerRotation,
+				FVector(Depth, 0.0f, 0.0f),
+				FVector(FrameWidth / LayerWidth,
+					FrameWidth / AspectRatio / LayerHeight,
+					1.0f)));
+		};
+
+		for (USceneComponent* Child : CameraComponent->GetAttachChildren())
+		{
+			if (!Child)
+			{
+				continue;
+			}
+			if (Child->ComponentHasTag(DayArtBackdropTag))
+			{
+				// Order 0 (street) sits furthest; each later layer steps toward the camera so the
+				// translucent stack sorts back-to-front without touching the stall or customers.
+				PlaceLayer(*Child, FarDepth
+					- DayArtLayerOrder(Child->ComponentTags, DayArtBackdropOrderPrefix) * DayArtBackdropLayerStep);
+			}
+			else if (Child->ComponentHasTag(DayArtForegroundTag))
+			{
+				// Order 0 (coins) sits just ahead of the nearest dressing; higher orders step
+				// nearer still so the rope draws over the coins, all in front of the stall.
+				PlaceLayer(*Child, NearDepth
+					- DayArtLayerOrder(Child->ComponentTags, DayArtForegroundOrderPrefix) * DayArtBackdropLayerStep);
+			}
+		}
 	}
 
 	/**
@@ -386,9 +574,9 @@ namespace DayBoardPresentationPrivate
 	TArray<FVector> SolveDayArtPlateSlots(UWorld* World, const int32 SeatCount, FDayCameraFrame* OutFrame = nullptr)
 	{
 		TArray<FVector> Slots;
-		AActor* Plates = FindActorWithTag(World, DayArtCustomerPlatesTag);
+		const FDayArtPiece Plates = FindDayArtPiece(World, DayArtCustomerPlatesTag);
 		FDayCameraFrame Frame;
-		if (!Plates || SeatCount <= 0 || !TryGetDayCameraFrame(World, Frame))
+		if (!Plates.IsValid() || SeatCount <= 0 || !TryGetDayCameraFrame(World, Frame))
 		{
 			return Slots;
 		}
@@ -399,7 +587,7 @@ namespace DayBoardPresentationPrivate
 
 		FVector PlatesOrigin = FVector::ZeroVector;
 		FVector PlatesExtent = FVector::ZeroVector;
-		Plates->GetActorBounds(false, PlatesOrigin, PlatesExtent);
+		Plates.GetBounds(PlatesOrigin, PlatesExtent);
 
 		const int32 SlotCount = FMath::Max(SeatCount, DayArtCustomerPlateCount);
 		const float SlotWidth = PlatesExtent.X * 2.0f / static_cast<float>(SlotCount);
@@ -983,6 +1171,19 @@ void ASDayCharacterStandIn::SetLabelFont(UFont* InFont)
 	ApplyLabelFont(Label, InFont, 24.0f);
 }
 
+#pragma region K2 moonyfli
+void ASDayCameraRig::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+}
+
+void ASDayCameraRig::RefitDayArt()
+{
+	// Intentionally empty. The cookingUI layers stay at their authored transforms so the
+	// editor camera preview and PIE show the same picture.
+}
+#pragma endregion K2 moonyfli
+
 ASDayBoardPresenter::ASDayBoardPresenter()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -1030,7 +1231,6 @@ void ASDayBoardPresenter::BeginPlay()
 	LogicBoard = ASMergeBoard::FindBoard(this);
 #pragma region K2 moonyfli
 	DisableDayArtCollision(GetWorld());
-	FitDayArtBackdrop(GetWorld());
 #pragma endregion K2 moonyfli
 	BuildWhitebox();
 
@@ -1044,11 +1244,14 @@ void ASDayBoardPresenter::BeginPlay()
 		if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0))
 		{
 #pragma region K2 moonyfli
-			if (ACameraActor* LevelCamera = DayBoardPresentationPrivate::FindDayLevelCamera(GetWorld()))
+			// The camera is a component now, so the view target is its owner: AActor::CalcCamera
+			// adopts the first active camera component, and the key light has to follow the
+			// component's rotation rather than the restaurant actor's.
+			if (UCameraComponent* LevelCamera = DayBoardPresentationPrivate::FindDayCameraComponent(GetWorld()))
 			{
-				PlayerController->SetViewTarget(LevelCamera);
+				PlayerController->SetViewTarget(LevelCamera->GetOwner());
 				DayBoardPresentationPrivate::AimKeyLightAlongCamera(
-					WhiteboxKeyLight, LevelCamera->GetActorRotation());
+					WhiteboxKeyLight, LevelCamera->GetComponentRotation());
 			}
 			else
 			{
@@ -1111,7 +1314,7 @@ void ASDayBoardPresenter::BuildWhitebox()
 	USDayBoardVisualConfig* Config = VisualConfig.LoadSynchronous();
 	UStaticMesh* Cube = LoadBasicShape(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	UStaticMesh* Cylinder = LoadBasicShape(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	const bool bUseDayArt = FindActorWithTag(GetWorld(), DayArtBoardTag) != nullptr; //add by K2
+	const bool bUseDayArt = FindDayArtPiece(GetWorld(), DayArtBoardTag).IsValid(); //add by K2
 
 	UMaterialInterface* BoardMaterial = Config ? Config->BoardMaterial.LoadSynchronous() : nullptr;
 	UMaterialInterface* CellMaterial = Config ? Config->CellMaterial.LoadSynchronous() : nullptr;
@@ -1241,8 +1444,8 @@ void ASDayBoardPresenter::BuildCells()
 	}
 
 #pragma region K2 moonyfli
-	AActor* ArtBoard = FindActorWithTag(World, DayArtBoardTag);
-	const bool bUseDayArt = ArtBoard != nullptr;
+	const FDayArtPiece ArtBoard = FindDayArtPiece(World, DayArtBoardTag);
+	const bool bUseDayArt = ArtBoard.IsValid();
 #pragma endregion K2 moonyfli
 
 	for (const FSDayBoardLayoutRow& Row : GetLayoutRows())
@@ -1255,7 +1458,7 @@ void ASDayBoardPresenter::BuildCells()
 		{
 			// Art rows are pan-local and already oriented, so the mirror the whitebox needs
 			// would move them off their wells.
-			SpawnTransform = DayArtCellToWorld(ArtBoard->GetActorTransform(), Row.Transform);
+			SpawnTransform = DayArtCellToWorld(ArtBoard.GetTransform(), Row.Transform);
 		}
 #pragma endregion K2 moonyfli
 
@@ -1330,13 +1533,13 @@ void ASDayBoardPresenter::BuildBins()
 	{
 		const FVector Location(-380.0f + Index * 190.0f, -690.0f + FMath::Abs(2 - Index) * 18.0f, 45.0f);
 #pragma region K2 moonyfli
-		AActor* ArtBin = FindActorWithTag(World, DayArtBinTag(Index));
+		const FDayArtPiece ArtBin = FindDayArtPiece(World, DayArtBinTag(Index));
 		FVector ArtBinCenter = FVector::ZeroVector;
 		FVector ArtBinExtent = FVector::ZeroVector;
 		FTransform SpawnTransform = FTransform(MirrorX(Location)) * GetActorTransform();
-		if (ArtBin)
+		if (ArtBin.IsValid())
 		{
-			ArtBin->GetActorBounds(false, ArtBinCenter, ArtBinExtent);
+			ArtBin.GetBounds(ArtBinCenter, ArtBinExtent);
 			SpawnTransform.SetLocation(ArtBinCenter);
 		}
 #pragma endregion K2 moonyfli
@@ -1368,7 +1571,7 @@ void ASDayBoardPresenter::BuildBins()
 		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
 #pragma endregion K2 moonyfli
 #pragma region K2 moonyfli
-		if (ArtBin)
+		if (ArtBin.IsValid())
 		{
 			// The imported box supplies the visible geometry. This hidden cube is sized to
 			// the art bounds and remains the stable Visibility trace target.
@@ -1405,7 +1608,7 @@ void ASDayBoardPresenter::BuildCharacters()
 		DeliverySeatCount = GameInstance->GetServiceSeatCount();
 	}
 	DeliverySeatCount = FMath::Clamp(DeliverySeatCount, 1, 6);
-	const bool bUseDayArt = FindActorWithTag(World, DayArtBoardTag) != nullptr; //add by K2
+	const bool bUseDayArt = FindDayArtPiece(World, DayArtBoardTag).IsValid(); //add by K2
 
 	TArray<FString> Labels;
 	TArray<FVector> Locations;

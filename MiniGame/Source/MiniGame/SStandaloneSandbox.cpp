@@ -5507,7 +5507,7 @@ void ASChefGameMode::BeginPlay()
 
 	UClass* GatewayClass = LoadClass<ASFakeNightGateway>(
 		nullptr,
-		TEXT("/Game/Day/Test/BP_FakeNightGateway.BP_FakeNightGateway_C"));
+		TEXT("/Game/Day/Maps/BP_FakeNightGateway.BP_FakeNightGateway_C"));
 	if (!GatewayClass)
 	{
 		GatewayClass = ASFakeNightGateway::StaticClass();

@@ -10,7 +10,7 @@ import math
 import unreal
 
 
-LEVEL_PATH = "/Game/Day/Test/L_S_DayWhitebox"
+LEVEL_PATH = "/Game/Day/Maps/L_S_DayWhitebox"
 BOARD_TAG = "SDay.Board"
 # Plane-space sampling grid; ~7 units per sample over an 830 x 1080 face.
 SAMPLES_U = 120
