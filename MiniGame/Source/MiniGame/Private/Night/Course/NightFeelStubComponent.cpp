@@ -1,4 +1,4 @@
-﻿#include "Night/Course/NightFeelStubComponent.h"
+#include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightFeelTuningData.h" //add by K2
 #include "EnhancedInputComponent.h"
