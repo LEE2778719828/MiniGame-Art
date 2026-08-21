@@ -584,6 +584,13 @@ private:
 	UFUNCTION()
 	void HandleChromeVisibilityChanged(bool bIsChecked);
 	void ApplyChromeVisibility(bool bShow);
+
+	/**
+	 * Diegetic readouts live in the art foreground page, not in this debug HUD, so they survive
+	 * the chrome toggle. Only the numbers come from C++; size, position and font stay in UMG.
+	 */
+	void RefreshForegroundReadouts(const USChefGameInstance& GameInstance);
+	void ResolveForegroundReadouts();
 #pragma endregion K2 moonyfli
 
 	void SpawnIngredient(FName IngredientId);
@@ -623,6 +630,11 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UVerticalBox> ControlsHost;
+
+	/** Text blocks authored inside the foreground art page; absent until that page is loaded. */
+	TWeakObjectPtr<UTextBlock> CoinAmountText;
+	TWeakObjectPtr<UTextBlock> RevenueCurrentText;
+	TWeakObjectPtr<UTextBlock> RevenueTargetText;
 #pragma endregion K2 moonyfli
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
