@@ -101,6 +101,15 @@ struct FSGameStageRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float CustomerSpawnInterval = 7.0f;
 
+#pragma region K2 moonyfli
+	/**
+	 * Seconds a regular customer waits after sitting down.
+	 * <= 0 means infinite: they stay until served or the shop closes.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float CustomerPatienceSeconds = 32.0f;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName CustomerConfigId = NAME_None;
 
@@ -256,6 +265,15 @@ struct FSGiftDefRow : public FTableRowBase
 	/** Numeric magnitude from the design sheet (0.3 rhythm, 2.5s dash, 40 HP, …). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float EffectValue = 0.0f;
+
+#pragma region K2 moonyfli
+	/**
+	 * Extra threshold for effects that need one, e.g. WildMilk near-death trigger.
+	 * Soul/HP points: heal fires when remaining soul is <= this value.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float EffectThreshold = 0.0f;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bGuideKite = false;
@@ -425,6 +443,12 @@ struct FSCustomerState
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bActive = false;
+
+#pragma region K2 moonyfli
+	/** Remaining wait time. Negative means infinite patience. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float PatienceRemaining = -1.0f;
+#pragma endregion K2 moonyfli
 };
 
 /** 下一夜可读的谢礼 Buff；代码认稳定 GiftId，不认卡面顺序。 */
@@ -457,6 +481,12 @@ struct FSGiftBuffState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float NearDeathHeal = 0.0f;
 
+#pragma region K2 moonyfli
+	/** Trigger heal when remaining soul/HP is at or below this value. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float NearDeathThreshold = 0.0f;
+#pragma endregion K2 moonyfli
+
 	FString ToDebugString() const
 	{
 		TArray<FString> Parts;
@@ -474,7 +504,10 @@ struct FSGiftBuffState
 		}
 		if (NearDeathHeal > 0.0f)
 		{
-			Parts.Add(FString::Printf(TEXT("NearDeath+%.0f"), NearDeathHeal));
+			Parts.Add(FString::Printf(
+				TEXT("NearDeath+%.0f@%.0f"),
+				NearDeathHeal,
+				NearDeathThreshold));
 		}
 		return Parts.IsEmpty() ? TEXT("None") : FString::Join(Parts, TEXT(", "));
 	}
@@ -843,6 +876,15 @@ public:
 	int32 GetRevenueGap() const;
 
 #pragma region K2 moonyfli
+	/**
+	 * Purse shown on the coin string. A persistent currency is not authored yet, so this is the
+	 * single place to redirect once one exists; the foreground readout already reads it.
+	 */
+	UFUNCTION(BlueprintPure, Category = "S Revenue")
+	int32 GetCoinBalance() const;
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
 	/** 调试：白天判失败，回档日初快照并重开当日。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool FailDayForDebug();
@@ -909,7 +951,13 @@ public:
 	float CustomerSpawnIntervalSeconds = 7.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
-	int32 CustomerConcurrentMax = 2;
+	int32 CustomerConcurrentMax = 4;
+
+#pragma region K2 moonyfli
+	/** Copied from DT_GameStages. <= 0 means customers wait forever. */
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
+	float CustomerPatienceSeconds = 32.0f;
+#pragma endregion K2 moonyfli
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 Revenue = 0;

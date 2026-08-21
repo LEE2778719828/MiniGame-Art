@@ -76,11 +76,11 @@ namespace
 
 	FString IngredientDisplayName(const FName Id)
 	{
-		if (Id == LingGuId) return TEXT("灵谷");
-		if (Id == YinShanJunId) return TEXT("阴山菌");
-		if (Id == ChiYanJiaoId) return TEXT("赤焰椒");
-		if (Id == YueLinYuId) return TEXT("月鳞鱼");
-		if (Id == XuanYuQinId) return TEXT("玄羽禽");
+		if (Id == LingGuId) return TEXT("煲仔饭");
+		if (Id == YinShanJunId) return TEXT("鸡蛋灌饼");
+		if (Id == ChiYanJiaoId) return TEXT("九转脆肠");
+		if (Id == YueLinYuId) return TEXT("仰望星空派");
+		if (Id == XuanYuQinId) return TEXT("蔬菜汁鹅腿");
 		return Id.ToString();
 	}
 
@@ -1060,6 +1060,14 @@ int32 USChefGameInstance::GetRevenueGap() const
 }
 
 #pragma region K2 moonyfli
+int32 USChefGameInstance::GetCoinBalance() const
+{
+	// No system banks money across days yet; keep the readout at zero rather than aliasing revenue.
+	return 0;
+}
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
 FSDayBalanceRow USChefGameInstance::GetDayBalance() const
 {
 	FSDayBalanceRow BuiltIn;
@@ -1286,6 +1294,8 @@ void USChefGameInstance::RebuildGiftBuffState()
 			{
 				GiftBuffState.NearDeathHeal = FMath::Max(
 					GiftBuffState.NearDeathHeal, Def.EffectValue);
+				GiftBuffState.NearDeathThreshold = FMath::Max(
+					GiftBuffState.NearDeathThreshold, Def.EffectThreshold);
 			}
 			else
 			{
@@ -1305,6 +1315,8 @@ void USChefGameInstance::RebuildGiftBuffState()
 				{
 					GiftBuffState.NearDeathHeal = FMath::Max(
 						GiftBuffState.NearDeathHeal, 40.0f);
+					GiftBuffState.NearDeathThreshold = FMath::Max(
+						GiftBuffState.NearDeathThreshold, 15.0f);
 				}
 			}
 			continue;
@@ -1350,7 +1362,19 @@ FString USChefGameInstance::GetGiftEffectText(const FName GiftId)
 
 bool USChefGameInstance::GrantGift(const FName GiftId)
 {
-	if (!IsKnownGiftId(GiftId))
+	if (GiftId.IsNone())
+	{
+		LastBoardFeedback = FString::Printf(TEXT("未知谢礼 ID：%s，已拒绝。"), *GiftId.ToString());
+		NotifyStateChanged();
+		return false;
+	}
+
+	FSGiftDefRow TableDef;
+#pragma region K2 moonyfli
+	const bool bKnownLegacy = IsKnownGiftId(GiftId);
+	const bool bKnownTable = TryGetGiftDef(GiftId, TableDef);
+	if (!bKnownLegacy && !bKnownTable)
+#pragma endregion K2 moonyfli
 	{
 		LastBoardFeedback = FString::Printf(TEXT("未知谢礼 ID：%s，已拒绝。"), *GiftId.ToString());
 		NotifyStateChanged();
@@ -1801,9 +1825,10 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 1001;
 		Row.DayDuration = 60.0f;
-		Row.RevenueTarget = 90;
-		Row.CustomerConcurrentMax = 2;
-		Row.CustomerSpawnInterval = 7.0f;
+		Row.RevenueTarget = 180;
+		Row.CustomerConcurrentMax = 4;
+		Row.CustomerSpawnInterval = 3.8f;
+		Row.CustomerPatienceSeconds = 32.0f;
 		Row.CustomerConfigId = TEXT("Wave_T0");
 		Row.NextLevelId = TEXT("L1");
 	}
@@ -1814,9 +1839,10 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 2101;
 		Row.DayDuration = 90.0f;
-		Row.RevenueTarget = 220;
-		Row.CustomerConcurrentMax = 3;
-		Row.CustomerSpawnInterval = 5.8f;
+		Row.RevenueTarget = 460;
+		Row.CustomerConcurrentMax = 4;
+		Row.CustomerSpawnInterval = 3.2f;
+		Row.CustomerPatienceSeconds = 28.0f;
 		Row.CustomerConfigId = TEXT("Wave_L1");
 		Row.NextLevelId = TEXT("L2");
 	}
@@ -1827,9 +1853,10 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.ForkPair = TEXT("AC");
 		Row.ReviewSeed = 3201;
 		Row.DayDuration = 120.0f;
-		Row.RevenueTarget = 360;
+		Row.RevenueTarget = 1010;
 		Row.CustomerConcurrentMax = 4;
-		Row.CustomerSpawnInterval = 5.0f;
+		Row.CustomerSpawnInterval = 2.9f;
+		Row.CustomerPatienceSeconds = 25.0f;
 		Row.CustomerConfigId = TEXT("Wave_L2");
 		Row.NextLevelId = TEXT("L3");
 	}
@@ -1840,9 +1867,10 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.ForkPair = TEXT("BC");
 		Row.ReviewSeed = 4301;
 		Row.DayDuration = 120.0f;
-		Row.RevenueTarget = 520;
-		Row.CustomerConcurrentMax = 5;
-		Row.CustomerSpawnInterval = 4.5f;
+		Row.RevenueTarget = 1280;
+		Row.CustomerConcurrentMax = 4;
+		Row.CustomerSpawnInterval = 2.7f;
+		Row.CustomerPatienceSeconds = 22.0f;
 		Row.CustomerConfigId = TEXT("Wave_L3");
 		Row.NextLevelId = NAME_None;
 		Row.bEndingAfterDay = true;
@@ -1900,6 +1928,16 @@ bool USChefGameInstance::ApplyStage(const FName InStageId)
 	RevenueTarget = Row.RevenueTarget + FMath::Max(0, CarryOverTargetBonus); //add by K2
 	CustomerSpawnIntervalSeconds = Row.CustomerSpawnInterval;
 	CustomerConcurrentMax = Row.CustomerConcurrentMax;
+#pragma region K2 moonyfli
+	CustomerPatienceSeconds = Row.CustomerPatienceSeconds;
+	if (Row.LevelId != TEXT("T0")
+		&& FMath::IsNearlyEqual(Row.CustomerPatienceSeconds, 32.0f))
+	{
+		if (Row.LevelId == TEXT("L1")) CustomerPatienceSeconds = 28.0f;
+		else if (Row.LevelId == TEXT("L2")) CustomerPatienceSeconds = 25.0f;
+		else if (Row.LevelId == TEXT("L3")) CustomerPatienceSeconds = 22.0f;
+	}
+#pragma endregion K2 moonyfli
 	CarryOverTargetBonusPerUnit = GetDayBalance().CarryOverTargetBonusPerUnit;
 	BuildNightBootstrap();
 	return true;
@@ -3161,16 +3199,24 @@ bool ASCustomerDirector::TryFillSeat(const int32 SeatIndex)
 	Customer.CustomerId = FString::Printf(TEXT("Guest-%02d"), CustomerNumber);
 	Customer.DisplayName = CustomerNames[(CustomerNumber - 1) % CustomerNames.Num()];
 	Customer.Order = Slot.Order;
+#pragma region K2 moonyfli
+	const float AuthoredPatience = GameInstance->CustomerPatienceSeconds;
+	Customer.PatienceRemaining = AuthoredPatience <= 0.0f ? -1.0f : AuthoredPatience;
+#pragma endregion K2 moonyfli
 	ActiveCustomers.Add(Customer);
 	SeatCooldowns[SeatIndex] = 0.0f;
 
+	const bool bInfinitePatience = Customer.PatienceRemaining < 0.0f;
 	SetFeedback(FString::Printf(
-		TEXT("座位 %d：顾客 %s（%s）入座，订单 %s（售价 %d），会一直等待。%s"),
+		TEXT("座位 %d：顾客 %s（%s）入座，订单 %s（售价 %d），%s。%s"),
 		SeatIndex + 1,
 		*Customer.DisplayName,
 		*Customer.CustomerId,
 		*Customer.Order.RecipeId.ToString(),
 		Customer.Order.SellValue,
+		bInfinitePatience
+			? TEXT("会一直等待")
+			: *FString::Printf(TEXT("耐心 %.0fs"), Customer.PatienceRemaining),
 		*GameInstance->GetPlannedOrderSummary()));
 	return true;
 }
@@ -3307,6 +3353,29 @@ void ASCustomerDirector::Tick(const float DeltaSeconds)
 	{
 		return;
 	}
+
+#pragma region K2 moonyfli
+	TArray<FString> TimedOutCustomerIds;
+	for (FSCustomerState& Customer : ActiveCustomers)
+	{
+		if (Customer.PatienceRemaining < 0.0f)
+		{
+			continue;
+		}
+
+		Customer.PatienceRemaining = FMath::Max(0.0f, Customer.PatienceRemaining - DeltaSeconds);
+		if (Customer.PatienceRemaining <= 0.0f)
+		{
+			TimedOutCustomerIds.Add(Customer.CustomerId);
+		}
+	}
+	for (const FString& CustomerId : TimedOutCustomerIds)
+	{
+		ClearCustomer(CustomerId, FString::Printf(
+			TEXT("顾客 %s 耐心耗尽离店，该座位稍后补客。"),
+			*CustomerId));
+	}
+#pragma endregion K2 moonyfli
 
 	for (int32 SeatIndex = 0; SeatIndex < SeatCooldowns.Num(); ++SeatIndex)
 	{
@@ -4291,7 +4360,7 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			DayBoardPresenter
 			&& DayBoardPresenter->GetDeliverySeatCount() == GameInstance->GetServiceSeatCount()
 			&& GameInstance->GetServiceSeatCount() == GameInstance->CustomerConcurrentMax
-			&& GameInstance->CustomerConcurrentMax == 2,
+			&& GameInstance->CustomerConcurrentMax == 4,
 			TEXT("T0 seats match CustomerConcurrentMax"));
 		const ASDayCharacterStandIn* CustomerSeat = DayBoardPresenter
 			? DayBoardPresenter->GetSeat(NAME_None)

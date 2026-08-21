@@ -750,6 +750,29 @@ namespace DayBoardPresentationPrivate
 		return FLinearColor::White;
 	}
 
+	FString IngredientDisplayName(const UObject* WorldContext, const FName IngredientId)
+	{
+		if (WorldContext)
+		{
+			if (const USChefGameInstance* GameInstance = WorldContext->GetWorld()
+				? WorldContext->GetWorld()->GetGameInstance<USChefGameInstance>()
+				: nullptr)
+			{
+				const FString Resolved = GameInstance->ResolveIngredientDisplayName(IngredientId);
+				if (!Resolved.IsEmpty())
+				{
+					return Resolved;
+				}
+			}
+		}
+		if (IngredientId == DayLingGuId) return TEXT("煲仔饭");
+		if (IngredientId == DayYinShanJunId) return TEXT("鸡蛋灌饼");
+		if (IngredientId == DayChiYanJiaoId) return TEXT("九转脆肠");
+		if (IngredientId == DayYueLinYuId) return TEXT("仰望星空派");
+		if (IngredientId == DayXuanYuQinId) return TEXT("蔬菜汁鹅腿");
+		return IngredientId.ToString();
+	}
+
 	FString IngredientShortName(const UObject* WorldContext, const FName IngredientId)
 	{
 		if (WorldContext)
@@ -1286,13 +1309,6 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	IngredientIcon->bIsScreenSizeScaled = false;
 	IngredientIcon->SetHiddenInGame(false);
 	IngredientIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	const FSDayIngredientBinIconTune DefaultIconTune;
-	IngredientIconTunes.Add(DayLingGuId, DefaultIconTune);
-	IngredientIconTunes.Add(DayYinShanJunId, DefaultIconTune);
-	IngredientIconTunes.Add(DayChiYanJiaoId, DefaultIconTune);
-	IngredientIconTunes.Add(DayYueLinYuId, DefaultIconTune);
-	IngredientIconTunes.Add(DayXuanYuQinId, DefaultIconTune);
 #pragma endregion K2 moonyfli
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
@@ -1919,7 +1935,7 @@ void ASDayBoardPresenter::BuildBins()
 			}
 		}
 		Bin->SetLabelFont(ResolveLabelFont());
-		Bin->Configure(Ids[Index], IngredientShortName(this, Ids[Index]));
+		Bin->Configure(Ids[Index], IngredientDisplayName(this, Ids[Index]));
 #pragma region K2 moonyfli
 		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
 		float IconBinHalfHeight = 35.0f;
@@ -2457,26 +2473,49 @@ USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(cons
 		return nullptr;
 	}
 
-	const FName ComponentName(*FString::Printf(TEXT("BoxAnim_%d"), BinIndex));
+#pragma region K2 moonyfli
+	auto MatchesBinAnim = [BinIndex](const USkeletalMeshComponent* AnimatedBox) -> bool
+	{
+		if (!AnimatedBox)
+		{
+			return false;
+		}
+		const FString Name = AnimatedBox->GetName();
+		const FString Exact = FString::Printf(TEXT("BoxAnim_%d"), BinIndex);
+		// Level instances and Live Coding may keep the SCS suffix (_GEN_VARIABLE) or a _1 duplicate.
+		return Name.Equals(Exact, ESearchCase::IgnoreCase)
+			|| Name.StartsWith(Exact + TEXT("_"), ESearchCase::IgnoreCase);
+	};
+
+	USkeletalMeshComponent* Fallback = nullptr;
 	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
 	{
-		AActor* Environment = *It;
-		if (!Environment || !Environment->ActorHasTag(DayArtEnvironmentTag))
+		AActor* Candidate = *It;
+		if (!Candidate)
 		{
 			continue;
 		}
 
 		TInlineComponentArray<USkeletalMeshComponent*> AnimatedBoxes;
-		Environment->GetComponents(AnimatedBoxes);
+		Candidate->GetComponents(AnimatedBoxes);
 		for (USkeletalMeshComponent* AnimatedBox : AnimatedBoxes)
 		{
-			if (AnimatedBox && AnimatedBox->GetFName() == ComponentName)
+			if (!MatchesBinAnim(AnimatedBox))
+			{
+				continue;
+			}
+			if (Candidate->ActorHasTag(DayArtEnvironmentTag))
 			{
 				return AnimatedBox;
 			}
+			if (!Fallback)
+			{
+				Fallback = AnimatedBox;
+			}
 		}
 	}
-	return nullptr;
+	return Fallback;
+#pragma endregion K2 moonyfli
 }
 
 void ASDayBoardPresenter::PlayIngredientBinAnimation(const FName IngredientId)
@@ -2504,6 +2543,13 @@ void ASDayBoardPresenter::PlayIngredientBinAnimation(const FName IngredientId)
 	USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex);
 	if (!Animation || !AnimatedBox)
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Ingredient bin animation skipped: Anim=%s BoxAnim_%d=%s"),
+			Animation ? *Animation->GetName() : TEXT("null"),
+			BinIndex,
+			AnimatedBox ? *AnimatedBox->GetName() : TEXT("null"));
 		return;
 	}
 
@@ -2775,10 +2821,14 @@ void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 
 TSharedRef<SWidget> USDayHUD::RebuildWidget()
 {
-	if (WidgetTree && !WidgetTree->RootWidget)
+#pragma region K2 moonyfli
+	// WBP_SDayHUD is a thin wrapper. If the designer tree has no C++ HUD root, replace it so the
+	// chrome toggle and debug controls actually exist at runtime.
+	if (WidgetTree && (!WidgetTree->RootWidget || WidgetTree->FindWidget(TEXT("DayHUDRoot")) == nullptr))
 	{
 		BuildWidgetTree();
 	}
+#pragma endregion K2 moonyfli
 	return Super::RebuildWidget();
 }
 
@@ -3096,7 +3146,76 @@ void USDayHUD::Refresh()
 		FlowButton->SetVisibility(FlowLabel.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 		SetButtonText(FlowButton, FlowLabel);
 	}
+
+	RefreshForegroundReadouts(*GameInstance); //add by K2
 }
+
+#pragma region K2 moonyfli
+void USDayHUD::ResolveForegroundReadouts()
+{
+	CoinAmountText.Reset();
+	RevenueCurrentText.Reset();
+	RevenueTargetText.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TInlineComponentArray<UWidgetComponent*> WidgetComponents;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		It->GetComponents(WidgetComponents);
+		for (const UWidgetComponent* WidgetComponent : WidgetComponents)
+		{
+			if (!WidgetComponent || !WidgetComponent->ComponentHasTag(DayArtForegroundTag))
+			{
+				continue;
+			}
+			UUserWidget* Page = WidgetComponent->GetUserWidgetObject();
+			if (!Page)
+			{
+				continue;
+			}
+			UTextBlock* Coin = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("CoinAmount")));
+			UTextBlock* Current = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueCurrent")));
+			UTextBlock* Target = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueTarget")));
+			if (!Coin && !Current && !Target)
+			{
+				continue;
+			}
+			CoinAmountText = Coin;
+			RevenueCurrentText = Current;
+			RevenueTargetText = Target;
+			return;
+		}
+	}
+}
+
+void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
+{
+	// Widget components rebuild their page on stream in/out, so stale handles mean "look again".
+	if (!CoinAmountText.IsValid() && !RevenueCurrentText.IsValid() && !RevenueTargetText.IsValid())
+	{
+		ResolveForegroundReadouts();
+	}
+
+	// The art paints bare digits, so bypass locale grouping separators.
+	if (UTextBlock* Coin = CoinAmountText.Get())
+	{
+		Coin->SetText(FText::AsNumber(GameInstance.GetCoinBalance(), &FNumberFormattingOptions::DefaultNoGrouping()));
+	}
+	if (UTextBlock* Current = RevenueCurrentText.Get())
+	{
+		Current->SetText(FText::AsNumber(GameInstance.Revenue, &FNumberFormattingOptions::DefaultNoGrouping()));
+	}
+	if (UTextBlock* Target = RevenueTargetText.Get())
+	{
+		Target->SetText(FText::AsNumber(GameInstance.RevenueTarget, &FNumberFormattingOptions::DefaultNoGrouping()));
+	}
+}
+#pragma endregion K2 moonyfli
 
 void USDayHUD::HandleCustomer()
 {
