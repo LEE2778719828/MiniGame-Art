@@ -115,6 +115,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
 	float AttackAnchorMs = 179.f;
 
+	/**
+	 * Camera framing lives on these two components and nowhere else: edit arm length, boom
+	 * rotation, socket offset and FOV on the components in BP_NightCoursePawn and what you set
+	 * is what runs. BeginPlay used to copy mirror UPROPERTYs over the boom, which silently
+	 * discarded anything set here; it now only re-asserts the invariants listed on
+	 * EnforceCameraInvariants.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Camera")
 	TObjectPtr<USpringArmComponent> SpringArm;
 
@@ -132,15 +139,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Feel|Input")
 	TObjectPtr<UInputAction> AttackAction;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera")
-	float CameraArmLength = 620.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera")
-	FRotator CameraBoomRotation = FRotator(-28.f, 0.f, 0.f);
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera")
-	FVector CameraBoomSocketOffset = FVector(0.f, 55.f, 160.f);
 
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -200,7 +198,14 @@ protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
 	void ApplyAvatarColor(FLinearColor Color);
-	void ApplyRearElevatedCamera();
+
+	/**
+	 * Re-asserts only what would break the lane camera if a Blueprint changed it: no controller
+	 * rotation (nothing ever sets one, so the boom would point somewhere arbitrary), no boom
+	 * collision test (the bridge deck would shove the camera around), and manual exposure (the
+	 * night scene must not auto-adapt). Framing values are deliberately left to the components.
+	 */
+	void EnforceCameraInvariants();
 
 	FVector AdvanceTargetLocation = FVector::ZeroVector;
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;

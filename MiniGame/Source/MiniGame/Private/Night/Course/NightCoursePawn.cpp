@@ -91,16 +91,19 @@ ANightCoursePawn::ANightCoursePawn()
 	}
 
 	// 刃心-style: behind + above the runner, looking forward down the lane.
+	// These are only the native defaults now. BP_NightCoursePawn may override any of them on the
+	// component and the override survives to runtime.
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(ArtRoot);
-	SpringArm->TargetArmLength = CameraArmLength;
+	SpringArm->TargetArmLength = 620.f;
 	SpringArm->bDoCollisionTest = false;
 	SpringArm->bUsePawnControlRotation = false;
+	// Yaw only: the boom swings through turns, but hero pitch/roll must not tilt the frame.
 	SpringArm->bInheritPitch = false;
 	SpringArm->bInheritYaw = true;
 	SpringArm->bInheritRoll = false;
-	SpringArm->SocketOffset = CameraBoomSocketOffset;
-	SpringArm->SetRelativeRotation(CameraBoomRotation);
+	SpringArm->SocketOffset = FVector(0.f, 55.f, 160.f);
+	SpringArm->SetRelativeRotation(FRotator(-28.f, 0.f, 0.f));
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
@@ -122,21 +125,16 @@ ANightCoursePawn::ANightCoursePawn()
 	FeelStub = CreateDefaultSubobject<UNightFeelStubComponent>(TEXT("FeelStub"));
 }
 
-void ANightCoursePawn::ApplyRearElevatedCamera()
+void ANightCoursePawn::EnforceCameraInvariants()
 {
 	if (SpringArm)
 	{
-		SpringArm->TargetArmLength = CameraArmLength;
 		SpringArm->bDoCollisionTest = false;
 		SpringArm->bUsePawnControlRotation = false;
-		SpringArm->SocketOffset = CameraBoomSocketOffset;
-		SpringArm->SetRelativeLocation(FVector::ZeroVector);
-		SpringArm->SetRelativeRotation(CameraBoomRotation);
 	}
 	if (Camera)
 	{
-		Camera->SetFieldOfView(70.f);
-		Camera->bConstrainAspectRatio = false;
+		Camera->bUsePawnControlRotation = false;
 		Camera->PostProcessBlendWeight = 1.f;
 		Camera->PostProcessSettings.bOverride_AutoExposureMethod = true;
 		Camera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
@@ -154,7 +152,7 @@ void ANightCoursePawn::ApplyRearElevatedCamera()
 void ANightCoursePawn::BeginPlay()
 {
 	Super::BeginPlay();
-	ApplyRearElevatedCamera();
+	EnforceCameraInvariants();
 	ApplyConfiguredHeroVisual();
 	if (UWorld* World = GetWorld())
 	{
