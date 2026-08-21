@@ -798,6 +798,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool StartNight();
 
+	/** Enter NightRunning for a playable NightCourse map, even after a saved Day phase. */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool PrepareNightForCourse();
+
 	/** 白天时钟由 ASCustomerDirector::Tick 驱动，DayRunning/DayQualified 都要走。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	void TickDayClock(float DeltaSeconds);

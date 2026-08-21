@@ -25,12 +25,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	TSubclassOf<ANightCourseHost> HostClass;
 
+	/** Fallback transition switch used when the Host has no destination override. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
 	bool bTravelToDayOnSuccess = true;
 
+	/** Fallback Day level; normally configure the placed Host instead. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
 	TSoftObjectPtr<UWorld> SuccessDayLevel;
 
+	/** Fallback Day GameMode; normally configure the placed Host instead. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
 	TSoftClassPtr<AGameModeBase> SuccessDayGameMode;
 

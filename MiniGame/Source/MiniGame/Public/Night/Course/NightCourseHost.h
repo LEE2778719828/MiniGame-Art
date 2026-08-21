@@ -18,6 +18,8 @@ class UDirectionalLightComponent;
 class UBoxComponent;
 class AStaticMeshActor;
 class AActor;
+class AGameModeBase;
+class UWorld;
 
 #pragma region K2 moonyfli
 /**
@@ -53,6 +55,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (ClampMin = "0.05"))
 	float AutoRetryDelaySeconds = 0.5f;
+
+	/** Open the configured Day level after a successful Night run. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	bool bTravelToDayOnSuccess = true;
+
+	/** Primary per-level Day destination. Leave empty to use the GameMode fallback. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	TSoftObjectPtr<UWorld> SuccessDayLevel;
+
+	/** Optional GameMode override for the configured Day destination. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	TSoftClassPtr<AGameModeBase> SuccessDayGameMode;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course|Layout")
 	TObjectPtr<UBoxComponent> LayoutBounds;

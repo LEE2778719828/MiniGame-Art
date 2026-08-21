@@ -1595,6 +1595,36 @@ bool USChefGameInstance::StartNight()
 	return true;
 }
 
+bool USChefGameInstance::PrepareNightForCourse()
+{
+	if (Phase == ESGamePhase::NightRunning)
+	{
+		return true;
+	}
+	if (Phase == ESGamePhase::Ending)
+	{
+		LastBoardFeedback = TEXT("当前关卡已进入尾声，不能重新进入 NightCourse。");
+		NotifyStateChanged();
+		return false;
+	}
+
+	if (Phase != ESGamePhase::PrepareNight && Phase != ESGamePhase::Boot)
+	{
+		// A standalone Night map can be opened after a saved Day phase. Stop the
+		// Day services and create a fresh Night snapshot without resetting stage
+		// progression or inventory.
+		ResetDayDirectors(false);
+		DayTimeRemaining = 0.0f;
+		DayStuckCheckAccum = 0.0f;
+		Phase = ESGamePhase::PrepareNight;
+		bAwaitingNightRetry = false;
+		BuildNightBootstrap();
+		NotifyStateChanged();
+	}
+
+	return StartNight();
+}
+
 void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 {
 	Phase = ESGamePhase::PrepareDay;

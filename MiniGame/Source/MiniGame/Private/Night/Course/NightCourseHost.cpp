@@ -567,17 +567,13 @@ void ANightCourseHost::PrepareChefNightFlow()
 		return;
 	}
 
-	if (GameInstance->Phase == ESGamePhase::Boot
-		|| GameInstance->Phase == ESGamePhase::PrepareNight)
+	if (!GameInstance->PrepareNightForCourse())
 	{
-		if (!GameInstance->StartNight())
-		{
-			UE_LOG(
-				LogTemp,
-				Error,
-				TEXT("[NightCourse][Stage=Flow] Could not establish NightRunning in USChefGameInstance."));
-			return;
-		}
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Flow] Could not establish NightRunning in USChefGameInstance."));
+		return;
 	}
 
 	if (GameInstance->Phase == ESGamePhase::NightRunning)
@@ -597,7 +593,7 @@ void ANightCourseHost::PrepareChefNightFlow()
 		UE_LOG(
 			LogTemp,
 			Warning,
-			TEXT("[NightCourse][Stage=Flow] GameInstance phase=%d; Host Bootstrap was not replaced."),
+			TEXT("[NightCourse][Stage=Flow] GameInstance phase=%d after PrepareNightForCourse; Host Bootstrap was not replaced."),
 			static_cast<int32>(GameInstance->Phase));
 	}
 }
@@ -1093,32 +1089,48 @@ void ANightCourseHost::TravelToDay()
 		return;
 	}
 
-	const ANightCourseGameMode* NightGameMode =
-		Cast<ANightCourseGameMode>(World->GetAuthGameMode());
-	if (!NightGameMode || !NightGameMode->bTravelToDayOnSuccess)
+	if (!bTravelToDayOnSuccess)
 	{
 		UE_LOG(
 			LogTemp,
 			Display,
-			TEXT("[NightCourse][Stage=Flow] Day travel is disabled or the current GameMode is not ANightCourseGameMode."));
+			TEXT("[NightCourse][Stage=Flow] Day travel is disabled on Host='%s'."),
+			*GetNameSafe(this));
 		return;
 	}
 
-	const FSoftObjectPath DayLevelPath =
-		NightGameMode->SuccessDayLevel.ToSoftObjectPath();
+	FSoftObjectPath DayLevelPath = SuccessDayLevel.ToSoftObjectPath();
+	FSoftObjectPath DayGameModePath = SuccessDayGameMode.ToSoftObjectPath();
+	bool bUsingGameModeFallback = false;
+	if (DayLevelPath.IsNull())
+	{
+		const ANightCourseGameMode* NightGameMode =
+			Cast<ANightCourseGameMode>(World->GetAuthGameMode());
+		if (NightGameMode
+			&& NightGameMode->bTravelToDayOnSuccess
+			&& !NightGameMode->SuccessDayLevel.IsNull())
+		{
+			DayLevelPath = NightGameMode->SuccessDayLevel.ToSoftObjectPath();
+			if (DayGameModePath.IsNull())
+			{
+				DayGameModePath = NightGameMode->SuccessDayGameMode.ToSoftObjectPath();
+			}
+			bUsingGameModeFallback = true;
+		}
+	}
+
 	const FString DayLevelPackage = DayLevelPath.GetLongPackageName();
 	if (DayLevelPackage.IsEmpty())
 	{
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("[NightCourse][Stage=Flow] SuccessDayLevel is not configured; staying in the Night map."));
+			TEXT("[NightCourse][Stage=Flow] No Day level configured. Set Host='%s' SuccessDayLevel (and optionally SuccessDayGameMode) in the Blueprint or level instance."),
+			*GetNameSafe(this));
 		return;
 	}
 
 	FString Options;
-	const FSoftObjectPath DayGameModePath =
-		NightGameMode->SuccessDayGameMode.ToSoftObjectPath();
 	if (!DayGameModePath.IsNull())
 	{
 		Options = FString::Printf(
@@ -1129,9 +1141,10 @@ void ANightCourseHost::TravelToDay()
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Flow] Night succeeded; opening Day level='%s' gameMode='%s'."),
+		TEXT("[NightCourse][Stage=Flow] Night succeeded; opening Day level='%s' gameMode='%s' source=%s."),
 		*DayLevelPackage,
-		DayGameModePath.IsNull() ? TEXT("<map default>") : *DayGameModePath.ToString());
+		DayGameModePath.IsNull() ? TEXT("<map default>") : *DayGameModePath.ToString(),
+		bUsingGameModeFallback ? TEXT("GameMode fallback") : TEXT("Host config"));
 	UGameplayStatics::OpenLevel(
 		this,
 		FName(*DayLevelPackage),
