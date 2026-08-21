@@ -11,6 +11,7 @@ class ASMergeBoard;
 class UBillboardComponent;
 class UBorder;
 class UButton;
+class UCheckBox; //add by K2
 class UCanvasPanelSlot;
 class UCameraComponent;
 class UDirectionalLightComponent;
@@ -28,6 +29,7 @@ class UTexture2D;
 class USChefGameInstance;
 class UScrollBox;
 class USizeBox;
+class UVerticalBox; //add by K2
 
 #pragma region K2 moonyfli
 
@@ -44,6 +46,21 @@ struct MINIGAME_API FSDayBoardLayoutRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float VisualRadius = 85.0f;
+};
+
+/** Per-ingredient placement for the icon floating above an authored ingredient bin. */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayIngredientBinIconTune
+{
+	GENERATED_BODY()
+
+	/** World-space billboard scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.01"))
+	float Scale = 0.85f;
+
+	/** Local offset measured from the top centre of the authored bin bounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FVector OffsetFromBinTop = FVector(0.0f, -75.0f, 45.0f);
 };
 
 /** DT_SDayDishIconTune single row Default: plated-food size and clearance. */
@@ -258,6 +275,11 @@ public:
 
 #pragma region K2 moonyfli
 	void SetIngredientIcon(UTexture2D* InTexture);
+	void ApplyIngredientIconLayout(float BinHalfHeight);
+
+	/** Independent icon size and top-relative placement keyed by IngredientId. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "S Day Board|Ingredient Icon")
+	TMap<FName, FSDayIngredientBinIconTune> IngredientIconTunes;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
@@ -558,6 +580,12 @@ private:
 	UFUNCTION()
 	void HandleFlowButton();
 
+#pragma region K2 moonyfli
+	UFUNCTION()
+	void HandleChromeVisibilityChanged(bool bIsChecked);
+	void ApplyChromeVisibility(bool bShow);
+#pragma endregion K2 moonyfli
+
 	void SpawnIngredient(FName IngredientId);
 	void DeliverNpc(FName NpcId);
 
@@ -588,6 +616,14 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UButton> FlowButton;
+
+#pragma region K2 moonyfli
+	UPROPERTY()
+	TObjectPtr<UCheckBox> ChromeToggle;
+
+	UPROPERTY()
+	TObjectPtr<UVerticalBox> ControlsHost;
+#pragma endregion K2 moonyfli
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
 	FTimerHandle RefreshTimerHandle; //add by K2

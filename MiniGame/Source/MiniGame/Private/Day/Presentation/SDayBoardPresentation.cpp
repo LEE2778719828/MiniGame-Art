@@ -8,6 +8,7 @@
 #include "Components/Border.h"
 #include "Components/BillboardComponent.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h" //add by K2
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/DirectionalLightComponent.h"
@@ -1285,6 +1286,13 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	IngredientIcon->bIsScreenSizeScaled = false;
 	IngredientIcon->SetHiddenInGame(false);
 	IngredientIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	const FSDayIngredientBinIconTune DefaultIconTune;
+	IngredientIconTunes.Add(DayLingGuId, DefaultIconTune);
+	IngredientIconTunes.Add(DayYinShanJunId, DefaultIconTune);
+	IngredientIconTunes.Add(DayChiYanJiaoId, DefaultIconTune);
+	IngredientIconTunes.Add(DayYueLinYuId, DefaultIconTune);
+	IngredientIconTunes.Add(DayXuanYuQinId, DefaultIconTune);
 #pragma endregion K2 moonyfli
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
@@ -1315,9 +1323,19 @@ void ASDayIngredientBinVisual::Configure(const FName InIngredientId, const FStri
 void ASDayIngredientBinVisual::SetIngredientIcon(UTexture2D* InTexture)
 {
 	IngredientIcon->SetSprite(InTexture);
-	IngredientIcon->SetRelativeScale3D(FVector(0.85f));
 	IngredientIcon->SetHiddenInGame(false);
 	IngredientIcon->SetVisibility(InTexture != nullptr);
+}
+
+void ASDayIngredientBinVisual::ApplyIngredientIconLayout(const float BinHalfHeight)
+{
+	const FSDayIngredientBinIconTune DefaultTune;
+	const FSDayIngredientBinIconTune* AuthoredTune = IngredientIconTunes.Find(IngredientId);
+	const FSDayIngredientBinIconTune& Tune = AuthoredTune ? *AuthoredTune : DefaultTune;
+
+	IngredientIcon->SetRelativeScale3D(FVector(FMath::Max(Tune.Scale, 0.01f)));
+	IngredientIcon->SetRelativeLocation(
+		Tune.OffsetFromBinTop + FVector(0.0f, 0.0f, FMath::Max(BinHalfHeight, 0.0f)));
 }
 #pragma endregion K2 moonyfli
 
@@ -1904,8 +1922,7 @@ void ASDayBoardPresenter::BuildBins()
 		Bin->Configure(Ids[Index], IngredientShortName(this, Ids[Index]));
 #pragma region K2 moonyfli
 		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
-#pragma endregion K2 moonyfli
-#pragma region K2 moonyfli
+		float IconBinHalfHeight = 35.0f;
 		if (ArtBin.IsValid())
 		{
 			// The imported box supplies the visible geometry. This hidden cube is sized to
@@ -1913,9 +1930,9 @@ void ASDayBoardPresenter::BuildBins()
 			Bin->BinMesh->SetRelativeScale3D(ArtBinExtent / 50.0f);
 			Bin->BinMesh->SetVisibility(false);
 			Bin->Label->SetRelativeLocation(FVector(0.0f, 0.0f, ArtBinExtent.Z + 30.0f));
-			Bin->IngredientIcon->SetRelativeLocation(
-				FVector(0.0f, -75.0f, ArtBinExtent.Z + 45.0f));
+			IconBinHalfHeight = ArtBinExtent.Z;
 		}
+		Bin->ApplyIngredientIconLayout(IconBinHalfHeight);
 #pragma endregion K2 moonyfli
 		IngredientBins.Add(Bin);
 	}
@@ -2805,6 +2822,51 @@ void USDayHUD::BuildWidgetTree()
 	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	SafeZone->AddChild(Root);
 
+#pragma region K2 moonyfli
+	UHorizontalBox* ToggleRow = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(),
+		TEXT("DayHudChromeRow"));
+	ToggleRow->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	Root->AddChildToVerticalBox(ToggleRow)->SetPadding(FMargin(8.0f, 6.0f, 8.0f, 0.0f));
+
+	USizeBox* ToggleSpacer = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(),
+		TEXT("DayHudChromeSpacer"));
+	ToggleSpacer->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ToggleRow->AddChildToHorizontalBox(ToggleSpacer)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+
+	// Tiny, almost invisible hit target in the top-right. It stays after the HUD chrome is hidden.
+	USizeBox* ToggleBox = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(),
+		TEXT("DayHudChromeSize"));
+	ToggleBox->SetWidthOverride(28.0f);
+	ToggleBox->SetHeightOverride(28.0f);
+	ToggleRow->AddChildToHorizontalBox(ToggleBox);
+
+	ChromeToggle = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("DayHudChromeSwitch"));
+	ChromeToggle->SetIsChecked(true);
+	ChromeToggle->SetToolTipText(FText::FromString(TEXT("显示/隐藏运行时控制信息和按钮")));
+	FCheckBoxStyle ToggleStyle = ChromeToggle->GetWidgetStyle();
+	const FLinearColor HiddenTint(1.0f, 1.0f, 1.0f, 0.0f);
+	ToggleStyle.UncheckedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UncheckedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UncheckedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ChromeToggle->SetWidgetStyle(ToggleStyle);
+	ToggleBox->AddChild(ChromeToggle);
+	ChromeToggle->OnCheckStateChanged.AddDynamic(this, &USDayHUD::HandleChromeVisibilityChanged);
+
+	ControlsHost = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DayHUDControls"));
+	ControlsHost->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	UVerticalBoxSlot* ControlsSlot = Root->AddChildToVerticalBox(ControlsHost);
+	ControlsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+#pragma endregion K2 moonyfli
+
 	auto MakeText = [this](const TCHAR* Name, const int32 Size, const FLinearColor& Color)
 	{
 		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
@@ -2852,13 +2914,13 @@ void USDayHUD::BuildWidgetTree()
 #pragma endregion K2 moonyfli
 
 	PhaseText = MakeText(TEXT("PhaseText"), 24, FLinearColor(0.10f, 0.95f, 0.75f));
-	Root->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
 
 	OrderText = MakeText(TEXT("DayOrderText"), 20, FLinearColor(0.98f, 0.90f, 0.42f));
-	Root->AddChildToVerticalBox(OrderText)->SetPadding(FMargin(18.0f, 2.0f, 18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(OrderText)->SetPadding(FMargin(18.0f, 2.0f, 18.0f, 4.0f));
 
 	UHorizontalBox* Orders = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("OrderRow"));
-	Root->AddChildToVerticalBox(Orders)->SetPadding(FMargin(12.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(Orders)->SetPadding(FMargin(12.0f, 4.0f));
 	CustomerButton = MakeButton(TEXT("DayCustomerButton"), TEXT("普通顾客"));
 	ALingButton = MakeButton(TEXT("DayALingButton"), TEXT("阿翎"));
 	SangPoButton = MakeButton(TEXT("DaySangPoButton"), TEXT("桑婆"));
@@ -2872,18 +2934,18 @@ void USDayHUD::BuildWidgetTree()
 	USizeBox* WorldSpacer = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("WorldBoardInputSpace"));
 	WorldSpacer->SetHeightOverride(680.0f);
 	WorldSpacer->SetVisibility(ESlateVisibility::HitTestInvisible);
-	UVerticalBoxSlot* SpacerSlot = Root->AddChildToVerticalBox(WorldSpacer);
+	UVerticalBoxSlot* SpacerSlot = ControlsHost->AddChildToVerticalBox(WorldSpacer);
 	SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 	FeedbackText = MakeText(TEXT("DayFeedbackText"), 20, FLinearColor(1.0f, 0.82f, 0.20f));
-	Root->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	InventoryText = MakeText(TEXT("DayInventoryText"), 20, FLinearColor::White);
-	Root->AddChildToVerticalBox(InventoryText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(InventoryText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	UWrapBox* Ingredients = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("IngredientRow"));
 	Ingredients->SetInnerSlotPadding(FVector2D(4.0f, 4.0f));
-	Root->AddChildToVerticalBox(Ingredients)->SetPadding(FMargin(12.0f, 2.0f));
+	ControlsHost->AddChildToVerticalBox(Ingredients)->SetPadding(FMargin(12.0f, 2.0f));
 	UButton* LingGu = MakeIngredientButton(TEXT("DayLingGuButton"), TEXT("灵谷"), DayLingGuId);
 	UButton* Yin = MakeIngredientButton(TEXT("DayYinShanJunButton"), TEXT("阴山菌"), DayYinShanJunId);
 	UButton* Chi = MakeIngredientButton(TEXT("DayChiYanJiaoButton"), TEXT("赤焰椒"), DayChiYanJiaoId);
@@ -2901,10 +2963,10 @@ void USDayHUD::BuildWidgetTree()
 	Xuan->OnClicked.AddDynamic(this, &USDayHUD::HandleXuanYuQin);
 
 	GiftTabText = MakeText(TEXT("DayGiftTabText"), 18, FLinearColor(0.72f, 0.88f, 1.0f));
-	Root->AddChildToVerticalBox(GiftTabText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(GiftTabText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	UHorizontalBox* Flow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FlowRow"));
-	Root->AddChildToVerticalBox(Flow)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
+	ControlsHost->AddChildToVerticalBox(Flow)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
 	FlowButton = MakeButton(TEXT("DayFlowButton"), TEXT("入夜"));
 	Flow->AddChildToHorizontalBox(FlowButton)->SetPadding(FMargin(4.0f));
 	FlowButton->OnClicked.AddDynamic(this, &USDayHUD::HandleFlowButton);
@@ -3079,6 +3141,25 @@ void USDayHUD::HandleFlowButton()
 }
 
 #pragma region K2 moonyfli
+void USDayHUD::HandleChromeVisibilityChanged(const bool bIsChecked)
+{
+	ApplyChromeVisibility(bIsChecked);
+}
+
+void USDayHUD::ApplyChromeVisibility(const bool bShow)
+{
+	if (ControlsHost)
+	{
+		ControlsHost->SetVisibility(
+			bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+
+	if (!bShow && CheatPanel)
+	{
+		CheatPanel->SetPanelVisible(false);
+	}
+}
+
 void USDayHUD::HandleToggleCheatPanel()
 {
 #if UE_BUILD_SHIPPING
