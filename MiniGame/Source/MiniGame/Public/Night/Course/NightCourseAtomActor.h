@@ -30,7 +30,7 @@ struct MINIGAME_API FNightAtomVisualBinding
 	FString AtomKey;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
-	int32 AtomSequenceIndex = INDEX_NONE;
+	int32 AtomSlotIndex = INDEX_NONE;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
 	TSubclassOf<AActor> VisualPrefabClass;

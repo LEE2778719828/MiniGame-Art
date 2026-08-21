@@ -74,7 +74,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Route")
 	FNightRouteRuleRow GetRule(ENightRouteId RouteId) const;
 
-	/** Built-in A/B/C rows used when no asset is assigned. */
+	/** Returns false when the route is not explicitly authored in this asset. */
+	UFUNCTION(BlueprintCallable, Category = "Night|Route")
+	bool TryGetRule(ENightRouteId RouteId, FNightRouteRuleRow& OutRule) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Route")
+	bool ValidateRules(FString& OutError) const;
+
+	/** Helper defaults for authoring/tests; Director still requires an asset. */
 	UFUNCTION(BlueprintCallable, Category = "Night|Route")
 	static FNightRouteRuleRow MakeDefaultRule(ENightRouteId RouteId);
 };

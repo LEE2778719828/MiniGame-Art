@@ -20,38 +20,6 @@ bool UNightCourseAtomRouteData::ValidateRoute(FString& OutError) const
 		OutError = TEXT("AtomMap is empty.");
 		return false;
 	}
-	if (AtomSequence.Num() == 0)
-	{
-		OutError = TEXT("AtomSequence is empty.");
-		return false;
-	}
-
-	TSet<FString> SeenKeys;
-	for (const FString& Key : AtomSequence)
-	{
-		if (Key.IsEmpty())
-		{
-			OutError = TEXT("AtomSequence contains an empty key.");
-			return false;
-		}
-		if (SeenKeys.Contains(Key))
-		{
-			OutError = FString::Printf(
-				TEXT("AtomSequence contains duplicate key '%s'."),
-				*Key);
-			return false;
-		}
-		SeenKeys.Add(Key);
-
-		const TSoftClassPtr<ANightCourseAtomActor>* AtomClass = AtomMap.Find(Key);
-		if (!AtomClass || AtomClass->IsNull())
-		{
-			OutError = FString::Printf(
-				TEXT("AtomSequence key '%s' is missing from AtomMap or has no BP class."),
-				*Key);
-			return false;
-		}
-	}
 
 	for (const TPair<FString, TSoftClassPtr<ANightCourseAtomActor>>& Entry : AtomMap)
 	{
@@ -63,6 +31,90 @@ bool UNightCourseAtomRouteData::ValidateRoute(FString& OutError) const
 	}
 
 	return true;
+}
+
+void UNightCourseAtomRouteData::GetCompatibleAtomKeys(
+	const int32 RequiredActionCount,
+	TArray<FString>& OutKeys,
+	TArray<FString>* OutRejectionReasons) const
+{
+	OutKeys.Reset();
+	if (OutRejectionReasons)
+	{
+		OutRejectionReasons->Reset();
+	}
+	if (RequiredActionCount < 0)
+	{
+		return;
+	}
+
+	TArray<FString> ExactMatches;
+	TArray<FString> UnknownCountMatches;
+	for (const TPair<FString, TSoftClassPtr<ANightCourseAtomActor>>& Entry : AtomMap)
+	{
+		if (Entry.Key.IsEmpty() || Entry.Value.IsNull())
+		{
+			if (OutRejectionReasons)
+			{
+				OutRejectionReasons->Add(
+					FString::Printf(
+						TEXT("key '%s' is empty or has no BP class"),
+						*Entry.Key));
+			}
+			continue;
+		}
+
+		UClass* AtomClass = Entry.Value.LoadSynchronous();
+		if (!AtomClass || !AtomClass->IsChildOf(ANightCourseAtomActor::StaticClass()))
+		{
+			if (OutRejectionReasons)
+			{
+				OutRejectionReasons->Add(
+					FString::Printf(
+						TEXT("key '%s' does not resolve to an Atom BP"),
+						*Entry.Key));
+			}
+			continue;
+		}
+
+		const ANightCourseAtomActor* AtomCDO =
+			Cast<ANightCourseAtomActor>(AtomClass->GetDefaultObject());
+		if (!AtomCDO)
+		{
+			if (OutRejectionReasons)
+			{
+				OutRejectionReasons->Add(
+					FString::Printf(TEXT("key '%s' has no valid Atom CDO"), *Entry.Key));
+			}
+			continue;
+		}
+
+		const int32 LandingPointCount = AtomCDO->GetLandingPointCount();
+		if (LandingPointCount <= 0)
+		{
+			// Blueprint SCS templates can be unavailable on an editor CDO. Keep
+			// the valid class as a candidate and let the transient Composer
+			// instance perform the authoritative count check.
+			UnknownCountMatches.Add(Entry.Key);
+		}
+		else if (LandingPointCount == RequiredActionCount + 1)
+		{
+			ExactMatches.Add(Entry.Key);
+		}
+		else if (OutRejectionReasons)
+		{
+			OutRejectionReasons->Add(
+				FString::Printf(
+					TEXT("key '%s' has %d landing points; expected %d"),
+					*Entry.Key,
+					LandingPointCount,
+					RequiredActionCount + 1));
+		}
+	}
+
+	ExactMatches.Sort();
+	UnknownCountMatches.Sort();
+	OutKeys = ExactMatches.Num() > 0 ? MoveTemp(ExactMatches) : MoveTemp(UnknownCountMatches);
 }
 
 void UNightCourseAtomRouteData::MarkPackageDirtyForEditor()

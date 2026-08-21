@@ -294,6 +294,16 @@ void ANightCoursePawn::BeginPlay()
 	}
 }
 
+void ANightCoursePawn::BindCourseDirector(UNightCourseDirector* InDirector)
+{
+	CourseDirector = InDirector;
+}
+
+UNightCourseDirector* ANightCoursePawn::GetCourseDirector() const
+{
+	return CourseDirector;
+}
+
 void ANightCoursePawn::SnapToTrack(const FVector& WorldLocation, const FRotator& WorldRotation)
 {
 	bTrackAdvancing = false;

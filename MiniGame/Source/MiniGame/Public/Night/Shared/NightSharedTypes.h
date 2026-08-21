@@ -116,6 +116,10 @@ struct FNightBootstrap
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
 	FGiftBuffState GiftBuffs;
 
+	/** Optional weighted foe pool. Repeated IDs represent higher weight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
+	TArray<EFoeId> FoeWeightOverride;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
 	int32 Seed = 1001;
 };

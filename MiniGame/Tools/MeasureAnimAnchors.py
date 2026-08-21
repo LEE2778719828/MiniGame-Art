@@ -21,7 +21,7 @@ import unreal
 
 BASE = "/Game/Night/Character/Anims/"
 
-# Traversal budgets that the clips have to line up with, from DA_NightG1_T0:
+# Traversal budgets that the clips have to line up with, from DA_Course:
 # JumpGapCm 420 / AdvanceSpeed 1400 = 300ms, KillGapCm 160 / 1400 = 114ms.
 JUMP_TRAVERSAL_MS = 300.0
 ATTACK_TRAVERSAL_MS = 114.0

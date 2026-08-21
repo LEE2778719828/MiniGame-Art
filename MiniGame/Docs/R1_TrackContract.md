@@ -109,7 +109,7 @@ G1 现用 `UNightFeelStubComponent`：Attack 对 Enemy、Jump 对 Hazard；错�
 
 ### 方法 A — 最快（改 DA / CDO，推荐联调）
 
-1. 打开 `/Game/Night/Course/Data/DA_NightG1_T0`（或 Host 运行时 NewObject 的 Config）  
+1. 打开 `/Game/Night/Course/Config/DA_Course`（Host 不再创建运行时默认 Config）
 2. 设例如：
    - `BeatCount = 3`
    - `JumpGapCm = 420`

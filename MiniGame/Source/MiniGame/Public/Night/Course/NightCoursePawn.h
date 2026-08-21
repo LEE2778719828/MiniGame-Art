@@ -16,6 +16,7 @@ class USkeletalMesh;
 class UMaterialInterface;
 class USkeletalMeshComponent;
 class UAnimSequence;
+class UNightCourseDirector;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -177,6 +178,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsTrackAdvancing() const { return bTrackAdvancing; }
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Course")
+	void BindCourseDirector(UNightCourseDirector* InDirector);
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course")
+	UNightCourseDirector* GetCourseDirector() const;
+
 	/**
 	 * add by K2 (R1): 加速未走完的这一段石间移动（负反应缓存命中时用）。
 	 * 压缩量上限 MaxCompressSeconds，只影响当前这一段。
@@ -268,6 +275,9 @@ protected:
 
 	/** 当前动作的播放倍率，追赶加速时在此基础上再乘。 */
 	float HeroAnimPlayRate = 1.f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNightCourseDirector> CourseDirector;
 
 	/**
 	 * 最近一次动作是不是斩击。PlayHeroAction 早于 Director 的 BeginTrackAdvance，

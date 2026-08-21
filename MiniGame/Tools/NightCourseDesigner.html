@@ -126,6 +126,7 @@
 <header>
   <h1>Night Course Designer（G3.5）</h1>
   <p>俯视预览密度 / 难度 / 岔路 · 导出 UE 可识别 JSON（与 FRandomStream LCG 对齐）</p>
+  <p><a href="NightCourseConfigGuide.html" style="color:#55d6be">打开 NightCourse 配置数据流与 UE 资产索引</a></p>
 </header>
 <div class="layout">
   <aside>
@@ -221,14 +222,30 @@
       <button id="btnImport">导入 JSON 文件</button>
       <input id="fileImport" type="file" accept="application/json,.json" hidden />
     </div>
-    <label>Atom Rule（策划规则：只写 AtomKey + Actions）</label>
+    <label>Atom Rule（模板池：总数 + Weight 加权；AtomKey 留空=按 Seed 自动选择，填值=美术/回归锁定）</label>
     <textarea id="atomRuleJson" rows="8" spellcheck="false">{
   "seed": 1001,
-  "route": [
-    { "atomKey": "A", "actions": ["Jump", "Kill", "Kill"] },
-    { "atomKey": "B", "actions": ["Kill", "Jump", "Kill"] }
+  "autoSelectAtomKeys": true,
+  "baseAtomCount": 30,
+  "baseRoute": [
+    { "atomKey": "", "actions": ["Jump", "Kill", "Kill"], "weight": 5 },
+    { "atomKey": "", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
   ],
-  "transitionAction": "Jump"
+  "branchRoutes": {
+    "A": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Jump", "Kill"], "weight": 1 }]
+    },
+    "B": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Jump", "Kill", "Jump"], "weight": 1 }]
+    },
+    "C": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Kill", "Jump"], "weight": 1 }]
+    }
+  },
+  "forkAfterBaseAtomIndex": 30
 }</textarea>
     <div class="actions">
       <button id="btnExportAtomRule">导出 Atom Rule JSON</button>
@@ -541,33 +558,94 @@ function normalizeAtomRule(value) {
   if (!value || typeof value !== "object") throw new Error("Atom Rule 必须是 JSON 对象");
   const seed = Number(value.seed);
   if (!Number.isFinite(seed)) throw new Error("Atom Rule.seed 必须是数字");
-  if (!Array.isArray(value.route) || value.route.length === 0) {
-    throw new Error("Atom Rule.route 必须是非空数组");
+  const baseAtomCount = value.baseAtomCount === undefined
+    ? 0
+    : Math.trunc(Number(value.baseAtomCount));
+  if (!Number.isFinite(baseAtomCount) || baseAtomCount < 0) {
+    throw new Error("Atom Rule.baseAtomCount 必须是非负整数");
   }
-  const seen = new Set();
-  const route = value.route.map((entry, index) => {
-    if (!entry || typeof entry.atomKey !== "string" || !entry.atomKey.trim()) {
-      throw new Error(`route[${index}].atomKey 必须是非空字符串`);
+  const autoSelectAtomKeys = value.autoSelectAtomKeys === undefined
+    ? true
+    : Boolean(value.autoSelectAtomKeys);
+  const normalizeEntries = (entries, label) => {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new Error(`Atom Rule.${label} 必须是非空数组`);
     }
-    const atomKey = entry.atomKey.trim();
-    if (seen.has(atomKey)) throw new Error(`AtomKey 重复：${atomKey}`);
-    seen.add(atomKey);
-    if (!Array.isArray(entry.actions)) {
-      throw new Error(`route[${index}].actions 必须是数组`);
-    }
-    const actions = entry.actions.map((action, actionIndex) => {
-      const normalized = String(action).trim().toLowerCase();
-      if (normalized === "jump" || normalized === "hazard") return "Jump";
-      if (normalized === "kill" || normalized === "attack" || normalized === "enemy") return "Kill";
-      throw new Error(`route[${index}].actions[${actionIndex}] 不支持：${action}`);
+    return entries.map((entry, index) => {
+      if (!entry || typeof entry.atomKey !== "string") {
+        throw new Error(`${label}[${index}].atomKey 必须是字符串，可为空`);
+      }
+      const atomKey = entry.atomKey.trim();
+      if (!atomKey && !autoSelectAtomKeys) {
+        throw new Error(`${label}[${index}].atomKey 为空，但 autoSelectAtomKeys=false`);
+      }
+      if (!Array.isArray(entry.actions)) {
+        throw new Error(`${label}[${index}].actions 必须是数组`);
+      }
+      const actions = entry.actions.map((action, actionIndex) => {
+        const normalized = String(action).trim().toLowerCase();
+        if (normalized === "jump" || normalized === "hazard") return "Jump";
+        if (normalized === "kill" || normalized === "attack" || normalized === "enemy") return "Kill";
+        throw new Error(`${label}[${index}].actions[${actionIndex}] 不支持：${action}`);
+      });
+      const weight = entry.weight === undefined ? 1 : Math.trunc(Number(entry.weight));
+      if (!Number.isFinite(weight) || weight <= 0) {
+        throw new Error(`${label}[${index}].weight 必须是大于 0 的整数`);
+      }
+      return { atomKey, actions, weight };
     });
-    return { atomKey, actions };
-  });
-  const transitionAction = String(value.transitionAction || "Jump").trim().toLowerCase();
-  if (transitionAction !== "jump" && transitionAction !== "hazard") {
-    throw new Error("transitionAction 只能是 Jump");
+  };
+  if (!Array.isArray(value.baseRoute)) {
+    throw new Error("Atom Rule.baseRoute 必须是非空数组；旧 route 字段已移除");
   }
-  return { seed: Math.trunc(seed), route, transitionAction: "Jump" };
+  const baseRoute = normalizeEntries(value.baseRoute, "baseRoute");
+  const branchRoutes = {};
+  if (value.branchRoutes !== undefined) {
+    if (!value.branchRoutes || typeof value.branchRoutes !== "object" || Array.isArray(value.branchRoutes)) {
+      throw new Error("Atom Rule.branchRoutes 必须是 A/B/C 到队列对象的映射");
+    }
+    for (const [routeId, queueValue] of Object.entries(value.branchRoutes)) {
+      if (!["A", "B", "C"].includes(routeId)) {
+        throw new Error(`branchRoutes.${routeId} 不是合法路线`);
+      }
+      const isLegacyArray = Array.isArray(queueValue);
+      const queueObject = queueValue && typeof queueValue === "object" && !isLegacyArray
+        ? queueValue
+        : null;
+      const targetAtomCount = queueObject && queueObject.targetAtomCount !== undefined
+        ? Math.trunc(Number(queueObject.targetAtomCount))
+        : 0;
+      if (!Number.isFinite(targetAtomCount) || targetAtomCount < 0) {
+        throw new Error(`branchRoutes.${routeId}.targetAtomCount 必须是非负整数`);
+      }
+      const entries = isLegacyArray ? queueValue : queueObject && queueObject.atoms;
+      branchRoutes[routeId] = {
+        targetAtomCount,
+        atoms: normalizeEntries(
+          entries,
+          `branchRoutes.${routeId}${isLegacyArray ? "" : ".atoms"}`
+        )
+      };
+    }
+  }
+  const forkAfterBaseAtomIndex = value.forkAfterBaseAtomIndex === undefined
+    ? undefined
+    : Math.trunc(Number(value.forkAfterBaseAtomIndex));
+  if (forkAfterBaseAtomIndex !== undefined
+      && (!Number.isFinite(forkAfterBaseAtomIndex) || forkAfterBaseAtomIndex < 1)) {
+    throw new Error("forkAfterBaseAtomIndex 必须是大于 0 的整数");
+  }
+  const normalized = {
+    seed: Math.trunc(seed),
+    autoSelectAtomKeys,
+    baseAtomCount,
+    baseRoute
+  };
+  if (Object.keys(branchRoutes).length > 0) normalized.branchRoutes = branchRoutes;
+  if (forkAfterBaseAtomIndex !== undefined) {
+    normalized.forkAfterBaseAtomIndex = forkAfterBaseAtomIndex;
+  }
+  return normalized;
 }
 
 function exportAtomRuleJson() {
@@ -607,7 +685,7 @@ document.getElementById("fileImport").onchange = async (e) => {
   if (!file) return;
   const text = await file.text();
   const obj = JSON.parse(text);
-  if (Array.isArray(obj.route) && obj.route.some(entry => entry && Object.prototype.hasOwnProperty.call(entry, "atomKey"))) {
+  if (Array.isArray(obj.baseRoute) || obj.branchRoutes) {
     importAtomRuleObject(obj, text);
   } else {
     applyParams(obj);

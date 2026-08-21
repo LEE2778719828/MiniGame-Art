@@ -1,5 +1,6 @@
 #include "Night/Course/NightCourseHost.h"
 #include "Night/Course/NightCourseDirector.h"
+#include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseAtomActor.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Engine/World.h"
@@ -17,10 +18,17 @@ static FAutoConsoleCommandWithWorld GNightCourseDumpCmd(
 	{
 		if (!World)
 		{
+			UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=ConsoleDump] No World."));
 			return;
 		}
 		TArray<AActor*> Hosts;
 		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=ConsoleDump] map='%s' hosts=%d."),
+			*World->GetMapName(),
+			Hosts.Num());
 		for (AActor* Actor : Hosts)
 		{
 			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
@@ -37,15 +45,173 @@ static FAutoConsoleCommandWithWorld GNightCourseRebuildPreviewCmd(
 	{
 		if (!World)
 		{
+			UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=ConsolePreview] No World."));
 			return;
 		}
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=ConsolePreview] map='%s' hosts=%d."),
+			*World->GetMapName(),
+			Hosts.Num());
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				Host->RebuildEditorPreview();
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseValidateCmd(
+	TEXT("Night.Course.Validate"),
+	TEXT("Validate NightCourse Config, Atom queues and RouteRules"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		if (!World)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=ConsoleValidate] No World."));
+			return;
+		}
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		if (Hosts.Num() == 0)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=ConsoleValidate] No NightCourseHost found in map='%s'."),
+				*World->GetMapName());
+			return;
+		}
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				FString Error;
+				const bool bValid = Host->Director
+					&& Host->Director->ValidateConfiguration(Error);
+				if (bValid)
+				{
+					UE_LOG(
+						LogTemp,
+						Display,
+						TEXT("[NightCourse][Stage=ConsoleValidate] Host='%s' Config='%s' Validate OK."),
+						*GetNameSafe(Host),
+						Host->Config ? *Host->Config->GetPathName() : TEXT("<null>"));
+				}
+				else
+				{
+					if (!Host->Director)
+					{
+						Error = TEXT("Host has no Director component.");
+					}
+					else if (Error.IsEmpty())
+					{
+						Error = TEXT("Validation failed without an error string.");
+					}
+					UE_LOG(
+						LogTemp,
+						Error,
+						TEXT("[NightCourse][Stage=ConsoleValidate] Host='%s' Config='%s' Validate FAILED: %s"),
+						*GetNameSafe(Host),
+						Host->Config ? *Host->Config->GetPathName() : TEXT("<null>"),
+						*Error);
+				}
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseChooseLeftCmd(
+	TEXT("Night.Course.ChooseLeft"),
+	TEXT("Choose the left route while a fork is active"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
 		TArray<AActor*> Hosts;
 		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
 		for (AActor* Actor : Hosts)
 		{
 			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
 			{
-				Host->RebuildEditorPreview();
+				if (Host->Director)
+				{
+					Host->Director->ChooseForkLeft();
+				}
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseChooseRightCmd(
+	TEXT("Night.Course.ChooseRight"),
+	TEXT("Choose the right route while a fork is active"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				if (Host->Director)
+				{
+					Host->Director->ChooseForkRight();
+				}
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseSkipForkCmd(
+	TEXT("Night.Course.SkipFork"),
+	TEXT("Resolve the active fork using its configured timeout-left policy"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				if (Host->Director)
+				{
+					Host->Director->SkipFork();
+				}
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseForceKeySwapCmd(
+	TEXT("Night.Course.ForceKeySwap"),
+	TEXT("Force the next configured key-swap cue"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				if (Host->Director)
+				{
+					Host->Director->ForceKeySwap();
+				}
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorld GNightCourseResetCmd(
+	TEXT("Night.Course.Reset"),
+	TEXT("Reset NightCourse runtime state and destroy spawned course actors"),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		TArray<AActor*> Hosts;
+		UGameplayStatics::GetAllActorsOfClass(World, ANightCourseHost::StaticClass(), Hosts);
+		for (AActor* Actor : Hosts)
+		{
+			if (ANightCourseHost* Host = Cast<ANightCourseHost>(Actor))
+			{
+				Host->ResetCourse();
 			}
 		}
 	}));

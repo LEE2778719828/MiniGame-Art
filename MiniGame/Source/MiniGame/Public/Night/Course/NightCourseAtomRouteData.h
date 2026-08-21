@@ -10,10 +10,9 @@ class ANightCourseAtomActor;
 /**
  * Artist-owned registry/library for authored course atoms.
  *
- * AtomMap is the reusable library (key -> Blueprint class). AtomSequence and
- * bEnabled remain as a legacy route compatibility path; when a
- * CourseRuleData is enabled, the planner rule owns the sequence and this
- * asset contributes only the AtomMap and transition gap.
+ * AtomMap is the reusable library (key -> Blueprint class). When a
+ * CourseRuleData is enabled, the planner rule owns the queue and this asset
+ * contributes the artist-authored Atom candidates and transition gap.
  */
 UCLASS(BlueprintType)
 class MINIGAME_API UNightCourseAtomRouteData : public UPrimaryDataAsset
@@ -27,11 +26,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Library")
 	TMap<FString, TSoftClassPtr<ANightCourseAtomActor>> AtomMap;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Library|Legacy")
-	TArray<FString> AtomSequence;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Library")
 	float TransitionJumpGapCm = 520.f;
+
+	/** Returns stable, valid candidates whose authored landing-point count matches the action count. */
+	void GetCompatibleAtomKeys(
+		int32 RequiredActionCount,
+		TArray<FString>& OutKeys,
+		TArray<FString>* OutRejectionReasons = nullptr) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Atom Route")
 	bool ValidateRoute(FString& OutError) const;

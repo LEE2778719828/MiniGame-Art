@@ -1,6 +1,8 @@
 # Art import targets (G3.5)
 
-Import FBX from the categorized `ArtSubmit/` folders into these folders, then assign SoftObject paths on `DA_NightG1_T0` or a `UNightProcParamsAsset`.
+Import FBX from the categorized `ArtSubmit/` folders into these folders, then bind
+the resulting Blueprint prefabs manually on the Atom BP components. Do not put
+mesh paths in planner rules or temporary Proc assets.
 
 Expected asset names (examples):
 
@@ -11,4 +13,5 @@ Expected asset names (examples):
 - `/Game/Night/Course/Art/Foe/cantingguai`
 - `/Game/Night/Course/Art/Environment/canguan`
 
-Until imported, runtime falls back to `/Engine/BasicShapes/*`.
+Until a visual prefab is bound, runtime intentionally keeps an empty/native
+gameplay carrier; it does not fall back to an old mesh configuration.

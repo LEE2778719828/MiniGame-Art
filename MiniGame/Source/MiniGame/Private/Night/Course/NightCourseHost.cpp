@@ -2,6 +2,7 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightG1CourseConfig.h"
+#include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightFeelStubComponent.h"
@@ -14,7 +15,6 @@
 #include "Components/BoxComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
-#include "Night/Course/NightTrackGenerator.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/GameplayStatics.h"
@@ -289,10 +289,24 @@ void ANightCourseHost::OnConstruction(const FTransform& Transform)
 
 void ANightCourseHost::RebuildEditorPreview()
 {
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Preview] Rebuild begin Host='%s' Config='%s' Director='%s' enforceBounds=%d."),
+		*GetNameSafe(this),
+		Config ? *Config->GetPathName() : TEXT("<null>"),
+		*GetNameSafe(Director),
+		bEnforceLayoutBounds ? 1 : 0);
+
 	if (!PreviewBridgeA || !PreviewBridgeB
 		|| !PreviewFoeM01 || !PreviewFoeM02 || !PreviewFoeM03
 		|| !PreviewFoeM04 || !PreviewFoeM05)
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Preview] Rebuild aborted: one or more preview instanced components are missing on Host='%s'."),
+			*GetNameSafe(this));
 		return;
 	}
 
@@ -320,19 +334,41 @@ void ANightCourseHost::RebuildEditorPreview()
 	EditorPreviewMeshActors.Reset();
 	if (!Config || !Director)
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Preview] Rebuild aborted: Config='%s' Director='%s'. Assign DA_Course and ensure the Director component exists."),
+			Config ? *Config->GetPathName() : TEXT("<null>"),
+			*GetNameSafe(Director));
 		return;
 	}
 
 	Director->Config = Config;
 	Director->SetLayoutBoundsComponent(LayoutBounds, bEnforceLayoutBounds);
-	FNightGeneratedCourse Preview;
+	Director->ResetCourse();
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Preview] Building Config='%s' Rule='%s' AtomLibrary='%s' RouteRules='%s'."),
+		*Config->GetPathName(),
+		Config->CourseRuleData ? *Config->CourseRuleData->GetPathName() : TEXT("<null>"),
+		Config->AtomRoute ? *Config->AtomRoute->GetPathName() : TEXT("<null>"),
+		Config->RouteRules ? *Config->RouteRules->GetPathName() : TEXT("<null>"));
+	TArray<FNightStoneSpec> PreviewStones;
+	TArray<FNightBeatSpec> PreviewBeats;
+	TArray<FNightBridgeSpec> PreviewBridges;
 	TArray<FNightAtomVisualBinding> VisualBindings;
 	if (!Director->BuildCourseForPreview(
-		Preview.Stones,
-		Preview.Beats,
-		Preview.Bridges,
+		PreviewStones,
+		PreviewBeats,
+		PreviewBridges,
 		VisualBindings))
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Preview] Build failed for Config='%s'; no preview actors will be created."),
+			*Config->GetPathName());
 		return;
 	}
 
@@ -342,8 +378,8 @@ void ANightCourseHost::RebuildEditorPreview()
 	{
 		TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
 		if (!Binding.bIsBridge
-			&& Preview.Stones.IsValidIndex(Binding.StoneIndex)
-			&& Preview.Stones[Binding.StoneIndex].bHasFoe
+			&& PreviewStones.IsValidIndex(Binding.StoneIndex)
+			&& PreviewStones[Binding.StoneIndex].bHasFoe
 			&& Binding.AlternateVisualPrefabClass)
 		{
 			VisualClass = Binding.AlternateVisualPrefabClass;
@@ -374,7 +410,7 @@ void ANightCourseHost::RebuildEditorPreview()
 			continue;
 		}
 		AActor* Actor = nullptr;
-		if (Binding.bIsBridge && Preview.Bridges.IsValidIndex(Binding.BridgeIndex))
+		if (Binding.bIsBridge && PreviewBridges.IsValidIndex(Binding.BridgeIndex))
 		{
 			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
 				GetWorld(),
@@ -382,19 +418,19 @@ void ANightCourseHost::RebuildEditorPreview()
 				Binding.LocalTransform,
 				nullptr,
 				INDEX_NONE,
-				&Preview.Bridges[Binding.BridgeIndex],
+				&PreviewBridges[Binding.BridgeIndex],
 				FString::Printf(
 					TEXT("EditorPreview_Atom_%s_Bridge_%d"),
 					Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
 					Binding.BridgeIndex));
 		}
-		else if (!Binding.bIsBridge && Preview.Stones.IsValidIndex(Binding.StoneIndex))
+		else if (!Binding.bIsBridge && PreviewStones.IsValidIndex(Binding.StoneIndex))
 		{
 			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
 				GetWorld(),
 				VisualClass.Get(),
 				Binding.LocalTransform,
-				&Preview.Stones[Binding.StoneIndex],
+				&PreviewStones[Binding.StoneIndex],
 				Binding.StoneIndex,
 				nullptr,
 				FString::Printf(
@@ -407,19 +443,15 @@ void ANightCourseHost::RebuildEditorPreview()
 			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
-	for (const FNightBridgeSpec& Bridge : Preview.Bridges)
+	for (const FNightBridgeSpec& Bridge : PreviewBridges)
 	{
-		if (ArtBridgeIndexes.Contains(&Bridge - Preview.Bridges.GetData()))
+		if (ArtBridgeIndexes.Contains(&Bridge - PreviewBridges.GetData()))
 		{
 			continue;
 		}
-		UClass* BridgeClass =
-			Bridge.MeshVariant == 0 ? Config->BridgeClassA.Get() : Config->BridgeClassB.Get();
-		if (!BridgeClass)
-		{
-			// Missing bridge BP intentionally produces an empty actor.
-			BridgeClass = ANightBridgeSegmentActor::StaticClass();
-		}
+		// Atom bridge visuals are authored by the Atom BP. A missing visual
+		// intentionally leaves only a native compatibility actor.
+		UClass* BridgeClass = ANightBridgeSegmentActor::StaticClass();
 		const FString Label = FString::Printf(
 			TEXT("EditorPreview_Bridge_%s_%d"),
 			Bridge.MeshVariant == 0 ? TEXT("A") : TEXT("B"),
@@ -432,9 +464,9 @@ void ANightCourseHost::RebuildEditorPreview()
 			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
-	for (int32 StoneIndex = 0; StoneIndex < Preview.Stones.Num(); ++StoneIndex)
+	for (int32 StoneIndex = 0; StoneIndex < PreviewStones.Num(); ++StoneIndex)
 	{
-		const FNightStoneSpec& Stone = Preview.Stones[StoneIndex];
+		const FNightStoneSpec& Stone = PreviewStones[StoneIndex];
 		if (ArtStoneIndexes.Contains(StoneIndex))
 		{
 			continue;
@@ -443,21 +475,9 @@ void ANightCourseHost::RebuildEditorPreview()
 		{
 			continue;
 		}
-		UClass* FoeClass = nullptr;
-		switch (Stone.FoeId)
-		{
-		case EFoeId::M01: FoeClass = Config->FoeClassM01.Get(); break;
-		case EFoeId::M02: FoeClass = Config->FoeClassM02.Get(); break;
-		case EFoeId::M03: FoeClass = Config->FoeClassM03.Get(); break;
-		case EFoeId::M04: FoeClass = Config->FoeClassM04.Get(); break;
-		case EFoeId::M05: FoeClass = Config->FoeClassM05.Get(); break;
-		default: break;
-		}
-		if (!FoeClass)
-		{
-			// Missing foe BP intentionally produces an empty actor.
-			FoeClass = ANightCourseStoneActor::StaticClass();
-		}
+		// Enemy visuals are authored by the Atom LandingPoint. A missing
+		// visual intentionally produces only the native gameplay carrier.
+		UClass* FoeClass = ANightCourseStoneActor::StaticClass();
 		FActorSpawnParameters Params;
 		Params.ObjectFlags |= RF_Transient;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -471,11 +491,29 @@ void ANightCourseHost::RebuildEditorPreview()
 			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Preview] Rebuild complete stones=%d beats=%d bridges=%d visualBindings=%d spawnedPreviewActors=%d."),
+		PreviewStones.Num(),
+		PreviewBeats.Num(),
+		PreviewBridges.Num(),
+		VisualBindings.Num(),
+		EditorPreviewMeshActors.Num());
 }
 
 void ANightCourseHost::BeginPlay()
 {
 	Super::BeginPlay();
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=HostBeginPlay] Host='%s' Config='%s' Director='%s' autoStart=%d."),
+		*GetNameSafe(this),
+		Config ? *Config->GetPathName() : TEXT("<null>"),
+		*GetNameSafe(Director),
+		bAutoStart ? 1 : 0);
 	if (LayoutBounds)
 	{
 		LayoutBounds->SetBoxExtent(LayoutBoundsExtent);
@@ -495,7 +533,11 @@ void ANightCourseHost::BeginPlay()
 
 	if (!Config)
 	{
-		Config = NewObject<UNightG1CourseConfig>(this, TEXT("RuntimeG1Config"));
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=HostBeginPlay] Config is missing; assign the canonical DA_Course asset in the editor. Course generation will not start."));
+		return;
 	}
 
 	BuildPlayableStage();
@@ -504,7 +546,28 @@ void ANightCourseHost::BeginPlay()
 	{
 		Director->Config = Config;
 		Director->SetLayoutBoundsComponent(LayoutBounds, bEnforceLayoutBounds);
+		Director->OnFinished.RemoveDynamic(this, &ANightCourseHost::HandleFinished);
 		Director->OnFinished.AddDynamic(this, &ANightCourseHost::HandleFinished);
+		Director->OnDebugMessage.RemoveDynamic(
+			this,
+			&ANightCourseHost::HandleDirectorDebugMessage);
+		Director->OnDebugMessage.AddDynamic(
+			this,
+			&ANightCourseHost::HandleDirectorDebugMessage);
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=HostBeginPlay] Director bound to Config='%s' LayoutBounds='%s' enforceBounds=%d."),
+			*Config->GetPathName(),
+			*GetNameSafe(LayoutBounds),
+			bEnforceLayoutBounds ? 1 : 0);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=HostBeginPlay] Director component is missing; course cannot start."));
 	}
 
 	if (bAutoStart)
@@ -517,7 +580,25 @@ void ANightCourseHost::BeginPlay()
 				&ANightCourseHost::StartCourse,
 				0.2f,
 				false);
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=HostBeginPlay] Auto-start timer scheduled for 0.2 seconds."));
 		}
+		else
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=HostBeginPlay] Cannot schedule auto-start: World is null."));
+		}
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=HostBeginPlay] Auto-start disabled; call StartCourse manually."));
 	}
 }
 
@@ -535,70 +616,284 @@ void ANightCourseHost::WireFeelFromPlayer()
 		Pawn = UGameplayStatics::GetPlayerPawn(this, 0);
 	}
 
-	if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(Pawn))
+	if (!Pawn)
 	{
-		if (Config && Config->HeroClass)
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=BindPlayer] No player Pawn found; Director cannot bind runner or Feel."));
+		return;
+	}
+
+	ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(Pawn);
+	if (!CoursePawn)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=BindPlayer] Player Pawn='%s' class='%s' is not ANightCoursePawn."),
+			*GetNameSafe(Pawn),
+			*GetNameSafe(Pawn->GetClass()));
+		return;
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=BindPlayer] Found Pawn='%s' class='%s' Config='%s'."),
+		*GetNameSafe(CoursePawn),
+		*GetNameSafe(CoursePawn->GetClass()),
+		Config ? *Config->GetPathName() : TEXT("<null>"));
+
+	if (Config && Config->HeroClass)
+	{
+		const ANightCoursePawn* HeroDefaults =
+			Config->HeroClass->GetDefaultObject<ANightCoursePawn>();
+		if (HeroDefaults)
 		{
-			const ANightCoursePawn* HeroDefaults =
-				Config->HeroClass->GetDefaultObject<ANightCoursePawn>();
-			if (HeroDefaults)
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=BindPlayer] Applying HeroClass='%s' visual defaults."),
+				*GetNameSafe(Config->HeroClass));
+			CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
+			// add by K2 (R1): HeroClass 只有属性会被拷过来，蓝图里直接挂在
+			// HeroSkelMesh 组件上的网格传不过去，结果是配了骨骼却退到静态模、
+			// 动画播在隐藏组件上。属性为空时回退去读组件，让蓝图里看到的即生效。
+			if (!CoursePawn->HeroSkeletalMesh && HeroDefaults->HeroSkelMesh)
 			{
-				CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
-				// add by K2 (R1): HeroClass 只有属性会被拷过来，蓝图里直接挂在
-				// HeroSkelMesh 组件上的网格传不过去，结果是配了骨骼却退到静态模、
-				// 动画播在隐藏组件上。属性为空时回退去读组件，让蓝图里看到的即生效。
-				if (!CoursePawn->HeroSkeletalMesh && HeroDefaults->HeroSkelMesh)
-				{
-					CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkelMesh->GetSkeletalMeshAsset();
-				}
-				CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
-				CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
-				CoursePawn->HeroScale = HeroDefaults->HeroScale;
-				CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
-				CoursePawn->ApplyConfiguredHeroVisual();
+				CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkelMesh->GetSkeletalMeshAsset();
 			}
+			CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
+			CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
+			CoursePawn->HeroScale = HeroDefaults->HeroScale;
+			CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
+			CoursePawn->ApplyConfiguredHeroVisual();
 		}
-		if (Director)
+		else
 		{
-			Director->BindRunnerPawn(CoursePawn);
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=BindPlayer] HeroClass='%s' has no valid ANightCoursePawn CDO."),
+				*GetNameSafe(Config->HeroClass));
 		}
-		if (CoursePawn->FeelStub && Director)
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Stage=BindPlayer] Config has no HeroClass; using Pawn's existing visual defaults."));
+	}
+
+	if (Director)
+	{
+		Director->BindRunnerPawn(CoursePawn);
+		CoursePawn->BindCourseDirector(Director);
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=BindPlayer] Runner Pawn and CourseDirector bound."));
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=BindPlayer] Director is null; runner binding skipped."));
+	}
+	if (CoursePawn->FeelStub && Director)
+	{
+		Director->BindFeelBridge(CoursePawn->FeelStub);
+		CoursePawn->FeelStub->OnInputResolved.RemoveDynamic(this, &ANightCourseHost::HandleFeelResolved);
+		CoursePawn->FeelStub->OnInputResolved.AddDynamic(this, &ANightCourseHost::HandleFeelResolved);
+		if (Config)
 		{
-			Director->BindFeelBridge(CoursePawn->FeelStub);
-			CoursePawn->FeelStub->OnInputResolved.RemoveDynamic(this, &ANightCourseHost::HandleFeelResolved);
-			CoursePawn->FeelStub->OnInputResolved.AddDynamic(this, &ANightCourseHost::HandleFeelResolved);
-			if (Config)
-			{
-				CoursePawn->FeelStub->Soul = Config->StartingSoul;
-			}
+			CoursePawn->FeelStub->Soul = Config->StartingSoul;
 		}
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=BindPlayer] FeelStub bound; startingSoul=%.1f."),
+			Config ? Config->StartingSoul : 0.f);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=BindPlayer] Feel binding skipped: FeelStub='%s' Director='%s'."),
+			*GetNameSafe(CoursePawn->FeelStub),
+			*GetNameSafe(Director));
 	}
 }
 
 void ANightCourseHost::StartCourse()
 {
+	FString Error;
+	const bool bStarted = TryStartCourse(Error);
+	if (bStarted)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=StartCourse] Start succeeded Host='%s' Config='%s'."),
+			*GetNameSafe(this),
+			Config ? *Config->GetPathName() : TEXT("<null>"));
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=StartCourse] Start failed Host='%s' Config='%s' Error='%s'."),
+			*GetNameSafe(this),
+			Config ? *Config->GetPathName() : TEXT("<null>"),
+			Error.IsEmpty() ? TEXT("<empty>") : *Error);
+	}
+}
+
+bool ANightCourseHost::TryStartCourse(FString& OutError)
+{
+	return StartNight_Implementation(Bootstrap, OutError);
+}
+
+bool ANightCourseHost::StartNight_Implementation(
+	const FNightBootstrap& InBootstrap,
+	FString& OutError)
+{
+	OutError.Reset();
+	ClearCourseResult();
+	Bootstrap = InBootstrap;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=StartRequest] Host='%s' Config='%s' Director='%s' Level=%d Seed=%d ForkPair=%d."),
+		*GetNameSafe(this),
+		Config ? *Config->GetPathName() : TEXT("<null>"),
+		*GetNameSafe(Director),
+		static_cast<int32>(Bootstrap.LevelId),
+		Bootstrap.Seed,
+		static_cast<int32>(Bootstrap.ForkPair));
 	WireFeelFromPlayer();
+	if (!Director)
+	{
+		OutError = TEXT("NightCourseHost has no Director.");
+		UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=StartRequest] %s"), *OutError);
+		EmitDebugMessage(
+			FString::Printf(TEXT("Start rejected: %s"), *OutError),
+			true);
+		return false;
+	}
+
+	Director->Config = Config;
+	if (!Director->Config)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=StartRequest] Config is null; creating transient fallback '%s'. It has no canonical Rule/Atom references."),
+			TEXT("RuntimeG1Config"));
+		Director->Config = NewObject<UNightG1CourseConfig>(
+			this,
+			TEXT("RuntimeG1Config"));
+		Config = Director->Config;
+	}
+
+	const bool bStarted = Director->TryStartNight(Bootstrap, OutError);
+	if (!bStarted && OutError.IsEmpty())
+	{
+		OutError = Director->GetLastFailureReason();
+	}
+	if (!bStarted && OutError.IsEmpty())
+	{
+		OutError = TEXT("NightCourseDirector rejected the start request.");
+		EmitDebugMessage(
+			FString::Printf(TEXT("Start rejected: %s"), *OutError),
+			true);
+	}
+	if (bStarted)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=StartRequest] Director result started=%d Error='%s' LastFailure='%s'."),
+			1,
+			OutError.IsEmpty() ? TEXT("<empty>") : *OutError,
+			Director->GetLastFailureReason().IsEmpty() ? TEXT("<empty>") : *Director->GetLastFailureReason());
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=StartRequest] Director result started=%d Error='%s' LastFailure='%s'."),
+			0,
+			OutError.IsEmpty() ? TEXT("<empty>") : *OutError,
+			Director->GetLastFailureReason().IsEmpty() ? TEXT("<empty>") : *Director->GetLastFailureReason());
+	}
+	return bStarted;
+}
+
+void ANightCourseHost::ResetCourse()
+{
 	if (Director)
 	{
-		Director->Config = Config;
-		if (!Director->Config)
-		{
-			Director->Config = NewObject<UNightG1CourseConfig>(this, TEXT("RuntimeG1Config"));
-			Config = Director->Config;
-		}
-		Director->StartNight(Bootstrap);
+		Director->ResetCourse();
 	}
+	ClearCourseResult();
+	EmitDebugMessage(TEXT("NightCourse reset."), false);
+}
+
+void ANightCourseHost::ResetNight_Implementation()
+{
+	ResetCourse();
+}
+
+bool ANightCourseHost::HasNightResult_Implementation() const
+{
+	return bHasResult;
+}
+
+FNightResult ANightCourseHost::GetNightResult_Implementation() const
+{
+	return LastResult;
 }
 
 void ANightCourseHost::HandleFinished(const FNightResult& Result)
 {
 	LastResult = Result;
-	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d drops=%d soul=%.1f"),
-		Result.bSuccess ? 1 : 0, Result.Ingredients.Num(), Result.SoulLeft);
+	bHasResult = true;
+	LastFailureReason = Director
+		? Director->GetLastFailureReason()
+		: FString();
+	OnNightFinished.Broadcast(Result);
+	if (Result.bSuccess && !Result.bFailedMidway)
+	{
+		OnNightSucceeded.Broadcast(Result);
+	}
+	else
+	{
+		OnNightFailed.Broadcast(Result);
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Finished success=%d route=%d failedMidway=%d drops=%d soul=%.1f"),
+		Result.bSuccess ? 1 : 0,
+		static_cast<int32>(Result.RouteTaken),
+		Result.bFailedMidway ? 1 : 0,
+		Result.Ingredients.Num(),
+		Result.SoulLeft);
 	for (const FIngredientStack& Stack : Result.Ingredients)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("  Drop Id=%d Count=%d"), static_cast<int32>(Stack.Id), Stack.Count);
 	}
+}
+
+void ANightCourseHost::HandleDirectorDebugMessage(
+	const FString& Message,
+	bool bIsError)
+{
+	EmitDebugMessage(Message, bIsError);
 }
 
 void ANightCourseHost::HandleFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome)
@@ -609,19 +904,63 @@ void ANightCourseHost::HandleFeelResolved(int32 NodeIndex, ENightJudgeOutcome Ou
 	}
 }
 
+void ANightCourseHost::ClearCourseResult()
+{
+	bHasResult = false;
+	LastResult = FNightResult();
+	LastFailureReason.Reset();
+}
+
+void ANightCourseHost::EmitDebugMessage(
+	const FString& Message,
+	bool bIsError)
+{
+	OnDebugMessage.Broadcast(Message, bIsError);
+	if (bIsError)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[NightCourseHost][Debug] %s"), *Message);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Display, TEXT("[NightCourseHost][Debug] %s"), *Message);
+	}
+}
+
 void ANightCourseHost::DebugDumpState() const
 {
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Dump] Host='%s' Config='%s' Director='%s' Rule='%s' AtomLibrary='%s' RouteRules='%s'."),
+		*GetNameSafe(this),
+		Config ? *Config->GetPathName() : TEXT("<null>"),
+		*GetNameSafe(Director),
+		Config && Config->CourseRuleData ? *Config->CourseRuleData->GetPathName() : TEXT("<null>"),
+		Config && Config->AtomRoute ? *Config->AtomRoute->GetPathName() : TEXT("<null>"),
+		Config && Config->RouteRules ? *Config->RouteRules->GetPathName() : TEXT("<null>"));
 	if (!Director)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] No Director"));
+		UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=Dump] No Director."));
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[NightCourseHost] Running=%d Phase=%d Elapsed=%.2f ActiveNode=%d Ingredients=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Stage=Dump] Running=%d Phase=%d Route=%d Fork=%.2f BranchBeats=%d Elapsed=%.2f ActiveNode=%d Ingredients=%d"),
 		Director->IsRunning() ? 1 : 0,
 		static_cast<int32>(Director->GetPhase()),
+		static_cast<int32>(Director->GetCurrentRoute()),
+		Director->GetForkSecondsRemaining(),
+		Director->GetBranchBeatCount(),
 		Director->GetElapsedSeconds(),
 		Director->GetActiveNodeIndex(),
 		Director->GetCollectedIngredients().Num());
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("[NightCourse][Stage=Dump] ResultValid=%d resultSuccess=%d failedMidway=%d route=%d failureReason=%s"),
+		bHasResult ? 1 : 0,
+		LastResult.bSuccess ? 1 : 0,
+		LastResult.bFailedMidway ? 1 : 0,
+		static_cast<int32>(LastResult.RouteTaken),
+		LastFailureReason.IsEmpty() ? TEXT("<none>") : *LastFailureReason);
 }
 #pragma endregion K2 moonyfli

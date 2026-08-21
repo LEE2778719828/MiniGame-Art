@@ -80,15 +80,11 @@ for name, mesh_path in (
     })
     bridges.append(bp)
 
-config = load_asset("/Game/Night/Course/Data/DA_NightG1_T0")
+config = load_asset("/Game/Night/Course/Config/DA_Course")
 if config:
     config.set_editor_property("HeroClass", hero.generated_class())
-    for index, bp in enumerate(foes, 1):
-        config.set_editor_property(f"FoeClassM{index:02d}", bp.generated_class())
-    config.set_editor_property("BridgeClassA", bridges[0].generated_class())
-    config.set_editor_property("BridgeClassB", bridges[1].generated_class())
     config.modify()
     config.MarkPackageDirtyForEditor()
-    unreal.EditorAssetLibrary.save_loaded_asset(config, False)
+    print("DA_Course modified in memory; use UE Save All manually.")
 
 print("VISUAL_BP_MIGRATION_COMPLETE")
