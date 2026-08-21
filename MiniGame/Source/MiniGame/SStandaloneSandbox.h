@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/SaveGame.h"
+#include "Night/Shared/NightSharedTypes.h"
 #include "SStandaloneSandbox.generated.h"
 
 class UTextBlock;
@@ -699,6 +700,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	bool ConsumeNightResult(const FSNightResult& Result);
 
+	/** Convert a playable NightCourse result into the Day inventory/settlement contract. */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool ConsumeNightCourseResult(const FNightResult& Result);
+
 	UFUNCTION(BlueprintCallable, Category = "S Inventory")
 	bool AddIngredient(FName IngredientId, int32 Quantity);
 
@@ -792,6 +797,10 @@ public:
 	/** PrepareNight → NightRunning：建立夜初快照。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool StartNight();
+
+	/** Enter NightRunning for a playable NightCourse map, even after a saved Day phase. */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool PrepareNightForCourse();
 
 	/** 白天时钟由 ASCustomerDirector::Tick 驱动，DayRunning/DayQualified 都要走。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")

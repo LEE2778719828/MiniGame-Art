@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NightCourse 配置数据流与 UE 资产索引</title>
+  <style>
+    :root {
+      --bg: #111827;
+      --panel: #1f2937;
+      --panel-2: #263548;
+      --line: #3b4b61;
+      --text: #edf4ff;
+      --muted: #a9b8ca;
+      --accent: #55d6be;
+      --blue: #65b9f5;
+      --gold: #f2c35b;
+      --red: #ff8077;
+      --green: #7ee2a8;
+      --shadow: 0 14px 40px rgba(0, 0, 0, .22);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(1000px 500px at 10% -10%, #263c5c 0%, transparent 70%),
+        var(--bg);
+      font: 15px/1.6 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      padding: 28px clamp(18px, 5vw, 72px) 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 { margin: 0; font-size: clamp(24px, 3vw, 36px); }
+    header p { margin: 8px 0 0; color: var(--muted); max-width: 900px; }
+    main { max-width: 1440px; margin: 0 auto; padding: 24px clamp(16px, 4vw, 56px) 56px; }
+    section {
+      margin: 18px 0;
+      padding: 22px;
+      background: rgba(31, 41, 55, .92);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    h2 { margin: 0 0 12px; font-size: 21px; }
+    h3 { margin: 0 0 7px; font-size: 16px; }
+    p { margin: 7px 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; color: var(--muted); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: end;
+      margin-top: 18px;
+      padding: 14px;
+      background: rgba(17, 24, 39, .65);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .toolbar label { min-width: 260px; flex: 1; color: var(--muted); font-size: 13px; }
+    input, textarea, button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--text);
+      background: #172131;
+      font: inherit;
+    }
+    input { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; }
+    textarea {
+      width: 100%;
+      min-height: 260px;
+      padding: 12px;
+      resize: vertical;
+      font: 13px/1.5 Consolas, "Cascadia Code", monospace;
+    }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); background: #203346; }
+    button.primary { color: #08211b; background: var(--accent); border-color: transparent; font-weight: 700; }
+    button.warn { color: #2b1800; background: var(--gold); border-color: transparent; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 16px;
+    }
+    .flow-card {
+      position: relative;
+      min-height: 128px;
+      padding: 13px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .flow-card:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -15px;
+      top: 45px;
+      z-index: 2;
+      color: var(--accent);
+      font-size: 23px;
+      font-weight: 700;
+    }
+    .flow-card .tag {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      color: #07151c;
+      background: var(--blue);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .flow-card:nth-child(3) .tag,
+    .flow-card:nth-child(4) .tag { background: var(--gold); }
+    .flow-card:nth-child(6) .tag { background: var(--green); }
+    .flow-card:nth-child(7) .tag { background: #d49cff; }
+    .flow-card strong { display: block; font-size: 14px; }
+    .flow-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .note {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: rgba(85, 214, 190, .08);
+    }
+    .note.warn { border-left-color: var(--gold); background: rgba(242, 195, 91, .08); }
+    .note.error { border-left-color: var(--red); background: rgba(255, 128, 119, .08); }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      padding: 0;
+      margin: 16px 0 0;
+      list-style: none;
+      counter-reset: step;
+    }
+    .steps li {
+      position: relative;
+      padding: 16px 16px 16px 52px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .steps li::before {
+      content: counter(step);
+      counter-increment: step;
+      position: absolute;
+      left: 15px;
+      top: 15px;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      color: #09201b;
+      background: var(--accent);
+      text-align: center;
+      font-weight: 700;
+    }
+    code, .path {
+      color: #b9e9ff;
+      font: 12px/1.45 Consolas, "Cascadia Code", monospace;
+      overflow-wrap: anywhere;
+    }
+    .path {
+      display: block;
+      padding: 7px 8px;
+      background: #121b28;
+      border-radius: 6px;
+    }
+    .asset-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 9px;
+    }
+    .asset-tools button { padding: 5px 8px; font-size: 12px; }
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 12px;
+      margin-top: 15px;
+    }
+    .asset-card {
+      padding: 15px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .asset-card .group {
+      color: var(--gold);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .asset-card .role { min-height: 47px; color: var(--muted); font-size: 13px; }
+    .asset-card .state {
+      display: inline-block;
+      margin-top: 9px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      color: #07151c;
+      background: var(--green);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .asset-card .state.check { color: #2b1800; background: var(--gold); }
+    .asset-card .state.manual { color: #1c0d28; background: #d49cff; }
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+      gap: 18px;
+    }
+    .checklist { margin: 10px 0 0; padding: 0; list-style: none; }
+    .checklist li {
+      display: flex;
+      gap: 9px;
+      align-items: flex-start;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(59, 75, 97, .6);
+    }
+    .checklist input { width: 17px; height: 17px; margin: 4px 0 0; accent-color: var(--accent); }
+    .json-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .commands {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .command {
+      padding: 12px;
+      background: #172131;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .command code { display: block; margin-bottom: 4px; color: var(--accent); }
+    .legacy {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .legacy div {
+      padding: 11px;
+      border: 1px solid rgba(255, 128, 119, .45);
+      border-radius: 8px;
+      background: rgba(255, 128, 119, .06);
+    }
+    footer { padding: 10px 0; color: var(--muted); font-size: 12px; }
+    #toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 10;
+      max-width: 360px;
+      padding: 10px 14px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      color: var(--text);
+      background: #172c31;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: .18s ease;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    @media (max-width: 1000px) {
+      .flow { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+      .flow-card:not(:last-child)::after { display: none; }
+      .two-col { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 580px) {
+      section { padding: 16px; }
+      .flow { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>NightCourse 配置数据流与 UE 资产索引</h1>
+    <p>
+      这页只描述当前 canonical Atom 管线：策划配置规则，艺术配置 Atom BP，
+      <code>DA_Course</code> 负责把两者和运行入口接起来。页面不会自动保存 UE 资产。
+    </p>
+    <div class="toolbar">
+      <label>
+        可选：UE 资产 URL 协议
+        <input id="ueScheme" placeholder="例如 minigame（仅安装 Hermes/UnrealHyperlink 等插件时填写）">
+      </label>
+      <button class="primary" id="copyAllAssets">复制全部 canonical 路径</button>
+      <button id="copyFlow">复制配置顺序</button>
+      <button id="resetChecks">重置检查单</button>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 一条关卡如何生成</h2>
+      <p class="muted">先记住这条关系：<b>地图只负责入口，DA_Course 负责汇总，DA_Rules 负责动作队列，DA_Atoms 负责美术原子。</b></p>
+      <div class="flow">
+        <div class="flow-card">
+          <span class="tag">入口</span>
+          <strong>L_Night_G1</strong>
+          <span>选择地图 / PIE</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">启动</span>
+          <strong>GameMode</strong>
+          <span>指定 DefaultPawn、Host、CourseConfig</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">汇总</span>
+          <strong>DA_Course</strong>
+          <span>玩法数值、规则、Atom 库、分支规则</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">策划</span>
+          <strong>DA_Rules</strong>
+          <span>Seed + 总数 + 加权 BaseRoute/BranchRoutes</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">美术</span>
+          <strong>DA_Atoms</strong>
+          <span>AtomKey → Atom BP；Entry/Exit/落脚点/桥/怪</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">组合</span>
+          <strong>CourseDirector</strong>
+          <span>校验、按 Seed 选 Atom、拼接、生成桥与判定</span>
+        </div>
+        <div class="flow-card">
+          <span class="tag">运行</span>
+          <strong>Pawn / Host / HUD</strong>
+          <span>Q/E 判定、岔路、成功失败和调试通知</span>
+        </div>
+      </div>
+      <div class="note warn">
+        <b>重要：</b>相邻 Atom 的衔接是长距离 Jump，使用 <code>DA_Atoms.TransitionJumpGapCm</code>，
+        不会自动在两个 Atom 之间生成一座桥。Atom 内部的桥和怪属于 Atom BP 的视觉配置。
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 推荐配置顺序</h2>
+      <ol class="steps">
+        <li>
+          <h3>先做 Atom BP</h3>
+          在 Atom BP 中摆好 <code>Entry</code>、<code>Exit</code>、落脚点，以及每个落脚点的桥/怪视觉。
+          一个动作数组长度为 N 时，Atom 应有 N+1 个有效落脚点。
+        </li>
+        <li>
+          <h3>登记 Atom 库</h3>
+          在 <code>DA_Atoms.AtomMap</code> 中用清晰的字符串 Key 指向 Atom BP；开启 <code>bEnabled</code>，
+          设置跨 Atom 的长距离 Jump 间距。
+        </li>
+        <li>
+          <h3>写策划规则</h3>
+          在 <code>DA_Rules</code> 中设置 <code>BaseAtomCount</code>，并写
+          <code>BaseRoute</code> 模板池；A/B/C 分支设置各自的
+          <code>TargetAtomCount</code>。每个模板填写 <code>AtomKey + Actions + Weight</code>。
+          <code>AtomKey</code> 留空并开启 <code>bAutoSelectAtomKeys</code>，运行时按有效 Seed 确定性选择。
+        </li>
+        <li>
+          <h3>汇总到 DA_Course</h3>
+          将 <code>AtomRoute=DA_Atoms</code>、<code>CourseRuleData=DA_Rules</code>、
+          <code>RouteRules=DA_RouteRules</code>、<code>HeroClass=BP_NightHero</code> 绑定到同一个课程配置。
+        </li>
+        <li>
+          <h3>绑定运行入口</h3>
+          在 <code>BP_NightCourseGameMode.CourseConfig</code> 和关卡中的
+          <code>BP_NightCourseHost.Config</code> 都指定 <code>DA_Course</code>。
+          GameMode 是运行时权威来源，Host 绑定便于编辑器预览。
+        </li>
+        <li>
+          <h3>校验再 PIE</h3>
+          手动保存并 Compile 相关 BP/DA 后，运行 <code>Night.Course.Validate</code>，
+          再执行 PIE。若需要看状态，使用 <code>Night.Course.Dump</code>。
+        </li>
+      </ol>
+      <div class="note error">
+        <b>当前工程检查提醒：</b>当前编辑器里曾检测到 <code>BP_NightCourseGameMode.CourseConfig</code> 为空、
+        <code>BP_NightCourseHost.Config</code> 仍指向旧的 <code>DA_NightG1_T0</code>，
+        且 <code>DA_Course.AtomRoute</code> 仍指向旧的 Atom 库。请按上面的目标引用重新检查并由你手动保存。
+      </div>
+    </section>
+
+    <section>
+      <h2>3. UE 资产索引</h2>
+      <p class="muted">
+        路径就是 UE Content Browser 的对象路径。点击“复制路径”后可粘贴到 Content Browser 搜索框、
+        DataAsset 引用槽或蓝图资产引用槽。
+      </p>
+      <div class="toolbar">
+        <label>
+          过滤资产
+          <input id="assetFilter" placeholder="例如 DA_Atoms、BP_NightCourse、规则">
+        </label>
+      </div>
+      <div class="asset-grid" id="assetGrid"></div>
+      <div class="note">
+        <b>关于“直接打开”：</b>UE 本身没有原生的浏览器资产 URL 协议。本页的“尝试打开 UE”只在本机安装并配置
+        Hermes / UnrealHyperlink 一类插件时生效；未配置时请使用“复制路径”。这不会改变 UE 资产，也不会自动保存。
+      </div>
+    </section>
+
+    <section class="two-col">
+      <div>
+        <h2>4. 最小 canonical Rule JSON</h2>
+        <p class="muted">
+          将下面 JSON 复制到 <code>DA_Rules.EditorJson</code>，再在 UE 中点击
+          <code>Import Editor Json</code>。Route 是模板池，按 Weight 生成目标数量；
+          每个 Atom 的 Actions 只描述判定，不描述网格和位置。
+        </p>
+        <textarea id="ruleJson" spellcheck="false">{
+  "seed": 2233,
+  "autoSelectAtomKeys": true,
+  "baseAtomCount": 30,
+  "baseRoute": [
+    { "atomKey": "A", "actions": ["Jump", "Jump", "Kill"], "weight": 5 },
+    { "atomKey": "A", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
+  ],
+  "branchRoutes": {
+    "A": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Jump", "Kill"], "weight": 1 }]
+    },
+    "B": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Jump", "Kill", "Jump"], "weight": 1 }]
+    },
+    "C": {
+      "targetAtomCount": 20,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Kill", "Jump"], "weight": 1 }]
+    }
+  },
+  "forkAfterBaseAtomIndex": 30
+}</textarea>
+        <p class="muted">
+          若不填写 <code>baseAtomCount</code> 或 <code>targetAtomCount</code>，C++ 会兼容旧格式，
+          使用对应模板数组长度；启用岔路时 <code>forkAfterBaseAtomIndex</code> 是岔口前实际生成的基础 Atom 数。
+        </p>
+        <div class="json-actions">
+          <button class="primary" id="copyRule">复制 Rule JSON</button>
+          <button id="formatRule">格式化 / 校验 JSON</button>
+        </div>
+        <div class="note warn">
+          <b>动作与 Atom 约束：</b><code>Jump</code>、<code>Kill</code> 是当前工具推荐写法；
+          旧别名 <code>Hazard</code>、<code>Enemy</code> 仅用于兼容输入。显式填 Key 时，Key 必须存在于
+          <code>DA_Atoms.AtomMap</code>，否则建议留空交给 Seed 选择。
+        </div>
+      </div>
+      <div>
+        <h2>5. 运行前检查</h2>
+        <ul class="checklist" id="checklist">
+          <li><input type="checkbox" data-check="map"><span>打开 <code>L_Night_G1</code>，确认使用 <code>BP_NightCourseGameMode</code>。</span></li>
+          <li><input type="checkbox" data-check="gameMode"><span>GameMode 的 <code>CourseConfig</code> 指向 <code>DA_Course</code>。</span></li>
+          <li><input type="checkbox" data-check="host"><span>关卡 Host 的 <code>Config</code> 指向同一个 <code>DA_Course</code>。</span></li>
+          <li><input type="checkbox" data-check="rules"><span><code>DA_Rules</code> 已启用，Seed 与队列有效。</span></li>
+          <li><input type="checkbox" data-check="atoms"><span><code>DA_Atoms</code> 已启用，AtomMap 中的 BP 均能加载。</span></li>
+          <li><input type="checkbox" data-check="landing"><span>每个 Atom 的落脚点数量 = 对应 Actions 数量 + 1。</span></li>
+          <li><input type="checkbox" data-check="route"><span><code>DA_RouteRules</code> 有实际启用分支的 A/B/C 行。</span></li>
+          <li><input type="checkbox" data-check="save"><span>相关 BP/DA 已由人工 Compile、Save，未依赖 HTML 自动写盘。</span></li>
+          <li><input type="checkbox" data-check="validate"><span>控制台执行 <code>Night.Course.Validate</code> 无错误。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>6. 运行时数据流细节</h2>
+      <div class="commands">
+        <div class="command">
+          <code>1. GameMode.BeginPlay</code>
+          <span>读取 CourseConfig；若关卡已有 Host，则把 GameMode 的配置作为运行时 Config。</span>
+        </div>
+        <div class="command">
+          <code>2. Host.StartCourse</code>
+          <span>绑定玩家 Pawn / Feel / Director，并触发课程启动；缺 canonical 引用直接失败。</span>
+        </div>
+        <div class="command">
+          <code>3. Director.BuildAtomRouteCourse</code>
+          <span>读总数和加权模板池；按 Seed 生成 BaseRoute，达到 Fork 后从 BranchRoutes 取目标数量并继续加权生成。</span>
+        </div>
+        <div class="command">
+          <code>4. Atom 拼接</code>
+          <span>前一 Atom 的 Exit 对齐后一 Atom 的 Entry；Atom 之间使用 TransitionJumpGapCm 的 Jump。</span>
+        </div>
+        <div class="command">
+          <code>5. 视觉与判定</code>
+          <span>Atom BP 提供视觉绑定；Director 生成 gameplay carrier，并按落脚点顺序绑定 Actions。</span>
+        </div>
+        <div class="command">
+          <code>6. 结果接口</code>
+          <span>成功/失败由 Host 的 OnNightSucceeded、OnNightFailed、OnNightFinished 和 Debug 消息输出。</span>
+        </div>
+      </div>
+      <div class="note">
+        <b>角色与摄像机：</b><code>BP_NightCoursePawn</code> 是实际运行 Pawn；<code>BP_NightHero</code>
+        通过 <code>DA_Course.HeroClass</code> 提供角色视觉配置。摄像机组件的编辑应优先在实际运行 Pawn 蓝图中完成。
+      </div>
+    </section>
+
+    <section>
+      <h2>7. 不要再挂载的旧配置</h2>
+      <p class="muted">这些资产可以保留作历史参考，但不应再作为 canonical 运行链的引用。</p>
+      <div class="legacy">
+        <div><code>/Game/Night/Course/Data/DA_NightG1_T0</code><br><span class="small">旧总课程配置；不要再绑定到 Host。</span></div>
+        <div><code>/Game/Night/Course/Data/DA_NightAtomLibrary_Art_Test</code><br><span class="small">旧 Atom 库；目标是 Config/DA_Atoms。</span></div>
+        <div><code>/Game/Night/Course/Data/DA_NightAtomRoute_Test</code><br><span class="small">旧 Route 资产；规则队列现在由 DA_Rules 持有。</span></div>
+        <div><code>/Game/Night/Course/Data/DA_NightCourseRules_Test</code><br><span class="small">旧规则测试资产；不要替代 DA_Rules。</span></div>
+      </div>
+    </section>
+
+    <footer>
+      NightCourseConfigGuide · canonical Seed-driven Atom pipeline · 页面只读 UE 路径和生成文本，不执行 UE 资产保存。
+    </footer>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    const ASSETS = [
+      {
+        group: "入口地图",
+        name: "L_Night_G1",
+        path: "/Game/Night/Course/Maps/L_Night_G1",
+        role: "打开后 PIE 的主测试关卡；地图本身不承载动作队列。",
+        state: "入口",
+        stateClass: ""
+      },
+      {
+        group: "运行入口",
+        name: "BP_NightCourseGameMode",
+        path: "/Game/Night/Course/Blueprints/BP_NightCourseGameMode",
+        role: "DefaultPawnClass / HostClass / CourseConfig 的运行入口。",
+        state: "必须检查",
+        stateClass: "check"
+      },
+      {
+        group: "运行入口",
+        name: "BP_NightCourseHost",
+        path: "/Game/Night/Course/Blueprints/BP_NightCourseHost",
+        role: "Director 宿主；编辑器预览、启动课程、成功失败接口和 Debug 消息。",
+        state: "必须检查",
+        stateClass: "check"
+      },
+      {
+        group: "运行 Pawn",
+        name: "BP_NightCoursePawn",
+        path: "/Game/Night/Course/Blueprints/BP_NightCoursePawn",
+        role: "实际生成的 Pawn；相机、输入和 FeelStub 在这里生效。",
+        state: "运行时使用",
+        stateClass: ""
+      },
+      {
+        group: "角色视觉",
+        name: "BP_NightHero",
+        path: "/Game/Night/Course/Blueprints/BP_NightHero",
+        role: "由 DA_Course.HeroClass 引用，提供角色 Mesh、材质、动画和视觉参数。",
+        state: "手动编辑",
+        stateClass: "manual"
+      },
+      {
+        group: "中心配置",
+        name: "DA_Course",
+        path: "/Game/Night/Course/Config/DA_Course",
+        role: "运行时唯一汇总入口：玩法参数 + HeroClass + DA_Rules + DA_Atoms + DA_RouteRules。",
+        state: "核心",
+        stateClass: ""
+      },
+      {
+        group: "策划规则",
+        name: "DA_Rules",
+        path: "/Game/Night/Course/Config/DA_Rules",
+        role: "Seed、BaseAtomCount、加权 BaseRoute/BranchRoutes、ForkAfterBaseAtomIndex；只写 AtomKey + Actions + Weight。",
+        state: "策划编辑",
+        stateClass: "manual"
+      },
+      {
+        group: "美术原子库",
+        name: "DA_Atoms",
+        path: "/Game/Night/Course/Config/DA_Atoms",
+        role: "AtomMap 的字符串 Key → Atom BP；包含跨 Atom Jump 间距。",
+        state: "美术编辑",
+        stateClass: "manual"
+      },
+      {
+        group: "分支规则",
+        name: "DA_RouteRules",
+        path: "/Game/Night/Course/Config/DA_RouteRules",
+        role: "A/B/C 的可见块、魂惩罚、DoT、掉落和 CarryOut 调优。",
+        state: "分支编辑",
+        stateClass: "manual"
+      },
+      {
+        group: "Feel 调优",
+        name: "DA_Feel",
+        path: "/Game/Night/Course/Config/DA_Feel",
+        role: "Feel 调优资产；是否实际挂到 FeelStub 以当前 BP 绑定为准。",
+        state: "手动检查",
+        stateClass: "check"
+      }
+    ];
+
+    const FLOW_TEXT = [
+      "打开 L_Night_G1",
+      "确认 GameMode = BP_NightCourseGameMode",
+      "GameMode.CourseConfig = DA_Course",
+      "Host.Config = DA_Course",
+      "DA_Course.CourseRuleData = DA_Rules",
+      "DA_Course.AtomRoute = DA_Atoms",
+      "DA_Course.RouteRules = DA_RouteRules",
+      "DA_Rules 写 Seed + 总数 + Actions + Weight",
+      "DA_Atoms 写 AtomKey → Atom BP",
+      "Compile / Save / Night.Course.Validate / PIE"
+    ];
+
+    const $ = (id) => document.getElementById(id);
+    let toastTimer = 0;
+
+    function showToast(message) {
+      const node = $("toast");
+      node.textContent = message;
+      node.classList.add("show");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => node.classList.remove("show"), 2600);
+    }
+
+    async function copyText(text, success = "已复制") {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (error) {
+        const helper = document.createElement("textarea");
+        helper.value = text;
+        helper.style.position = "fixed";
+        helper.style.opacity = "0";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        helper.remove();
+      }
+      showToast(success);
+    }
+
+    function makeOptionalUeUrl(path) {
+      const scheme = $("ueScheme").value.trim().replace(/:$/, "");
+      if (!scheme) return "";
+      return `${scheme}://asset?path=${encodeURIComponent(path)}`;
+    }
+
+    function renderAssets() {
+      const query = $("assetFilter").value.trim().toLowerCase();
+      const assets = ASSETS.filter((asset) => {
+        const searchable = `${asset.group} ${asset.name} ${asset.path} ${asset.role}`.toLowerCase();
+        return !query || searchable.includes(query);
+      });
+      $("assetGrid").innerHTML = assets.map((asset) => `
+        <article class="asset-card">
+          <div class="group">${asset.group}</div>
+          <h3>${asset.name}</h3>
+          <div class="role">${asset.role}</div>
+          <span class="path">${asset.path}</span>
+          <span class="state ${asset.stateClass}">${asset.state}</span>
+          <div class="asset-tools">
+            <button data-copy="${asset.path}">复制路径</button>
+            <button data-open="${asset.path}">尝试打开 UE</button>
+          </div>
+        </article>
+      `).join("");
+      $("assetGrid").querySelectorAll("[data-copy]").forEach((button) => {
+        button.onclick = () => copyText(button.dataset.copy, "UE 路径已复制");
+      });
+      $("assetGrid").querySelectorAll("[data-open]").forEach((button) => {
+        button.onclick = () => {
+          const path = button.dataset.open;
+          const url = makeOptionalUeUrl(path);
+          if (!url) {
+            copyText(path, "未配置 UE URL 协议，已复制路径");
+            return;
+          }
+          window.location.href = url;
+        };
+      });
+    }
+
+    function resetChecks() {
+      document.querySelectorAll("[data-check]").forEach((box) => {
+        box.checked = false;
+        localStorage.removeItem(`night-course-check-${box.dataset.check}`);
+      });
+      showToast("检查单已重置");
+    }
+
+    function restoreChecks() {
+      document.querySelectorAll("[data-check]").forEach((box) => {
+        box.checked = localStorage.getItem(`night-course-check-${box.dataset.check}`) === "1";
+        box.onchange = () => {
+          localStorage.setItem(`night-course-check-${box.dataset.check}`, box.checked ? "1" : "0");
+        };
+      });
+    }
+
+    $("assetFilter").oninput = renderAssets;
+    $("ueScheme").oninput = renderAssets;
+    $("copyAllAssets").onclick = () => copyText(
+      ASSETS.map((asset) => `${asset.name}\t${asset.path}`).join("\n"),
+      "全部 canonical 资产路径已复制"
+    );
+    $("copyFlow").onclick = () => copyText(FLOW_TEXT.map((item, index) => `${index + 1}. ${item}`).join("\n"), "配置顺序已复制");
+    $("resetChecks").onclick = resetChecks;
+    $("copyRule").onclick = () => copyText($("ruleJson").value, "Rule JSON 已复制");
+    $("formatRule").onclick = () => {
+      try {
+        const value = JSON.parse($("ruleJson").value);
+        $("ruleJson").value = JSON.stringify(value, null, 2);
+        showToast("JSON 格式正确");
+      } catch (error) {
+        showToast(`JSON 错误：${error.message}`);
+      }
+    };
+
+    restoreChecks();
+    renderAssets();
+  </script>
+</body>
+</html>

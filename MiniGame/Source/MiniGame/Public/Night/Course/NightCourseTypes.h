@@ -31,7 +31,13 @@ enum class ENightCoursePhase : uint8
 {
 	Idle UMETA(DisplayName = "Idle"),
 	BaseSegment UMETA(DisplayName = "BaseSegment"),
+	ForkChoice UMETA(DisplayName = "ForkChoice"),
+	BranchEnterBuffer UMETA(DisplayName = "BranchEnterBuffer"),
+	BranchSegment UMETA(DisplayName = "BranchSegment"),
+	KeySwapWarning UMETA(DisplayName = "KeySwapWarning"),
+	KeySwapSafetyHold UMETA(DisplayName = "KeySwapSafetyHold"),
 	ExitBuffer UMETA(DisplayName = "ExitBuffer"),
+	Failed UMETA(DisplayName = "Failed"),
 	Finished UMETA(DisplayName = "Finished")
 };
 

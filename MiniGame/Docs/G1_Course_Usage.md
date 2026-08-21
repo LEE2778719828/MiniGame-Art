@@ -25,7 +25,9 @@
 | `/Game/Night/Course/Blueprints/BP_NightCoursePawn` | 后上方相机 + Feel stub；Q/E |
 | `/Game/Night/Course/Blueprints/BP_NightCourseHost` | Director 宿主 |
 | `/Game/Night/Course/Blueprints/BP_NightCourseStone`（或运行时 C++ 石） | 落脚石；可选怪胶囊 |
-| `/Game/Night/Course/Data/DA_NightG1_T0` | 间距/石链配置 |
+| `/Game/Night/Course/Config/DA_Course` | G1 课程调优、规则和 Atom 引用 |
+| `/Game/Night/Course/Config/DA_Atoms` | A/B/C Atom BP 库与跳跃衔接间距 |
+| `/Game/Night/Course/Config/DA_Rules` | `BaseAtomCount` + 加权 `BaseRoute/BranchRoutes`；空 AtomKey 由 Seed 选择 |
 | `/Game/Night/Course/Input/IA_NightJump` / `IA_NightAttack` + `IMC_NightCourse` | Q=跳，E/LMB=劈 |
 
 默认图：`L_Night_G1`（`DefaultEngine.ini`）。
@@ -40,7 +42,7 @@
 
 - `FNightStoneSpec`：一块石的轨距、是否带怪、掉落  
 - `FNightBeatSpec`：站在 From 石、按 Jump/Attack、前进到 To 石  
-- Generator：按「跳空 / 砍怪」模式拉出石链（跳=大间距无怪；砍=小间距+目标石带怪）
+- Atom Composer：按 `Actions` 绑定 Atom 内按序落脚点；相邻 Atom 固定用长距离 Jump 衔接
 
 ## 美术对接
 
@@ -48,7 +50,9 @@
 |---|---|
 | 石 Actor | 平台 Mesh；`bHasFoe` 时显示胶囊；Success 砍怪播消失/受击 |
 | `BP_NightCoursePawn` | `ArtRoot` 下挂角色 |
-| `DA_NightG1_T0` | `JumpGapCm` / `KillGapCm` / 石间距 |
+| `DA_Course` | 运行速度、惩罚、岔口和玩法调优 |
+| `DA_Atoms` | Atom BP 的落脚点、桥、Entry/Exit 和 `TransitionJumpGapCm` |
+| `DA_Rules` | `Seed`、目标 Atom 数、`AtomKey + Actions + Weight` 模板池 |
 
 ## R1 替换
 

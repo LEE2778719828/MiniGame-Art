@@ -4,6 +4,9 @@
 #include "Components/ActorComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "Night/Course/NightCourseAtomActor.h"
+#include "Night/Course/NightCourseInterface.h"
+#include "Night/Course/NightCourseRuleData.h"
+#include "Night/Course/NightRouteRules.h"
 #include "Night/Shared/NightSharedTypes.h"
 #include "NightCourseDirector.generated.h"
 
@@ -14,8 +17,8 @@ class ANightCoursePawn;
 class AActor;
 class UBoxComponent;
 class INightFeelBridge;
+class UNightForkController;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseFinished, const FNightResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNightCoursePhaseChanged, ENightCoursePhase, OldPhase, ENightCoursePhase, NewPhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNightCourseNodeEvent, int32, NodeIndex, ENightNodeKind, Kind, ENightJudgeOutcome, Outcome);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseDebugTick, float, ElapsedSeconds);
@@ -54,8 +57,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Night|Course|Debug")
 	FOnNightCourseDebugTick OnDebugTick;
 
+	UPROPERTY(BlueprintAssignable, Category = "Night|Course|Debug")
+	FOnNightCourseDebugMessage OnDebugMessage;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartNight(const FNightBootstrap& Bootstrap);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course")
+	bool TryStartNight(const FNightBootstrap& Bootstrap, FString& OutError);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void BindFeelBridge(UObject* FeelObject);
@@ -75,6 +84,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugSkipToExit();
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
+	void ChooseForkLeft();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
+	void ChooseForkRight();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Fork")
+	void SkipFork();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|KeySwap")
+	void ForceKeySwap();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
+	void ResetCourse();
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
+	bool ValidateConfiguration(FString& OutError) const;
+
 	bool BuildCourseForPreview(
 		TArray<FNightStoneSpec>& OutStones,
 		TArray<FNightBeatSpec>& OutBeats,
@@ -88,6 +115,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsRunning() const { return bRunning; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Result")
+	bool HasNightResult() const { return bHasResult; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Result")
+	FNightResult GetNightResult() const { return LastResult; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Debug")
+	FString GetLastFailureReason() const { return LastFailureReason; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Debug")
+	bool DidEnterRuntimeCourse() const { return bDidEnterRuntimeCourse; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsAwaitingInput() const { return bRunning && bWindowOpen && !bAdvancing; }
@@ -107,6 +146,51 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	int32 GetCurrentStoneIndex() const { return CurrentStoneIndex; }
 
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	bool IsForkChoiceActive() const
+	{
+		return bRunning && Phase == ENightCoursePhase::ForkChoice;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	float GetForkSecondsRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	ENightRouteId GetForkLeftRoute() const;
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	ENightRouteId GetForkRightRoute() const;
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	ENightRouteId GetCurrentRoute() const { return CurrentRoute; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
+	int32 GetBranchBeatCount() const { return BranchBeatCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Route")
+	int32 GetVisibleBlockCount() const
+	{
+		return bHasActiveRouteRule
+			? FMath::Max(1, ActiveRouteRule.VisibleBlockCount)
+			: 0;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Gift")
+	FString GetForkHintText() const;
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|KeySwap")
+	bool IsKeySwapWarningActive() const
+	{
+		return Phase == ENightCoursePhase::KeySwapWarning
+			|| Phase == ENightCoursePhase::KeySwapSafetyHold;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|KeySwap")
+	float GetKeySwapSecondsRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category = "Night|Course|KeySwap")
+	bool IsCourseFailed() const { return Phase == ENightCoursePhase::Failed; }
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
 
@@ -121,6 +205,18 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	ENightCoursePhase Phase = ENightCoursePhase::Idle;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")
+	bool bDidEnterRuntimeCourse = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Result")
+	bool bHasResult = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Result")
+	FNightResult LastResult;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")
+	FString LastFailureReason;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	float ElapsedSeconds = 0.f;
@@ -158,6 +254,18 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	TArray<FIngredientStack> CollectedIngredients;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Drops")
+	TArray<FIngredientStack> BranchCollectedIngredients;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
+	ENightRouteId CurrentRoute = ENightRouteId::None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
+	ENightForkPair ActiveForkPair = ENightForkPair::AB;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
+	int32 BranchBeatCount = 0;
+
 	UPROPERTY()
 	TObjectPtr<UObject> FeelBridgeObject;
 
@@ -176,11 +284,47 @@ protected:
 	UPROPERTY()
 	bool bEnforceLayoutBounds = false;
 
+	UPROPERTY()
+	TObjectPtr<UNightForkController> ForkController;
+
+	FNightRouteRuleRow ActiveRouteRule;
+	bool bHasActiveRouteRule = false;
+	bool bForkPending = false;
+	bool bBranchSelected = false;
+	bool bSpareLampConsumed = false;
+	bool bBranchTransitionConsumed = false;
+	bool bBranchHasExplicitTransitionBeat = true;
+	int32 BaseBeatCount = 0;
+	int32 BranchTransitionBeatIndex = INDEX_NONE;
+	int32 RuntimeSeed = 0;
+	bool bHasRuntimeSeed = false;
+	bool bBuildingRuntimeCourse = false;
+	int32 NextKeySwapCueIndex = 0;
+	float BranchEnterBufferEndTime = 0.f;
+	float KeySwapEndTime = 0.f;
+	TArray<FNightKeySwapCue> AuthoredKeySwapCues;
+	TArray<FNightKeySwapCue> ActiveKeySwapCues;
+
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
 	void SetPhase(ENightCoursePhase NewPhase);
+	void EmitDebugMessage(const FString& Message, bool bIsError);
 	void FinishNight(const FNightResult& Result);
-	void EnsureCourse();
+	bool EnsureCourse(FString& OutError);
+	void ClearSpawnedCourseActors();
+	void SpawnCourseActors();
+	bool RebuildCourseForSelectedRoute(FString& OutError);
+	void BeginForkChoice();
+	UFUNCTION()
+	void HandleForkResolved(ENightRouteId RouteTaken, bool bTimedOut);
+	void BeginKeySwapWarning();
+	void ApplyKeySwapCue(const FNightKeySwapCue& Cue);
+	bool HasPendingKeySwap() const;
+	void UpdateRouteEffects(float DeltaTime);
+	void UpdateRouteVisibility();
+	void HandleFailedInput(int32 BeatIndex, ENightJudgeOutcome Outcome);
+	void BeginFailure(const FString& Reason);
+	bool HasBranchQueueForRoute(ENightRouteId RouteId) const;
 	bool BuildAtomRouteCourse(
 		TArray<FNightStoneSpec>& OutStones,
 		TArray<FNightBeatSpec>& OutBeats,
@@ -197,7 +341,6 @@ protected:
 	bool IsAtomTransformInsideLayoutBounds(
 		const ANightCourseAtomActor* AtomDefaults,
 		const FTransform& AtomWorld) const;
-	bool HasVisualBindingForStone(int32 StoneIndex) const;
 	void TryOpenBeat(int32 BeatIndex);
 	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginAdvanceToStone(int32 StoneIndex);
@@ -205,6 +348,7 @@ protected:
 	void OpenNextBeatOrExit();
 	void SyncPawnToProgress(bool bInstant);
 	void AddDrop(EIngredientId Id, int32 Count);
+	void AddDropToArray(TArray<FIngredientStack>& Target, EIngredientId Id, int32 Count) const;
 	FVector GetTrackLocation(float Distance) const;
 	FVector GetStoneWorldLocation(int32 StoneIndex) const;
 	INightFeelBridge* GetFeel() const;

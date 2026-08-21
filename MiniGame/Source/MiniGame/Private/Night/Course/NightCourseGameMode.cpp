@@ -22,8 +22,22 @@ void ANightCourseGameMode::BeginPlay()
 	UWorld* World = GetWorld();
 	if (!World)
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=GameMode] BeginPlay aborted: World is null."));
 		return;
 	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=GameMode] BeginPlay map='%s' gameMode='%s' CourseConfig='%s' DefaultPawn='%s' HostClass='%s'."),
+		*World->GetMapName(),
+		*GetNameSafe(this),
+		CourseConfig ? *CourseConfig->GetPathName() : TEXT("<null>"),
+		*GetNameSafe(DefaultPawnClass),
+		*GetNameSafe(HostClass));
 
 	for (TActorIterator<ASkyLight> It(World); It; ++It)
 	{
@@ -39,18 +53,49 @@ void ANightCourseGameMode::BeginPlay()
 		ANightCourseHost* ExistingHost = *It;
 		if (ExistingHost)
 		{
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=GameMode] Found existing Host='%s' serializedConfig='%s'."),
+				*GetNameSafe(ExistingHost),
+				ExistingHost->Config ? *ExistingHost->Config->GetPathName() : TEXT("<null>"));
 			// The level host may contain a stale serialized Config from an
 			// earlier preview. PIE must use the GameMode's current DataAsset.
 			if (CourseConfig)
 			{
 				ExistingHost->Config = CourseConfig;
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("[NightCourse][Stage=GameMode] Applied GameMode CourseConfig='%s' to existing Host='%s'."),
+					*CourseConfig->GetPathName(),
+					*GetNameSafe(ExistingHost));
+			}
+			else
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightCourse][Stage=GameMode] CourseConfig is null; existing Host keeps serialized Config. Runtime may use stale or empty data."));
 			}
 			SpawnedHost = ExistingHost;
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=GameMode] Using existing Host='%s' finalConfig='%s'."),
+				*GetNameSafe(SpawnedHost),
+				SpawnedHost->Config ? *SpawnedHost->Config->GetPathName() : TEXT("<null>"));
 			return;
 		}
 	}
 
 	UClass* ClassToSpawn = HostClass ? HostClass.Get() : ANightCourseHost::StaticClass();
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=GameMode] No level Host found; spawning HostClass='%s' with CourseConfig='%s'."),
+		*GetNameSafe(ClassToSpawn),
+		CourseConfig ? *CourseConfig->GetPathName() : TEXT("<null>"));
 	ANightCourseHost* Host = World->SpawnActorDeferred<ANightCourseHost>(
 		ClassToSpawn,
 		FTransform::Identity,
@@ -60,12 +105,22 @@ void ANightCourseGameMode::BeginPlay()
 
 	if (!Host)
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=GameMode] Failed to spawn HostClass='%s'."),
+			*GetNameSafe(ClassToSpawn));
 		return;
 	}
 
 	Host->Config = CourseConfig;
 	if (!Host->Config)
 	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=GameMode] Spawned Host='%s' without CourseConfig; transient fallback will not contain canonical Rule/Atom references."),
+			*GetNameSafe(Host));
 		Host->Config = NewObject<UNightG1CourseConfig>(Host, TEXT("RuntimeG1Config"));
 	}
 	Host->Bootstrap.LevelId = ENightLevelId::T0;
@@ -73,5 +128,13 @@ void ANightCourseGameMode::BeginPlay()
 	Host->bAutoStart = true;
 	Host->FinishSpawning(FTransform::Identity);
 	SpawnedHost = Host;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=GameMode] Spawned Host='%s' finalConfig='%s' autoStart=%d seed=%d."),
+		*GetNameSafe(Host),
+		Host->Config ? *Host->Config->GetPathName() : TEXT("<null>"),
+		Host->bAutoStart ? 1 : 0,
+		Host->Bootstrap.Seed);
 }
 #pragma endregion K2 moonyfli

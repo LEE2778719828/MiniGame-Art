@@ -239,9 +239,10 @@ ENightJudgeOutcome UNightFeelStubComponent::JudgeInput(ENightFeelInput Input)
 		return LastOutcome;
 	}
 
-	// 裁定 R-006：按错只扣魂，不锁输入——下一帧按对照常执行
-	ApplyFailurePenalty(ENightJudgeOutcome::WrongButton);
-	PlayFailFeedback_Implementation(ENightJudgeOutcome::WrongButton, ActiveRequest.Kind);
+	// CourseDirector owns the route-scaled penalty and feedback. Broadcast the
+	// failed attempt while keeping the request open so a corrected input can
+	// still resolve the same beat.
+	OnInputResolved.Broadcast(ResolvedIndex, LastOutcome);
 	return LastOutcome;
 }
 

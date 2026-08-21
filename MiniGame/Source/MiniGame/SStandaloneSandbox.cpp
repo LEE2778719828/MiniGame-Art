@@ -26,6 +26,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
@@ -64,6 +65,19 @@ namespace
 	{
 		static const TArray<FName> Ids = {LingGuId, YinShanJunId, ChiYanJiaoId, YueLinYuId, XuanYuQinId};
 		return Ids;
+	}
+
+	FName NightIngredientToDayId(const EIngredientId Id)
+	{
+		switch (Id)
+		{
+		case EIngredientId::F01_LingGu: return LingGuId;
+		case EIngredientId::F02_YinShanJun: return YinShanJunId;
+		case EIngredientId::F03_ChiYanJiao: return ChiYanJiaoId;
+		case EIngredientId::F04_YueLinYu: return YueLinYuId;
+		case EIngredientId::F05_XuanYuQin: return XuanYuQinId;
+		default: return NAME_None;
+		}
 	}
 
 	bool IsKnownGiftId(const FName GiftId)
@@ -308,6 +322,58 @@ bool USChefGameInstance::ApplyBatch(const TArray<FSIngredientStack>& Changes)
 	Inventory = MoveTemp(Projected);
 	NotifyStateChanged();
 	return true;
+}
+
+bool USChefGameInstance::ConsumeNightCourseResult(const FNightResult& Result)
+{
+	FSNightResult DayResult;
+	const FString ResultGuid =
+		FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+	DayResult.ResultId = FString::Printf(
+		TEXT("NightCourse-%s-%s"),
+		*StageId.ToString(),
+		*ResultGuid);
+	DayResult.bSuccess = Result.bSuccess;
+	DayResult.bFailedMidway = Result.bFailedMidway;
+	DayResult.SoulLeft = Result.SoulLeft;
+	switch (Result.RouteTaken)
+	{
+	case ENightRouteId::A:
+		DayResult.RouteTaken = TEXT("A");
+		break;
+	case ENightRouteId::B:
+		DayResult.RouteTaken = TEXT("B");
+		break;
+	case ENightRouteId::C:
+		DayResult.RouteTaken = TEXT("C");
+		break;
+	default:
+		DayResult.RouteTaken = TEXT("AB");
+		break;
+	}
+
+	for (const FIngredientStack& Stack : Result.Ingredients)
+	{
+		const FName IngredientId = NightIngredientToDayId(Stack.Id);
+		if (IngredientId.IsNone() || Stack.Count <= 0)
+		{
+			continue;
+		}
+		FSIngredientStack& DayStack = DayResult.Ingredients.AddDefaulted_GetRef();
+		DayStack.IngredientId = IngredientId;
+		DayStack.Quantity = Stack.Count;
+	}
+
+	UE_LOG(
+		LogSSandbox,
+		Display,
+		TEXT("NightCourse result bridged to Day: id=%s success=%d failedMidway=%d ingredients=%d route=%s."),
+		*DayResult.ResultId,
+		DayResult.bSuccess ? 1 : 0,
+		DayResult.bFailedMidway ? 1 : 0,
+		DayResult.Ingredients.Num(),
+		*DayResult.RouteTaken);
+	return ConsumeNightResult(DayResult);
 }
 
 bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
@@ -1518,6 +1584,7 @@ bool USChefGameInstance::StartNight()
 
 	NightStartSnapshot = CaptureSnapshot();
 	Phase = ESGamePhase::NightRunning;
+	bAwaitingNightRetry = false;
 	BuildNightBootstrap();
 	LastBoardFeedback = FString::Printf(
 		TEXT("已入夜（%s）：夜初快照已建立，夜败将清除本次收获。%s"),
@@ -1526,6 +1593,36 @@ bool USChefGameInstance::StartNight()
 	NotifyStateChanged();
 	AutoSaveChefProfile(TEXT("入夜建立夜初快照"));
 	return true;
+}
+
+bool USChefGameInstance::PrepareNightForCourse()
+{
+	if (Phase == ESGamePhase::NightRunning)
+	{
+		return true;
+	}
+	if (Phase == ESGamePhase::Ending)
+	{
+		LastBoardFeedback = TEXT("当前关卡已进入尾声，不能重新进入 NightCourse。");
+		NotifyStateChanged();
+		return false;
+	}
+
+	if (Phase != ESGamePhase::PrepareNight && Phase != ESGamePhase::Boot)
+	{
+		// A standalone Night map can be opened after a saved Day phase. Stop the
+		// Day services and create a fresh Night snapshot without resetting stage
+		// progression or inventory.
+		ResetDayDirectors(false);
+		DayTimeRemaining = 0.0f;
+		DayStuckCheckAccum = 0.0f;
+		Phase = ESGamePhase::PrepareNight;
+		bAwaitingNightRetry = false;
+		BuildNightBootstrap();
+		NotifyStateChanged();
+	}
+
+	return StartNight();
 }
 
 void USChefGameInstance::EnterPrepareDay(const FString& Reason)
