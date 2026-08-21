@@ -11,7 +11,8 @@
 #include "Animation/AnimMontage.h" //add by K2
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
-#include "Night/Course/NightCourseDirector.h"
+#include "Night/Course/NightCourseHUD.h"
+#include "InputCoreTypes.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -581,6 +582,19 @@ void ANightCoursePawn::PossessedBy(AController* NewController)
 
 	if (APlayerController* PC = Cast<APlayerController>(NewController))
 	{
+		// add by K2 (R1): packaged Android otherwise loads DefaultVirtualJoysticks from
+		// DefaultInput.ini, which would put a stick on a Jump+Attack-only game.
+		PC->ActivateTouchInterface(nullptr);
+
+		// Default PC captures the mouse (DefaultViewportMouseCaptureMode=CapturePermanently),
+		// which hides the cursor. The HUD pads are clicked/tapped, so the pointer has to be visible
+		// in PIE and on device when a mouse is attached.
+		PC->bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
 			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
 		{
@@ -614,6 +628,59 @@ void ANightCoursePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 			EIC->BindAction(AttackAction, ETriggerEvent::Started, this, &ANightCoursePawn::OnAttackPressed);
 		}
 	}
+
+	// add by K2 (R1): pads are Canvas rects, not widgets, so Enhanced Input cannot hit-test them.
+	// Mouse (PIE) and Touch (device) share the same classify path. Q/E stay on the mapping context.
+	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANightCoursePawn::OnHudPointerPressed);
+	PlayerInputComponent->BindTouch(IE_Pressed, this, &ANightCoursePawn::OnHudTouchPressed);
+}
+
+void ANightCoursePawn::OnHudPointerPressed()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	float ScreenX = 0.f;
+	float ScreenY = 0.f;
+	if (!PC->GetMousePosition(ScreenX, ScreenY))
+	{
+		return;
+	}
+	TryResolveHudPointer(ScreenX, ScreenY);
+}
+
+void ANightCoursePawn::OnHudTouchPressed(const ETouchIndex::Type FingerIndex, const FVector Location)
+{
+	(void)FingerIndex;
+	TryResolveHudPointer(Location.X, Location.Y);
+}
+
+void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
+{
+	if (!FeelStub)
+	{
+		return;
+	}
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	int32 ViewX = 0;
+	int32 ViewY = 0;
+	PC->GetViewportSize(ViewX, ViewY);
+
+	ENightFeelInput Input = ENightFeelInput::Jump;
+	if (!ANightCourseHUD::HitTestActionButtons(ScreenX, ScreenY, static_cast<float>(ViewX), static_cast<float>(ViewY), Input))
+	{
+		return;
+	}
+	FeelStub->TryResolveInput_Implementation(Input);
 }
 
 // add by K2 (R1): 加速未走完的这一段石间移动，供负反应缓存命中时追赶时间轴
@@ -684,7 +751,18 @@ void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	// 裁定 R-006：不再拦 bTrackAdvancing，移动中的输入要交给 Feel 缓存并加速衔接
+
+	// LeftMouseButton is still mapped to IA_NightAttack in IMC_NightCourse. The HUD pads own the
+	// mouse now, so swallow that chord here and let OnHudPointerPressed classify the click;
+	// otherwise tapping Jump would also fire Attack on the same frame.
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (PC->IsInputKeyDown(EKeys::LeftMouseButton))
+		{
+			return;
+		}
+	}
+
 	if (FeelStub)
 	{
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Attack);

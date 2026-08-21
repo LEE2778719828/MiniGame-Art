@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "InputActionValue.h"
+#include "InputCoreTypes.h"
 #include "NightCoursePawn.generated.h"
 
 class UCameraComponent;
@@ -217,6 +218,9 @@ public:
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
+	void OnHudPointerPressed();
+	void OnHudTouchPressed(const ETouchIndex::Type FingerIndex, const FVector Location);
+	void TryResolveHudPointer(float ScreenX, float ScreenY);
 	void ApplyAvatarColor(FLinearColor Color);
 
 	/**
