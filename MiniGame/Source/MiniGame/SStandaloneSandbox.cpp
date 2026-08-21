@@ -20,6 +20,7 @@
 #include "Components/WrapBoxSlot.h"
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
+#include "Materials/MaterialInstanceDynamic.h" //add by K2
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/HUD.h"
 #include "Kismet/GameplayStatics.h"
@@ -4365,6 +4366,15 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			Check(
 				ALingCellVisual->PieceMesh->GetRelativeLocation().Z > 50.0f,
 				TEXT("selected piece is highlighted"));
+#pragma region K2 moonyfli
+			UMaterialInstanceDynamic* PlatedMaterial = Cast<UMaterialInstanceDynamic>(
+				ALingCellVisual->PieceIcon->GetMaterial(0));
+			Check(
+				ALingCellVisual->PieceIcon->IsVisible()
+				&& PlatedMaterial
+				&& PlatedMaterial->K2_GetTextureParameterValue(TEXT("Tex")) != nullptr,
+				TEXT("plated piece shows food artwork"));
+#pragma endregion K2 moonyfli
 			DayBoardPresenter->SimulatePointerEvent(CellScreen, false);
 			DayBoardPresenter->SimulatePointerEvent(SeatScreen, true);
 		}

@@ -8,6 +8,7 @@
 #include "Components/Border.h"
 #include "Components/BillboardComponent.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h" //add by K2
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/DirectionalLightComponent.h"
@@ -16,6 +17,7 @@
 #include "Components/Image.h"
 #include "Components/SafeZone.h"
 #include "Components/ScrollBox.h"
+#include "Components/SkeletalMeshComponent.h" //add by K2
 #include "Components/SkyLightComponent.h"
 #include "Components/SizeBox.h"
 #include "Components/StaticMeshComponent.h"
@@ -26,6 +28,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WrapBox.h"
 #include "Components/WidgetComponent.h"
+#include "Animation/AnimationAsset.h" //add by K2
+#include "Animation/AnimSequenceBase.h" //add by K2
+#include "TimerManager.h" //add by K2
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -33,6 +38,7 @@
 #include "Day/Input/SDayPlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h" //add by K2
 #include "UObject/ConstructorHelpers.h"
 
 namespace DayBoardPresentationPrivate
@@ -504,14 +510,16 @@ namespace DayBoardPresentationPrivate
 	 * FSpriteSceneProxy draws a quad of half-height 0.25 * ComponentScale * texture height, and
 	 * the portrait PNGs differ in pixel size, so the scale is solved per texture.
 	 */
-	float DayPortraitSpriteScale(const UTexture2D* Texture)
+	float DayPortraitSpriteScale(
+		const UTexture2D* Texture,
+		const float WorldHeight = DayArtPortraitSpriteHeight)
 	{
 		const float TextureHeight = Texture ? static_cast<float>(Texture->GetSizeY()) : 0.0f;
 		if (TextureHeight <= 0.0f)
 		{
 			return 1.0f;
 		}
-		return 2.0f * DayArtPortraitSpriteHeight / TextureHeight;
+		return 2.0f * WorldHeight / TextureHeight;
 	}
 
 	/**
@@ -776,6 +784,44 @@ namespace DayBoardPresentationPrivate
 				AssetName));
 	}
 
+	UDataTable* LoadDayDataTable(const TCHAR* AssetName)
+	{
+		return LoadObject<UDataTable>(
+			nullptr,
+			*FString::Printf(
+				TEXT("/Game/Day/Data/%s.%s"),
+				AssetName,
+				AssetName));
+	}
+
+	FSDayDishIconTuneRow ResolveDishIconTune(const USDayBoardVisualConfig* Config)
+	{
+		FSDayDishIconTuneRow BuiltIn;
+		UDataTable* Table = Config ? Config->DishIconTune.LoadSynchronous() : nullptr;
+		if (!Table)
+		{
+			Table = LoadDayDataTable(TEXT("DT_SDayDishIconTune"));
+		}
+		if (!Table)
+		{
+			return BuiltIn;
+		}
+		if (const FSDayDishIconTuneRow* Row = Table->FindRow<FSDayDishIconTuneRow>(
+			TEXT("Default"),
+			TEXT("ResolveDishIconTune"),
+			false))
+		{
+			return *Row;
+		}
+		TArray<FSDayDishIconTuneRow*> Rows;
+		Table->GetAllRows(TEXT("ResolveDishIconTune"), Rows);
+		if (Rows.Num() > 0 && Rows[0])
+		{
+			return *Rows[0];
+		}
+		return BuiltIn;
+	}
+
 	UTexture2D* ResolveIngredientIcon(const FName IngredientId)
 	{
 		if (UDataTable* Table = LoadSharedDayTable(TEXT("DT_Ingredients")))
@@ -793,12 +839,108 @@ namespace DayBoardPresentationPrivate
 		}
 
 		const TCHAR* Fallback = nullptr;
-		if (IngredientId == DayLingGuId) Fallback = TEXT("/Game/Day/Art/food/food_rice.food_rice");
-		else if (IngredientId == DayYinShanJunId) Fallback = TEXT("/Game/Day/Art/food/food_egg.food_egg");
-		else if (IngredientId == DayChiYanJiaoId) Fallback = TEXT("/Game/Day/Art/food/food_hand.food_hand");
-		else if (IngredientId == DayYueLinYuId) Fallback = TEXT("/Game/Day/Art/food/food_fish.food_fish");
-		else if (IngredientId == DayXuanYuQinId) Fallback = TEXT("/Game/Day/Art/food/food_leg.food_leg");
+		if (IngredientId == DayLingGuId) Fallback = TEXT("/Game/Day/Art/food/food_rice_V0.food_rice_V0");
+		else if (IngredientId == DayYinShanJunId) Fallback = TEXT("/Game/Day/Art/food/food_egg_V0.food_egg_V0");
+		else if (IngredientId == DayChiYanJiaoId) Fallback = TEXT("/Game/Day/Art/food/food_hand_V0.food_hand_V0");
+		else if (IngredientId == DayYueLinYuId) Fallback = TEXT("/Game/Day/Art/food/food_fish_V0.food_fish_V0");
+		else if (IngredientId == DayXuanYuQinId) Fallback = TEXT("/Game/Day/Art/food/food_leg_V0.food_leg_V0");
 		return Fallback ? LoadObject<UTexture2D>(nullptr, Fallback) : nullptr;
+	}
+
+	/** Artwork stem shipped for each chain: /Game/Day/Art/food/food_<stem>_V<level>. */
+	FName DefaultDishArtStem(const FName IngredientId)
+	{
+		if (IngredientId == DayLingGuId) return TEXT("rice");
+		if (IngredientId == DayYinShanJunId) return TEXT("egg");
+		if (IngredientId == DayChiYanJiaoId) return TEXT("hand");
+		if (IngredientId == DayYueLinYuId) return TEXT("fish");
+		if (IngredientId == DayXuanYuQinId) return TEXT("leg");
+		return NAME_None;
+	}
+
+	UTexture2D* LoadDishIconByName(const FName AssetName)
+	{
+		// A merge refreshes every cell, so an uncached miss would hit the package loader
+		// once per cell. Misses are remembered too, or an unauthored level logs every refresh.
+		static TMap<FName, TWeakObjectPtr<UTexture2D>> IconCache;
+		static TSet<FName> MissingIcons;
+		if (MissingIcons.Contains(AssetName))
+		{
+			return nullptr;
+		}
+		if (const TWeakObjectPtr<UTexture2D>* Cached = IconCache.Find(AssetName))
+		{
+			if (Cached->IsValid())
+			{
+				return Cached->Get();
+			}
+		}
+
+		const FString Name = AssetName.ToString();
+		UTexture2D* Loaded = LoadObject<UTexture2D>(
+			nullptr,
+			*FString::Printf(TEXT("/Game/Day/Art/food/%s.%s"), *Name, *Name));
+		if (Loaded)
+		{
+			IconCache.Add(AssetName, Loaded);
+		}
+		else
+		{
+			MissingIcons.Add(AssetName);
+		}
+		return Loaded;
+	}
+
+	/** Config overrides win; otherwise the level resolves through the naming convention. */
+	UTexture2D* ResolveDishIcon(
+		const USDayBoardVisualConfig* Config,
+		const FName IngredientId,
+		const int32 Level)
+	{
+		const int32 ClampedLevel = FMath::Clamp(Level, 0, 4);
+
+		FName Stem = NAME_None;
+		if (Config)
+		{
+			if (const FSDayDishIconSet* Set = Config->DishIconOverrides.Find(IngredientId))
+			{
+				if (Set->LevelIcons.IsValidIndex(ClampedLevel))
+				{
+					if (UTexture2D* Override = Set->LevelIcons[ClampedLevel].LoadSynchronous())
+					{
+						return Override;
+					}
+				}
+			}
+			if (const FName* Mapped = Config->DishArtStemByIngredient.Find(IngredientId))
+			{
+				Stem = *Mapped;
+			}
+		}
+		if (Stem.IsNone())
+		{
+			Stem = DefaultDishArtStem(IngredientId);
+		}
+		if (Stem.IsNone())
+		{
+			return nullptr;
+		}
+
+		return LoadDishIconByName(
+			FName(*FString::Printf(TEXT("food_%s_V%d"), *Stem.ToString(), ClampedLevel)));
+	}
+
+	/** Local player view point; false before PIE has a controller so callers can skip the offset. */
+	bool GetViewPoint(const AActor* Context, FVector& OutLocation, FRotator& OutRotation)
+	{
+		const UWorld* World = Context ? Context->GetWorld() : nullptr;
+		APlayerController* PlayerController = World ? World->GetFirstPlayerController() : nullptr;
+		if (!PlayerController || !PlayerController->GetViewTarget())
+		{
+			return false;
+		}
+		PlayerController->GetPlayerViewPoint(OutLocation, OutRotation);
+		return true;
 	}
 
 	UTexture2D* ResolveCustomerPortrait(const FString& DisplayName)
@@ -933,6 +1075,14 @@ ASDayCellVisual::ASDayCellVisual()
 	PieceMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 32.0f));
 	PieceMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+#pragma region K2 moonyfli
+	PieceIcon = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PieceIcon"));
+	PieceIcon->SetupAttachment(Root);
+	PieceIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PieceIcon->SetCastShadow(false);
+	PieceIcon->SetVisibility(false);
+#pragma endregion K2 moonyfli
+
 	PieceLabel = CreateDefaultSubobject<UTextRenderComponent>(TEXT("PieceLabel"));
 	PieceLabel->SetupAttachment(Root);
 	PieceLabel->SetRelativeLocation(FVector(0.0f, 0.0f, 75.0f));
@@ -978,6 +1128,33 @@ void ASDayCellVisual::SetSeatedInWell(const bool bInSeated)
 	}
 	RefreshVisual();
 }
+
+void ASDayCellVisual::SetDishIconConfig(USDayBoardVisualConfig* InConfig)
+{
+	IconConfig = InConfig;
+
+	UStaticMesh* Mesh = InConfig ? InConfig->DishIconMesh.LoadSynchronous() : nullptr;
+	if (!Mesh)
+	{
+		Mesh = LoadBasicShape(TEXT("/Engine/BasicShapes/Plane.Plane"));
+	}
+	PieceIcon->SetStaticMesh(Mesh);
+
+	UMaterialInterface* Parent = InConfig ? InConfig->DishIconMaterial.LoadSynchronous() : nullptr;
+	if (!Parent)
+	{
+		Parent = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Game/Day/Materials/M_SDayDishIcon.M_SDayDishIcon"));
+	}
+	DishIconMaterial = Parent ? UMaterialInstanceDynamic::Create(Parent, this) : nullptr;
+	if (DishIconMaterial)
+	{
+		PieceIcon->SetMaterial(0, DishIconMaterial);
+	}
+
+	RefreshVisual();
+}
 #pragma endregion K2 moonyfli
 
 void ASDayCellVisual::SetLabelFont(UFont* InFont)
@@ -998,6 +1175,7 @@ void ASDayCellVisual::RefreshVisual()
 	{
 		PieceMesh->SetVisibility(false);
 		PieceLabel->SetVisibility(false);
+		PieceIcon->SetVisibility(false); //add by K2
 		return;
 	}
 
@@ -1006,6 +1184,7 @@ void ASDayCellVisual::RefreshVisual()
 	const bool bSelected = MergeBoard->GetActiveDragCellIndex() == CellIndex;
 	PieceMesh->SetVisibility(bHasPiece);
 	PieceLabel->SetVisibility(bHasPiece);
+	PieceIcon->SetVisibility(false); //add by K2
 	CellMesh->SetCustomDepthStencilValue(bSelected ? 2 : 1);
 	CellMesh->SetRenderCustomDepth(bSelected);
 	// The whitebox has no outline post-process, so the selection reads through tint and lift instead.
@@ -1038,6 +1217,44 @@ void ASDayCellVisual::RefreshVisual()
 
 	const FLinearColor PieceColor = IngredientColor(Piece.IngredientId);
 	ApplyTint(PieceMesh, bSelected ? PieceColor * 1.8f + FLinearColor(0.15f, 0.15f, 0.05f, 0.0f) : PieceColor);
+
+#pragma region K2 moonyfli
+	// The pan art wants plated food, not tinted spheres. The sphere stays as the whitebox
+	// fallback and keeps carrying the selection lift the smoke test reads, so it is hidden
+	// rather than removed once artwork resolves.
+	USDayBoardVisualConfig* Config = IconConfig.Get();
+	UTexture2D* DishIcon = (!Config || Config->bUseDishIcons)
+		? ResolveDishIcon(Config, Piece.IngredientId, Piece.Level)
+		: nullptr;
+	if (DishIcon && DishIconMaterial)
+	{
+		const FSDayDishIconTuneRow Tune = ResolveDishIconTune(Config);
+		const FName TextureParameter = Config ? Config->DishIconTextureParameter : FName(TEXT("Tex"));
+
+		// The engine plane is 100cm across, so the quad size is the scale in centimetres.
+		const float IconSize = Tune.WorldSize
+			* (1.0f + Tune.ScalePerLevel * static_cast<float>(Piece.Level))
+			* (bSelected ? Tune.SelectedScale : 1.0f);
+		DishIconMaterial->SetTextureParameterValue(TextureParameter, DishIcon);
+		PieceIcon->SetRelativeScale3D(FVector(IconSize / 100.0f));
+		PieceIcon->SetRelativeRotation(FRotator(0.0f, Tune.Yaw, 0.0f));
+		PieceIcon->SetRelativeLocation(Tune.LocalOffset);
+		// Pushing along the cell normal slides the dish across the screen because the wells are
+		// tilted. The day camera is orthographic, so moving straight back along the view axis
+		// clears the pan art without changing where the dish lands in frame.
+		const float Push = Tune.CameraPush + (bSelected ? Tune.SelectedLift : 0.0f);
+		FVector ViewLocation = FVector::ZeroVector;
+		FRotator ViewRotation = FRotator::ZeroRotator;
+		if (Push > KINDA_SMALL_NUMBER && GetViewPoint(this, ViewLocation, ViewRotation))
+		{
+			PieceIcon->AddWorldOffset(-ViewRotation.Vector() * Push);
+		}
+		PieceIcon->SetVisibility(true);
+		PieceMesh->SetVisibility(false);
+		PieceLabel->SetVisibility(Config && Config->bShowPieceLabelWithIcon);
+	}
+#pragma endregion K2 moonyfli
+
 	PieceLabel->SetRelativeLocation(FVector(0.0f, 0.0f, bSelected ? 108.0f : 75.0f));
 	// Ink instead of white/amber: the board and the highlight tint are both pale.
 	PieceLabel->SetTextRenderColor(LabelInkColor());
@@ -1069,6 +1286,13 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	IngredientIcon->bIsScreenSizeScaled = false;
 	IngredientIcon->SetHiddenInGame(false);
 	IngredientIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	const FSDayIngredientBinIconTune DefaultIconTune;
+	IngredientIconTunes.Add(DayLingGuId, DefaultIconTune);
+	IngredientIconTunes.Add(DayYinShanJunId, DefaultIconTune);
+	IngredientIconTunes.Add(DayChiYanJiaoId, DefaultIconTune);
+	IngredientIconTunes.Add(DayYueLinYuId, DefaultIconTune);
+	IngredientIconTunes.Add(DayXuanYuQinId, DefaultIconTune);
 #pragma endregion K2 moonyfli
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
@@ -1099,9 +1323,19 @@ void ASDayIngredientBinVisual::Configure(const FName InIngredientId, const FStri
 void ASDayIngredientBinVisual::SetIngredientIcon(UTexture2D* InTexture)
 {
 	IngredientIcon->SetSprite(InTexture);
-	IngredientIcon->SetRelativeScale3D(FVector(0.85f));
 	IngredientIcon->SetHiddenInGame(false);
 	IngredientIcon->SetVisibility(InTexture != nullptr);
+}
+
+void ASDayIngredientBinVisual::ApplyIngredientIconLayout(const float BinHalfHeight)
+{
+	const FSDayIngredientBinIconTune DefaultTune;
+	const FSDayIngredientBinIconTune* AuthoredTune = IngredientIconTunes.Find(IngredientId);
+	const FSDayIngredientBinIconTune& Tune = AuthoredTune ? *AuthoredTune : DefaultTune;
+
+	IngredientIcon->SetRelativeScale3D(FVector(FMath::Max(Tune.Scale, 0.01f)));
+	IngredientIcon->SetRelativeLocation(
+		Tune.OffsetFromBinTop + FVector(0.0f, 0.0f, FMath::Max(BinHalfHeight, 0.0f)));
 }
 #pragma endregion K2 moonyfli
 
@@ -1117,24 +1351,35 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
+	VisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VisualRoot"));
+	VisualRoot->SetupAttachment(Root);
+
 	CharacterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CharacterMesh"));
-	CharacterMesh->SetupAttachment(Root);
+	CharacterMesh->SetupAttachment(VisualRoot);
 	CharacterMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CharacterMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	CharacterMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
 #pragma region K2 moonyfli
 	Portrait = CreateDefaultSubobject<UBillboardComponent>(TEXT("Portrait"));
-	Portrait->SetupAttachment(Root);
+	Portrait->SetupAttachment(VisualRoot);
 	Portrait->SetRelativeLocation(FVector(0.0f, 0.0f, 92.0f));
 	Portrait->bIsScreenSizeScaled = false;
 	Portrait->SetHiddenInGame(false);
 	Portrait->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Portrait->SetVisibility(false);
+
+	EatEffectAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("EatEffectAnchor"));
+	EatEffectAnchor->SetupAttachment(VisualRoot);
+	EatEffectAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, 180.0f));
+
+	GiftEffectAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("GiftEffectAnchor"));
+	GiftEffectAnchor->SetupAttachment(VisualRoot);
+	GiftEffectAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, 260.0f));
 #pragma endregion K2 moonyfli
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
-	Label->SetupAttachment(Root);
+	Label->SetupAttachment(VisualRoot);
 	// -Y is screen-down under the portrait camera; the seats hug the top edge, so the
 	// name plate goes underneath them where there is empty space.
 	Label->SetRelativeLocation(FVector(0.0f, -120.0f, 150.0f));
@@ -1143,6 +1388,37 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 	Label->SetVerticalAlignment(EVRTA_TextCenter);
 	Label->SetWorldSize(24.0f);
 }
+
+#pragma region K2 moonyfli
+void ASDayCharacterStandIn::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	if (!bSceneAuthoredSeat)
+	{
+		return;
+	}
+
+	Tags.AddUnique(TEXT("SDay.Seat"));
+	const UWorld* World = GetWorld();
+	if (bShowEditorPreview && (!World || !World->IsGameWorld()))
+	{
+		SetPortrait(EditorPreviewPortrait.LoadSynchronous());
+		CharacterMesh->SetVisibility(false);
+		Label->SetVisibility(false);
+	}
+}
+
+void ASDayCharacterStandIn::BeginPlay()
+{
+	Super::BeginPlay();
+	if (bSceneAuthoredSeat)
+	{
+		SetPortrait(nullptr);
+		PresentedOccupantKey.Reset();
+	}
+}
+#pragma endregion K2 moonyfli
 
 void ASDayCharacterStandIn::Configure(const FString& InLabel, const FLinearColor& InColor)
 {
@@ -1167,9 +1443,57 @@ void ASDayCharacterStandIn::Configure(const FString& InLabel, const FLinearColor
 void ASDayCharacterStandIn::SetPortrait(UTexture2D* InTexture)
 {
 	Portrait->SetSprite(InTexture);
-	Portrait->SetRelativeScale3D(FVector(DayPortraitSpriteScale(InTexture)));
+	Portrait->SetRelativeScale3D(FVector(DayPortraitSpriteScale(InTexture, PortraitWorldHeight)));
+
+	// Each portrait pads its canvas differently, so the seat lands the painted feet, not the
+	// image border. Seats are authored upright, so their local -Z is the counter direction.
+	const float BottomPadding = DayPortraitBottomPadding(InTexture);
+	Portrait->SetRelativeLocation(
+		PortraitLocalOffset - FVector(0.0f, 0.0f, BottomPadding * PortraitWorldHeight));
 	Portrait->SetHiddenInGame(false);
 	Portrait->SetVisibility(InTexture != nullptr);
+}
+
+void ASDayCharacterStandIn::SetSceneSeatEnabled(const bool bEnabled)
+{
+	bDeliveryTarget = bEnabled;
+	SetActorHiddenInGame(!bEnabled);
+	SetActorEnableCollision(bEnabled);
+	if (!bEnabled)
+	{
+		bOccupied = false;
+		NpcId = NAME_None;
+		CustomerId.Reset();
+		SetPortrait(nullptr);
+		NotifySeatVacated();
+	}
+}
+
+void ASDayCharacterStandIn::NotifySeatOccupied(
+	const FString& OccupantKey,
+	const bool bSpecialNpc)
+{
+	if (PresentedOccupantKey == OccupantKey)
+	{
+		return;
+	}
+	PresentedOccupantKey = OccupantKey;
+	OnSeatOccupied(OccupantKey, bSpecialNpc);
+}
+
+void ASDayCharacterStandIn::NotifySeatVacated()
+{
+	if (PresentedOccupantKey.IsEmpty())
+	{
+		return;
+	}
+	PresentedOccupantKey.Reset();
+	OnSeatVacated();
+}
+
+void ASDayCharacterStandIn::NotifyServeSucceeded(const bool bSpecialNpc)
+{
+	OnServeSucceeded(bSpecialNpc);
 }
 #pragma endregion K2 moonyfli
 
@@ -1522,6 +1846,7 @@ void ASDayBoardPresenter::BuildCells()
 			}
 		}
 		Visual->SetLabelFont(ResolveLabelFont());
+		Visual->SetDishIconConfig(Config); //add by K2
 		Visual->Configure(Row.CellIndex, Row.VisualRadius, LogicBoard.Get());
 #pragma region K2 moonyfli
 		// The art mesh owns the visible holes; keep the logical trace surface but remove
@@ -1597,8 +1922,7 @@ void ASDayBoardPresenter::BuildBins()
 		Bin->Configure(Ids[Index], IngredientShortName(this, Ids[Index]));
 #pragma region K2 moonyfli
 		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
-#pragma endregion K2 moonyfli
-#pragma region K2 moonyfli
+		float IconBinHalfHeight = 35.0f;
 		if (ArtBin.IsValid())
 		{
 			// The imported box supplies the visible geometry. This hidden cube is sized to
@@ -1606,12 +1930,91 @@ void ASDayBoardPresenter::BuildBins()
 			Bin->BinMesh->SetRelativeScale3D(ArtBinExtent / 50.0f);
 			Bin->BinMesh->SetVisibility(false);
 			Bin->Label->SetRelativeLocation(FVector(0.0f, 0.0f, ArtBinExtent.Z + 30.0f));
-			Bin->IngredientIcon->SetRelativeLocation(
-				FVector(0.0f, -75.0f, ArtBinExtent.Z + 45.0f));
+			IconBinHalfHeight = ArtBinExtent.Z;
 		}
+		Bin->ApplyIngredientIconLayout(IconBinHalfHeight);
 #pragma endregion K2 moonyfli
 		IngredientBins.Add(Bin);
 	}
+}
+
+bool ASDayBoardPresenter::TryBindSceneAuthoredSeats(const int32 DesiredSeatCount)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	TArray<ASDayCharacterStandIn*> AuthoredSeats;
+	for (TActorIterator<ASDayCharacterStandIn> It(World); It; ++It)
+	{
+		ASDayCharacterStandIn* Seat = *It;
+		if (Seat && Seat->bSceneAuthoredSeat)
+		{
+			AuthoredSeats.Add(Seat);
+		}
+	}
+
+	AuthoredSeats.Sort([](const ASDayCharacterStandIn& A, const ASDayCharacterStandIn& B)
+	{
+		return A.AuthoredSeatSlot < B.AuthoredSeatSlot;
+	});
+
+	if (AuthoredSeats.Num() < DesiredSeatCount)
+	{
+		for (ASDayCharacterStandIn* Seat : AuthoredSeats)
+		{
+			Seat->SetSceneSeatEnabled(false);
+		}
+		if (!AuthoredSeats.IsEmpty())
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Day scene has %d authored seats but gameplay needs %d; using runtime fallback."),
+				AuthoredSeats.Num(),
+				DesiredSeatCount);
+		}
+		return false;
+	}
+
+	bUsingSceneAuthoredSeats = true;
+	CharacterStandIns = AuthoredSeats;
+	const bool bUseDayArt = FindDayArtPiece(World, DayArtBoardTag).IsValid();
+	for (int32 Index = 0; Index < CharacterStandIns.Num(); ++Index)
+	{
+		ASDayCharacterStandIn* Seat = CharacterStandIns[Index];
+		if (!Seat)
+		{
+			continue;
+		}
+
+		const bool bEnabled = Index < DesiredSeatCount;
+		Seat->SeatIndex = bEnabled ? Index : INDEX_NONE;
+		Seat->SetSceneSeatEnabled(bEnabled);
+		if (!bEnabled)
+		{
+			continue;
+		}
+
+		Seat->SetLabelFont(ResolveLabelFont());
+		Seat->Configure(TEXT("空座"), FLinearColor(0.95f, 0.75f, 0.65f));
+		Seat->CharacterMesh->SetVisibility(!bUseDayArt);
+		Seat->Label->SetVisibility(!bUseDayArt);
+		if (bUseDayArt)
+		{
+			Seat->CharacterMesh->SetRelativeScale3D(DayArtSeatProxyScale);
+		}
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("Bound %d/%d scene-authored Day customer seats."),
+		DesiredSeatCount,
+		AuthoredSeats.Num());
+	return true;
 }
 
 void ASDayBoardPresenter::BuildCharacters()
@@ -1636,6 +2039,12 @@ void ASDayBoardPresenter::BuildCharacters()
 		DeliverySeatCount = GameInstance->GetServiceSeatCount();
 	}
 	DeliverySeatCount = FMath::Clamp(DeliverySeatCount, 1, 6);
+	bUsingSceneAuthoredSeats = false;
+	if (TryBindSceneAuthoredSeats(DeliverySeatCount))
+	{
+		RefreshCharacters();
+		return;
+	}
 	const bool bUseDayArt = FindDayArtPiece(World, DayArtBoardTag).IsValid(); //add by K2
 
 	TArray<FString> Labels;
@@ -1783,6 +2192,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 			Seat->CustomerId = Customer.CustomerId;
 			Seat->bOccupied = true;
 			Seat->SetPortrait(ResolveCustomerPortrait(Customer.DisplayName));
+			Seat->NotifySeatOccupied(Customer.CustomerId, false);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -1814,6 +2224,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 			Seat->NpcId = SeatedNpc.NpcId;
 			Seat->bOccupied = true;
 			Seat->SetPortrait(ResolveSpecialNpcPortrait(SeatedNpc.NpcId));
+			Seat->NotifySeatOccupied(SeatedNpc.NpcId.ToString(), true);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -1827,6 +2238,7 @@ void ASDayBoardPresenter::RefreshCharacters()
 		}
 
 		ApplyTint(Seat->CharacterMesh, FLinearColor(0.55f, 0.53f, 0.50f));
+		Seat->NotifySeatVacated();
 		const float Cooldown = CustomerDirector
 			? CustomerDirector->GetSeatCooldownRemaining(SeatIndex)
 			: 0.0f;
@@ -1839,7 +2251,10 @@ void ASDayBoardPresenter::RefreshCharacters()
 #pragma region K2 moonyfli
 	// Occupancy and portraits are settled now, so the free (invisible) seats can move onto the
 	// plates nobody uses; whichever plate a seat holds is where its next customer shows up.
-	PlaceDayArtSeats(GetWorld(), Seats);
+	if (!bUsingSceneAuthoredSeats)
+	{
+		PlaceDayArtSeats(GetWorld(), Seats);
+	}
 #pragma endregion K2 moonyfli
 }
 
@@ -1859,16 +2274,26 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 	{
 		if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
 		{
-			return Director->TryDeliverFromCellToCustomer(
+			const bool bDelivered = Director->TryDeliverFromCellToCustomer(
 				Board->GetActiveDragCellIndex(),
 				Character->CustomerId);
+			if (bDelivered)
+			{
+				Character->NotifyServeSucceeded(false);
+			}
+			return bDelivered;
 		}
 		return false;
 	}
 
 	if (ASSpecialNpcDirector* Director = ASSpecialNpcDirector::FindDirector(this))
 	{
-		return Director->TryDeliverToNpc(Character->NpcId);
+		const bool bDelivered = Director->TryDeliverToNpc(Character->NpcId);
+		if (bDelivered)
+		{
+			Character->NotifyServeSucceeded(true);
+		}
+		return bDelivered;
 	}
 	return false;
 }
@@ -1896,11 +2321,14 @@ void ASDayBoardPresenter::RefreshFromLogic()
 	DesiredSeats = FMath::Clamp(DesiredSeats, 1, 6);
 	if (GetDeliverySeatCount() != DesiredSeats)
 	{
-		for (ASDayCharacterStandIn* Character : CharacterStandIns)
+		if (!bUsingSceneAuthoredSeats)
 		{
-			if (Character)
+			for (ASDayCharacterStandIn* Character : CharacterStandIns)
 			{
-				Character->Destroy();
+				if (Character && !Character->bSceneAuthoredSeat)
+				{
+					Character->Destroy();
+				}
 			}
 		}
 		CharacterStandIns.Reset();
@@ -1992,6 +2420,150 @@ ASDayIngredientBinVisual* ASDayBoardPresenter::GetIngredientBin(const FName Ingr
 	}
 	return nullptr;
 }
+
+#pragma region K2 moonyfli
+namespace
+{
+	UAnimSequenceBase* LoadIngredientBinAnimation(const int32 BinIndex)
+	{
+		const FString AnimationPath = FString::Printf(
+			TEXT("/Game/Day/Art/canguan/animation/box%d_Anim.box%d_Anim"),
+			BinIndex + 1,
+			BinIndex + 1);
+		return LoadObject<UAnimSequenceBase>(nullptr, *AnimationPath);
+	}
+
+	// Speed is authored outside this class: the component PlayRate drives the single node
+	// instance and the engine multiplies the sequence RateScale on top of it.
+	float GetIngredientBinBaseRate(const USkeletalMeshComponent& AnimatedBox)
+	{
+		const float AuthoredRate = FMath::Abs(AnimatedBox.AnimationData.SavedPlayRate);
+		return AuthoredRate > UE_KINDA_SMALL_NUMBER ? AuthoredRate : 1.0f;
+	}
+
+	/** Returns 0 when the effective rate cannot advance the sequence, meaning it never reaches an end. */
+	float GetIngredientBinPlaySeconds(const USkeletalMeshComponent& AnimatedBox, const UAnimSequenceBase& Animation)
+	{
+		const float EffectiveRate = GetIngredientBinBaseRate(AnimatedBox) * FMath::Abs(Animation.RateScale);
+		return EffectiveRate > UE_KINDA_SMALL_NUMBER ? Animation.GetPlayLength() / EffectiveRate : 0.0f;
+	}
+}
+
+USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(const int32 BinIndex) const
+{
+	const UWorld* World = GetWorld();
+	if (!World || BinIndex < 0)
+	{
+		return nullptr;
+	}
+
+	const FName ComponentName(*FString::Printf(TEXT("BoxAnim_%d"), BinIndex));
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Environment = *It;
+		if (!Environment || !Environment->ActorHasTag(DayArtEnvironmentTag))
+		{
+			continue;
+		}
+
+		TInlineComponentArray<USkeletalMeshComponent*> AnimatedBoxes;
+		Environment->GetComponents(AnimatedBoxes);
+		for (USkeletalMeshComponent* AnimatedBox : AnimatedBoxes)
+		{
+			if (AnimatedBox && AnimatedBox->GetFName() == ComponentName)
+			{
+				return AnimatedBox;
+			}
+		}
+	}
+	return nullptr;
+}
+
+void ASDayBoardPresenter::PlayIngredientBinAnimation(const FName IngredientId)
+{
+	const TArray<FName> IngredientIds = {
+		DayLingGuId,
+		DayYinShanJunId,
+		DayChiYanJiaoId,
+		DayYueLinYuId,
+		DayXuanYuQinId
+	};
+	const int32 BinIndex = IngredientIds.IndexOfByKey(IngredientId);
+	if (BinIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UAnimSequenceBase* Animation = LoadIngredientBinAnimation(BinIndex);
+	USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex);
+	if (!Animation || !AnimatedBox)
+	{
+		return;
+	}
+
+	if (FTimerHandle* PendingTimer = BinAnimTimers.Find(BinIndex))
+	{
+		World->GetTimerManager().ClearTimer(*PendingTimer);
+	}
+
+	AnimatedBox->SetAnimation(Animation);
+	AnimatedBox->SetPlayRate(GetIngredientBinBaseRate(*AnimatedBox));
+	AnimatedBox->SetPosition(0.0f, false);
+	AnimatedBox->Play(false);
+
+	const float OpenSeconds = GetIngredientBinPlaySeconds(*AnimatedBox, *Animation);
+	if (!bBinAnimAutoClose || OpenSeconds <= 0.0f)
+	{
+		return;
+	}
+
+	const float CloseDelay = FMath::Max(OpenSeconds + BinAnimHoldSeconds, UE_KINDA_SMALL_NUMBER);
+	FTimerDelegate CloseDelegate = FTimerDelegate::CreateUObject(this, &ASDayBoardPresenter::CloseIngredientBinAnimation, BinIndex);
+	World->GetTimerManager().SetTimer(BinAnimTimers.FindOrAdd(BinIndex), CloseDelegate, CloseDelay, false);
+}
+
+void ASDayBoardPresenter::CloseIngredientBinAnimation(const int32 BinIndex)
+{
+	UWorld* World = GetWorld();
+	USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex);
+	if (!World || !AnimatedBox)
+	{
+		return;
+	}
+
+	const UAnimSequenceBase* Animation = LoadIngredientBinAnimation(BinIndex);
+	if (!Animation)
+	{
+		return;
+	}
+
+	// A negative play rate rewinds the single-node instance, so the lid closes with the same art.
+	AnimatedBox->SetPosition(Animation->GetPlayLength(), false);
+	AnimatedBox->SetPlayRate(-GetIngredientBinBaseRate(*AnimatedBox));
+	AnimatedBox->Play(false);
+
+	const float CloseSeconds = FMath::Max(GetIngredientBinPlaySeconds(*AnimatedBox, *Animation), UE_KINDA_SMALL_NUMBER);
+	FTimerDelegate RestDelegate = FTimerDelegate::CreateUObject(this, &ASDayBoardPresenter::RestIngredientBinAnimation, BinIndex);
+	World->GetTimerManager().SetTimer(BinAnimTimers.FindOrAdd(BinIndex), RestDelegate, CloseSeconds, false);
+}
+
+void ASDayBoardPresenter::RestIngredientBinAnimation(const int32 BinIndex)
+{
+	if (USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex))
+	{
+		AnimatedBox->Stop();
+		AnimatedBox->SetPlayRate(GetIngredientBinBaseRate(*AnimatedBox));
+		AnimatedBox->SetPosition(0.0f, false);
+	}
+	BinAnimTimers.Remove(BinIndex);
+}
+#pragma endregion K2 moonyfli
 
 bool ASDayBoardPresenter::IsInIngredientDropZone(const FVector2D& ScreenPosition) const
 {
@@ -2121,7 +2693,12 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 
 	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitTest(ScreenPosition)))
 	{
-		Board->TrySpawnFromMotherPiece(Bin->IngredientId);
+#pragma region K2 moonyfli
+		if (Board->TrySpawnFromMotherPiece(Bin->IngredientId))
+		{
+			PlayIngredientBinAnimation(Bin->IngredientId);
+		}
+#pragma endregion K2 moonyfli
 		RefreshFromLogic();
 		return;
 	}
@@ -2245,6 +2822,51 @@ void USDayHUD::BuildWidgetTree()
 	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	SafeZone->AddChild(Root);
 
+#pragma region K2 moonyfli
+	UHorizontalBox* ToggleRow = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(),
+		TEXT("DayHudChromeRow"));
+	ToggleRow->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	Root->AddChildToVerticalBox(ToggleRow)->SetPadding(FMargin(8.0f, 6.0f, 8.0f, 0.0f));
+
+	USizeBox* ToggleSpacer = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(),
+		TEXT("DayHudChromeSpacer"));
+	ToggleSpacer->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ToggleRow->AddChildToHorizontalBox(ToggleSpacer)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+
+	// Tiny, almost invisible hit target in the top-right. It stays after the HUD chrome is hidden.
+	USizeBox* ToggleBox = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(),
+		TEXT("DayHudChromeSize"));
+	ToggleBox->SetWidthOverride(28.0f);
+	ToggleBox->SetHeightOverride(28.0f);
+	ToggleRow->AddChildToHorizontalBox(ToggleBox);
+
+	ChromeToggle = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("DayHudChromeSwitch"));
+	ChromeToggle->SetIsChecked(true);
+	ChromeToggle->SetToolTipText(FText::FromString(TEXT("显示/隐藏运行时控制信息和按钮")));
+	FCheckBoxStyle ToggleStyle = ChromeToggle->GetWidgetStyle();
+	const FLinearColor HiddenTint(1.0f, 1.0f, 1.0f, 0.0f);
+	ToggleStyle.UncheckedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UncheckedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UncheckedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.CheckedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedHoveredImage.TintColor = FSlateColor(HiddenTint);
+	ToggleStyle.UndeterminedPressedImage.TintColor = FSlateColor(HiddenTint);
+	ChromeToggle->SetWidgetStyle(ToggleStyle);
+	ToggleBox->AddChild(ChromeToggle);
+	ChromeToggle->OnCheckStateChanged.AddDynamic(this, &USDayHUD::HandleChromeVisibilityChanged);
+
+	ControlsHost = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DayHUDControls"));
+	ControlsHost->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	UVerticalBoxSlot* ControlsSlot = Root->AddChildToVerticalBox(ControlsHost);
+	ControlsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+#pragma endregion K2 moonyfli
+
 	auto MakeText = [this](const TCHAR* Name, const int32 Size, const FLinearColor& Color)
 	{
 		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
@@ -2292,13 +2914,13 @@ void USDayHUD::BuildWidgetTree()
 #pragma endregion K2 moonyfli
 
 	PhaseText = MakeText(TEXT("PhaseText"), 24, FLinearColor(0.10f, 0.95f, 0.75f));
-	Root->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
 
 	OrderText = MakeText(TEXT("DayOrderText"), 20, FLinearColor(0.98f, 0.90f, 0.42f));
-	Root->AddChildToVerticalBox(OrderText)->SetPadding(FMargin(18.0f, 2.0f, 18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(OrderText)->SetPadding(FMargin(18.0f, 2.0f, 18.0f, 4.0f));
 
 	UHorizontalBox* Orders = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("OrderRow"));
-	Root->AddChildToVerticalBox(Orders)->SetPadding(FMargin(12.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(Orders)->SetPadding(FMargin(12.0f, 4.0f));
 	CustomerButton = MakeButton(TEXT("DayCustomerButton"), TEXT("普通顾客"));
 	ALingButton = MakeButton(TEXT("DayALingButton"), TEXT("阿翎"));
 	SangPoButton = MakeButton(TEXT("DaySangPoButton"), TEXT("桑婆"));
@@ -2312,18 +2934,18 @@ void USDayHUD::BuildWidgetTree()
 	USizeBox* WorldSpacer = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("WorldBoardInputSpace"));
 	WorldSpacer->SetHeightOverride(680.0f);
 	WorldSpacer->SetVisibility(ESlateVisibility::HitTestInvisible);
-	UVerticalBoxSlot* SpacerSlot = Root->AddChildToVerticalBox(WorldSpacer);
+	UVerticalBoxSlot* SpacerSlot = ControlsHost->AddChildToVerticalBox(WorldSpacer);
 	SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 	FeedbackText = MakeText(TEXT("DayFeedbackText"), 20, FLinearColor(1.0f, 0.82f, 0.20f));
-	Root->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(FeedbackText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	InventoryText = MakeText(TEXT("DayInventoryText"), 20, FLinearColor::White);
-	Root->AddChildToVerticalBox(InventoryText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(InventoryText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	UWrapBox* Ingredients = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("IngredientRow"));
 	Ingredients->SetInnerSlotPadding(FVector2D(4.0f, 4.0f));
-	Root->AddChildToVerticalBox(Ingredients)->SetPadding(FMargin(12.0f, 2.0f));
+	ControlsHost->AddChildToVerticalBox(Ingredients)->SetPadding(FMargin(12.0f, 2.0f));
 	UButton* LingGu = MakeIngredientButton(TEXT("DayLingGuButton"), TEXT("灵谷"), DayLingGuId);
 	UButton* Yin = MakeIngredientButton(TEXT("DayYinShanJunButton"), TEXT("阴山菌"), DayYinShanJunId);
 	UButton* Chi = MakeIngredientButton(TEXT("DayChiYanJiaoButton"), TEXT("赤焰椒"), DayChiYanJiaoId);
@@ -2341,10 +2963,10 @@ void USDayHUD::BuildWidgetTree()
 	Xuan->OnClicked.AddDynamic(this, &USDayHUD::HandleXuanYuQin);
 
 	GiftTabText = MakeText(TEXT("DayGiftTabText"), 18, FLinearColor(0.72f, 0.88f, 1.0f));
-	Root->AddChildToVerticalBox(GiftTabText)->SetPadding(FMargin(18.0f, 4.0f));
+	ControlsHost->AddChildToVerticalBox(GiftTabText)->SetPadding(FMargin(18.0f, 4.0f));
 
 	UHorizontalBox* Flow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FlowRow"));
-	Root->AddChildToVerticalBox(Flow)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
+	ControlsHost->AddChildToVerticalBox(Flow)->SetPadding(FMargin(12.0f, 2.0f, 12.0f, 10.0f));
 	FlowButton = MakeButton(TEXT("DayFlowButton"), TEXT("入夜"));
 	Flow->AddChildToHorizontalBox(FlowButton)->SetPadding(FMargin(4.0f));
 	FlowButton->OnClicked.AddDynamic(this, &USDayHUD::HandleFlowButton);
@@ -2519,6 +3141,25 @@ void USDayHUD::HandleFlowButton()
 }
 
 #pragma region K2 moonyfli
+void USDayHUD::HandleChromeVisibilityChanged(const bool bIsChecked)
+{
+	ApplyChromeVisibility(bIsChecked);
+}
+
+void USDayHUD::ApplyChromeVisibility(const bool bShow)
+{
+	if (ControlsHost)
+	{
+		ControlsHost->SetVisibility(
+			bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+
+	if (!bShow && CheatPanel)
+	{
+		CheatPanel->SetPanelVisible(false);
+	}
+}
+
 void USDayHUD::HandleToggleCheatPanel()
 {
 #if UE_BUILD_SHIPPING

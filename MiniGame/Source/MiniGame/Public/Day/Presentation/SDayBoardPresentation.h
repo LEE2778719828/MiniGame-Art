@@ -11,12 +11,16 @@ class ASMergeBoard;
 class UBillboardComponent;
 class UBorder;
 class UButton;
+class UCheckBox; //add by K2
 class UCanvasPanelSlot;
 class UCameraComponent;
 class UDirectionalLightComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class USkeletalMeshComponent; //add by K2
 class USkyLightComponent;
 class UFont;
+class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTextBlock;
@@ -25,6 +29,7 @@ class UTexture2D;
 class USChefGameInstance;
 class UScrollBox;
 class USizeBox;
+class UVerticalBox; //add by K2
 
 #pragma region K2 moonyfli
 
@@ -41,6 +46,70 @@ struct MINIGAME_API FSDayBoardLayoutRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float VisualRadius = 85.0f;
+};
+
+/** Per-ingredient placement for the icon floating above an authored ingredient bin. */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayIngredientBinIconTune
+{
+	GENERATED_BODY()
+
+	/** World-space billboard scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.01"))
+	float Scale = 0.85f;
+
+	/** Local offset measured from the top centre of the authored bin bounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FVector OffsetFromBinTop = FVector(0.0f, -75.0f, 45.0f);
+};
+
+/** DT_SDayDishIconTune single row Default: plated-food size and clearance. */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayDishIconTuneRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	/** Width in centimetres of a Lv0 dish quad, including the transparent margin of the art. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "1.0"))
+	float WorldSize = 180.0f;
+
+	/** Added per merge level, as a fraction of the Lv0 size. Art carries the real change. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.0"))
+	float ScalePerLevel = 0.12f;
+
+	/** Enlargement while the piece is picked up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "1.0"))
+	float SelectedScale = 1.18f;
+
+	/** Spin of the artwork within the well plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	float Yaw = 0.0f;
+
+	/** Cell-local nudge inside the well plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	FVector LocalOffset = FVector::ZeroVector;
+
+	/**
+	 * Centimetres to move the quad towards the camera. The whitebox cells sit well behind the
+	 * pan art, so without this only the leading edge of the dish clears it. Pushing along the
+	 * view axis keeps the dish where the well is on screen, since the day camera is orthographic.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.0"))
+	float CameraPush = 104.0f;
+
+	/** Extra push towards the camera while the piece is picked up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	float SelectedLift = 14.0f;
+};
+
+/** Per-level artwork for one ingredient chain; index 0 is the Lv0 dish. */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayDishIconSet
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
+	TArray<TSoftObjectPtr<UTexture2D>> LevelIcons;
 };
 
 UCLASS(BlueprintType)
@@ -97,6 +166,44 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
 	TSubclassOf<class ASDayCharacterStandIn> CharacterStandInClass;
+
+#pragma region K2 moonyfli
+	/** Plate the food artwork instead of the tinted whitebox sphere. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	bool bUseDishIcons = true;
+
+	/**
+	 * Quad the artwork is drawn on. It lies in the well plane rather than facing the camera:
+	 * the pan is nearly face-on, so a camera-facing sprite is almost coplanar with it and all
+	 * but a sliver of the dish ends up buried in the pan. Defaults to the engine plane.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	TSoftObjectPtr<UStaticMesh> DishIconMesh;
+
+	/** Unlit texture material; defaults to the cookingUI layer material. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	TSoftObjectPtr<UMaterialInterface> DishIconMaterial;
+
+	/** Texture parameter the artwork is pushed into on DishIconMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	FName DishIconTextureParameter = TEXT("Tex");
+
+	/** Size and clearance; row Default. Defaults to /Game/Day/Data/DT_SDayDishIconTune. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	TSoftObjectPtr<UDataTable> DishIconTune;
+
+	/** Keeps the "灵 Lv1" debug text visible on top of the artwork. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	bool bShowPieceLabelWithIcon = false;
+
+	/** Ingredient id to artwork stem; LingGu -> rice resolves food_rice_V2 at level 2. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	TMap<FName, FName> DishArtStemByIngredient;
+
+	/** Explicit artwork per level; a set entry wins over the naming convention. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
+	TMap<FName, FSDayDishIconSet> DishIconOverrides;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -118,6 +225,9 @@ public:
 	 * projects on screen as the dish sliding out of its hole.
 	 */
 	void SetSeatedInWell(bool bInSeated);
+
+	/** Without a config the cell keeps the whitebox sphere, so this is optional. */
+	void SetDishIconConfig(USDayBoardVisualConfig* InConfig);
 #pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
@@ -135,9 +245,20 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> PieceLabel;
 
+#pragma region K2 moonyfli
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	TObjectPtr<UStaticMeshComponent> PieceIcon;
+#pragma endregion K2 moonyfli
+
 private:
 	TWeakObjectPtr<ASMergeBoard> Board;
 	float VisualRadius = 85.0f;
+#pragma region K2 moonyfli
+	TWeakObjectPtr<USDayBoardVisualConfig> IconConfig;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DishIconMaterial;
+#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -154,6 +275,11 @@ public:
 
 #pragma region K2 moonyfli
 	void SetIngredientIcon(UTexture2D* InTexture);
+	void ApplyIngredientIconLayout(float BinHalfHeight);
+
+	/** Independent icon size and top-relative placement keyed by IngredientId. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "S Day Board|Ingredient Icon")
+	TMap<FName, FSDayIngredientBinIconTune> IngredientIconTunes;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
@@ -178,6 +304,8 @@ class MINIGAME_API ASDayCharacterStandIn : public AActor
 
 public:
 	ASDayCharacterStandIn();
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
 
 	void Configure(const FString& InLabel, const FLinearColor& InColor);
 
@@ -188,6 +316,41 @@ public:
 
 #pragma region K2 moonyfli
 	void SetPortrait(UTexture2D* InTexture);
+	void SetSceneSeatEnabled(bool bEnabled);
+	void NotifySeatOccupied(const FString& OccupantKey, bool bSpecialNpc);
+	void NotifySeatVacated();
+	void NotifyServeSucceeded(bool bSpecialNpc);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
+	void OnSeatOccupied(const FString& OccupantKey, bool bSpecialNpc);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
+	void OnSeatVacated();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
+	void OnServeSucceeded(bool bSpecialNpc);
+
+	/** Scene-authored seats are discovered instead of spawned and never repositioned at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat")
+	bool bSceneAuthoredSeat = false;
+
+	/** Stable logical slot, left-to-right. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat", meta = (ClampMin = "0", ClampMax = "5"))
+	int32 AuthoredSeatSlot = 0;
+
+	/** Visible only in editor worlds so artists can frame an empty seat without PIE. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat")
+	bool bShowEditorPreview = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat")
+	TSoftObjectPtr<UTexture2D> EditorPreviewPortrait;
+
+	/** Per-seat visual size; no code constant is needed for framing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat", meta = (ClampMin = "1.0"))
+	float PortraitWorldHeight = 330.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat")
+	FVector PortraitLocalOffset = FVector::ZeroVector;
 #pragma endregion K2 moonyfli
 
 	/** None while empty or taken by a walk-in guest; set to ALing/SangPo when an NPC sits down. */
@@ -214,12 +377,24 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UStaticMeshComponent> CharacterMesh;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
+	TObjectPtr<USceneComponent> VisualRoot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
+	TObjectPtr<USceneComponent> EatEffectAnchor;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
+	TObjectPtr<USceneComponent> GiftEffectAnchor;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> Label;
 
 #pragma region K2 moonyfli
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UBillboardComponent> Portrait;
+
+	UPROPERTY(Transient)
+	FString PresentedOccupantKey;
 #pragma endregion K2 moonyfli
 };
 
@@ -289,6 +464,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float PortraitOrthoWidth = 1100.0f;
 
+#pragma region K2 moonyfli
+	/**
+	 * Seconds the bin stays fully open before it starts closing.
+	 * Playback speed is not configured here: it comes from the BoxAnim component PlayRate
+	 * in BP_SDayCanguan multiplied by the RateScale of the box*_Anim sequence.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Bin Animation", meta = (ClampMin = "0.0"))
+	float BinAnimHoldSeconds = 0.15f;
+
+	/** When false the bin lid holds the last frame instead of closing itself. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Bin Animation")
+	bool bBinAnimAutoClose = true;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UCameraComponent> Camera;
 
@@ -309,9 +498,16 @@ private:
 	void BuildCells();
 	void BuildBins();
 	void BuildCharacters();
+	bool TryBindSceneAuthoredSeats(int32 DesiredSeatCount);
 	void RefreshCharacters();
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+#pragma region K2 moonyfli
+	void PlayIngredientBinAnimation(FName IngredientId);
+	void CloseIngredientBinAnimation(int32 BinIndex);
+	void RestIngredientBinAnimation(int32 BinIndex);
+	USkeletalMeshComponent* FindIngredientBinAnimComponent(int32 BinIndex) const;
+#pragma endregion K2 moonyfli
 	bool IsInIngredientDropZone(const FVector2D& ScreenPosition) const;
 	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
 	void HandlePointerPressed(const FVector2D& ScreenPosition);
@@ -331,6 +527,9 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
 
+	TMap<int32, FTimerHandle> BinAnimTimers; //add by K2
+
+	bool bUsingSceneAuthoredSeats = false; //add by K2
 	bool bPointerWasDown = false;
 	bool bUseExternalPointerDriver = false; //add by K2
 	bool bDropHandledOnPress = false;
@@ -381,6 +580,12 @@ private:
 	UFUNCTION()
 	void HandleFlowButton();
 
+#pragma region K2 moonyfli
+	UFUNCTION()
+	void HandleChromeVisibilityChanged(bool bIsChecked);
+	void ApplyChromeVisibility(bool bShow);
+#pragma endregion K2 moonyfli
+
 	void SpawnIngredient(FName IngredientId);
 	void DeliverNpc(FName NpcId);
 
@@ -411,6 +616,14 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UButton> FlowButton;
+
+#pragma region K2 moonyfli
+	UPROPERTY()
+	TObjectPtr<UCheckBox> ChromeToggle;
+
+	UPROPERTY()
+	TObjectPtr<UVerticalBox> ControlsHost;
+#pragma endregion K2 moonyfli
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */
 	FTimerHandle RefreshTimerHandle; //add by K2
