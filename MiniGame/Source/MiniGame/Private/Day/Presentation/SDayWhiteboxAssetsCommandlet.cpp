@@ -11,8 +11,8 @@
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "Factories/TrueTypeFontFactory.h"
 #include "Kismet2/KismetEditorUtilities.h"
-#include "Materials/Material.h" //add by K2
-#include "Materials/MaterialExpressionTextureSampleParameter2D.h" //add by K2
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
@@ -98,12 +98,7 @@ namespace
 		return WidgetBlueprint;
 	}
 
-#pragma region K2 moonyfli
-	/**
-	 * Unlit masked quad material for plated dishes. The food PNGs carry their silhouette in
-	 * alpha, so masking keeps the well readable without paying for translucent sorting against
-	 * the pan.
-	 */
+	/** Creates the unlit masked material used by plated-food textures. */
 	UMaterial* CreateDishIconMaterial()
 	{
 		const FString PackagePath(TEXT("/Game/Day/Materials/M_SDayDishIcon"));
@@ -134,10 +129,8 @@ namespace
 		Material->GetExpressionCollection().AddExpression(Sample);
 
 		UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
-		// Output pins are RGB, R, G, B, A, RGBA; alpha is index 4.
 		Data->EmissiveColor.Connect(0, Sample);
 		Data->OpacityMask.Connect(4, Sample);
-
 		Material->BlendMode = BLEND_Masked;
 		Material->SetShadingModel(MSM_Unlit);
 		Material->TwoSided = true;
@@ -147,7 +140,6 @@ namespace
 		SaveAsset(Material);
 		return Material;
 	}
-#pragma endregion K2 moonyfli
 
 	UMaterialInstanceConstant* CreatePlaceholderMaterial(
 		const FString& AssetName,
@@ -363,9 +355,21 @@ namespace
 		{
 			Config->CharacterStandInClass = CharacterBlueprint->GeneratedClass;
 		}
-#pragma region K2 moonyfli
-		// Written out so the mapping is visible and editable in the data asset; the same
-		// pairs live in code as the fallback for a config that never went through here.
+		Config->IngredientBinOutputs.Reset();
+		const TArray<FName> DefaultIngredientIds = {
+			TEXT("LingGu"),
+			TEXT("YinShanJun"),
+			TEXT("ChiYanJiao"),
+			TEXT("YueLinYu"),
+			TEXT("XuanYuQin")
+		};
+		for (int32 BinIndex = 0; BinIndex < DefaultIngredientIds.Num(); ++BinIndex)
+		{
+			FSDayIngredientBinOutput Output;
+			Output.BinIndex = BinIndex;
+			Output.IngredientId = DefaultIngredientIds[BinIndex];
+			Config->IngredientBinOutputs.Add(Output);
+		}
 		Config->DishArtStemByIngredient.Reset();
 		Config->DishArtStemByIngredient.Add(TEXT("LingGu"), TEXT("rice"));
 		Config->DishArtStemByIngredient.Add(TEXT("YinShanJun"), TEXT("egg"));
@@ -374,7 +378,6 @@ namespace
 		Config->DishArtStemByIngredient.Add(TEXT("XuanYuQin"), TEXT("leg"));
 		Config->DishIconMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
 		Config->DishIconMaterial = CreateDishIconMaterial();
-#pragma endregion K2 moonyfli
 		SaveAsset(Config);
 		return Config;
 	}
@@ -395,9 +398,6 @@ USDayWhiteboxAssetsCommandlet::USDayWhiteboxAssetsCommandlet()
 int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 {
 #if WITH_EDITOR
-#pragma region K2 moonyfli
-	// Most whitebox assets are already authored and checked in read-only, so re-running the full
-	// pass fails on save. -DishIconOnly adds just the dish material to an existing project.
 	if (Params.Contains(TEXT("DishIconOnly")))
 	{
 		UMaterial* DishIcon = CreateDishIconMaterial();
@@ -416,7 +416,6 @@ int32 USDayWhiteboxAssetsCommandlet::Main(const FString& Params)
 		UE_LOG(LogTemp, Display, TEXT("S Day dish icon tune table: %s"), Tune ? TEXT("ready") : TEXT("failed"));
 		return Tune ? 0 : 1;
 	}
-#pragma endregion K2 moonyfli
 
 	UBlueprint* Presenter = CreateActorBlueprint(
 		TEXT("/Game/Day/Board/BP_SDayBoardPresenter"),

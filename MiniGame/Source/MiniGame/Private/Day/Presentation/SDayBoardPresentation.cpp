@@ -38,11 +38,13 @@
 #include "Day/Input/SDayPlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Materials/MaterialInstanceDynamic.h" //add by K2
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace DayBoardPresentationPrivate
 {
+	// The authored box order stays fixed so changing an output never changes a hit zone.
+	constexpr int32 DayIngredientBinCount = 5;
 	const FName DayLingGuId(TEXT("LingGu"));
 	const FName DayYinShanJunId(TEXT("YinShanJun"));
 	const FName DayChiYanJiaoId(TEXT("ChiYanJiao"));
@@ -883,8 +885,6 @@ namespace DayBoardPresentationPrivate
 
 	UTexture2D* LoadDishIconByName(const FName AssetName)
 	{
-		// A merge refreshes every cell, so an uncached miss would hit the package loader
-		// once per cell. Misses are remembered too, or an unauthored level logs every refresh.
 		static TMap<FName, TWeakObjectPtr<UTexture2D>> IconCache;
 		static TSet<FName> MissingIcons;
 		if (MissingIcons.Contains(AssetName))
@@ -914,7 +914,6 @@ namespace DayBoardPresentationPrivate
 		return Loaded;
 	}
 
-	/** Config overrides win; otherwise the level resolves through the naming convention. */
 	UTexture2D* ResolveDishIcon(
 		const USDayBoardVisualConfig* Config,
 		const FName IngredientId,
@@ -953,7 +952,6 @@ namespace DayBoardPresentationPrivate
 			FName(*FString::Printf(TEXT("food_%s_V%d"), *Stem.ToString(), ClampedLevel)));
 	}
 
-	/** Local player view point; false before PIE has a controller so callers can skip the offset. */
 	bool GetViewPoint(const AActor* Context, FVector& OutLocation, FRotator& OutRotation)
 	{
 		const UWorld* World = Context ? Context->GetWorld() : nullptr;
@@ -1098,13 +1096,11 @@ ASDayCellVisual::ASDayCellVisual()
 	PieceMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 32.0f));
 	PieceMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-#pragma region K2 moonyfli
 	PieceIcon = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PieceIcon"));
 	PieceIcon->SetupAttachment(Root);
 	PieceIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PieceIcon->SetCastShadow(false);
 	PieceIcon->SetVisibility(false);
-#pragma endregion K2 moonyfli
 
 	PieceLabel = CreateDefaultSubobject<UTextRenderComponent>(TEXT("PieceLabel"));
 	PieceLabel->SetupAttachment(Root);
@@ -1152,6 +1148,12 @@ void ASDayCellVisual::SetSeatedInWell(const bool bInSeated)
 	RefreshVisual();
 }
 
+void ASDayCellVisual::SetUseAuthoredVisuals(const bool bInUse)
+{
+	bUseAuthoredVisuals = bInUse;
+	RefreshVisual();
+}
+
 void ASDayCellVisual::SetDishIconConfig(USDayBoardVisualConfig* InConfig)
 {
 	IconConfig = InConfig;
@@ -1178,6 +1180,15 @@ void ASDayCellVisual::SetDishIconConfig(USDayBoardVisualConfig* InConfig)
 
 	RefreshVisual();
 }
+
+void ASDayCellVisual::SetDragIconWorldLocation(const FVector& InWorldLocation)
+{
+	if (PieceIcon && PieceIcon->IsVisible())
+	{
+		PieceIcon->SetWorldLocation(InWorldLocation);
+	}
+}
+
 #pragma endregion K2 moonyfli
 
 void ASDayCellVisual::SetLabelFont(UFont* InFont)
@@ -1198,16 +1209,16 @@ void ASDayCellVisual::RefreshVisual()
 	{
 		PieceMesh->SetVisibility(false);
 		PieceLabel->SetVisibility(false);
-		PieceIcon->SetVisibility(false); //add by K2
+		PieceIcon->SetVisibility(false);
 		return;
 	}
 
 	FSDishPiece Piece;
 	const bool bHasPiece = MergeBoard->TryGetPiece(CellIndex, Piece);
 	const bool bSelected = MergeBoard->GetActiveDragCellIndex() == CellIndex;
-	PieceMesh->SetVisibility(bHasPiece);
-	PieceLabel->SetVisibility(bHasPiece);
-	PieceIcon->SetVisibility(false); //add by K2
+	PieceMesh->SetVisibility(bHasPiece && !bUseAuthoredVisuals);
+	PieceLabel->SetVisibility(bHasPiece && !bUseAuthoredVisuals);
+	PieceIcon->SetVisibility(false);
 	CellMesh->SetCustomDepthStencilValue(bSelected ? 2 : 1);
 	CellMesh->SetRenderCustomDepth(bSelected);
 	// The whitebox has no outline post-process, so the selection reads through tint and lift instead.
@@ -1241,11 +1252,7 @@ void ASDayCellVisual::RefreshVisual()
 	const FLinearColor PieceColor = IngredientColor(Piece.IngredientId);
 	ApplyTint(PieceMesh, bSelected ? PieceColor * 1.8f + FLinearColor(0.15f, 0.15f, 0.05f, 0.0f) : PieceColor);
 
-#pragma region K2 moonyfli
-	// The pan art wants plated food, not tinted spheres. The sphere stays as the whitebox
-	// fallback and keeps carrying the selection lift the smoke test reads, so it is hidden
-	// rather than removed once artwork resolves.
-	USDayBoardVisualConfig* Config = IconConfig.Get();
+	const USDayBoardVisualConfig* Config = IconConfig.Get();
 	UTexture2D* DishIcon = (!Config || Config->bUseDishIcons)
 		? ResolveDishIcon(Config, Piece.IngredientId, Piece.Level)
 		: nullptr;
@@ -1253,8 +1260,6 @@ void ASDayCellVisual::RefreshVisual()
 	{
 		const FSDayDishIconTuneRow Tune = ResolveDishIconTune(Config);
 		const FName TextureParameter = Config ? Config->DishIconTextureParameter : FName(TEXT("Tex"));
-
-		// The engine plane is 100cm across, so the quad size is the scale in centimetres.
 		const float IconSize = Tune.WorldSize
 			* (1.0f + Tune.ScalePerLevel * static_cast<float>(Piece.Level))
 			* (bSelected ? Tune.SelectedScale : 1.0f);
@@ -1262,9 +1267,6 @@ void ASDayCellVisual::RefreshVisual()
 		PieceIcon->SetRelativeScale3D(FVector(IconSize / 100.0f));
 		PieceIcon->SetRelativeRotation(FRotator(0.0f, Tune.Yaw, 0.0f));
 		PieceIcon->SetRelativeLocation(Tune.LocalOffset);
-		// Pushing along the cell normal slides the dish across the screen because the wells are
-		// tilted. The day camera is orthographic, so moving straight back along the view axis
-		// clears the pan art without changing where the dish lands in frame.
 		const float Push = Tune.CameraPush + (bSelected ? Tune.SelectedLift : 0.0f);
 		FVector ViewLocation = FVector::ZeroVector;
 		FRotator ViewRotation = FRotator::ZeroRotator;
@@ -1276,7 +1278,6 @@ void ASDayCellVisual::RefreshVisual()
 		PieceMesh->SetVisibility(false);
 		PieceLabel->SetVisibility(Config && Config->bShowPieceLabelWithIcon);
 	}
-#pragma endregion K2 moonyfli
 
 	PieceLabel->SetRelativeLocation(FVector(0.0f, 0.0f, bSelected ? 108.0f : 75.0f));
 	// Ink instead of white/amber: the board and the highlight tint are both pale.
@@ -1301,16 +1302,6 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	BinMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BinMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
-#pragma region K2 moonyfli
-	IngredientIcon = CreateDefaultSubobject<UBillboardComponent>(TEXT("IngredientIcon"));
-	IngredientIcon->SetupAttachment(Root);
-	IngredientIcon->SetRelativeLocation(FVector(0.0f, 0.0f, 80.0f));
-	IngredientIcon->SetRelativeScale3D(FVector(0.85f));
-	IngredientIcon->bIsScreenSizeScaled = false;
-	IngredientIcon->SetHiddenInGame(false);
-	IngredientIcon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-#pragma endregion K2 moonyfli
-
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
 	Label->SetupAttachment(Root);
 	Label->SetRelativeLocation(FVector(0.0f, 0.0f, 80.0f));
@@ -1320,8 +1311,12 @@ ASDayIngredientBinVisual::ASDayIngredientBinVisual()
 	Label->SetWorldSize(28.0f);
 }
 
-void ASDayIngredientBinVisual::Configure(const FName InIngredientId, const FString& InDisplayName)
+void ASDayIngredientBinVisual::Configure(
+	const int32 InBinIndex,
+	const FName InIngredientId,
+	const FString& InDisplayName)
 {
+	BinIndex = InBinIndex;
 	IngredientId = InIngredientId;
 	if (!BinMesh->GetStaticMesh())
 	{
@@ -1334,26 +1329,6 @@ void ASDayIngredientBinVisual::Configure(const FName InIngredientId, const FStri
 	// The bin mesh already carries the ingredient colour, so tinting the text to match hides it.
 	Label->SetTextRenderColor(LabelInkColor());
 }
-
-#pragma region K2 moonyfli
-void ASDayIngredientBinVisual::SetIngredientIcon(UTexture2D* InTexture)
-{
-	IngredientIcon->SetSprite(InTexture);
-	IngredientIcon->SetHiddenInGame(false);
-	IngredientIcon->SetVisibility(InTexture != nullptr);
-}
-
-void ASDayIngredientBinVisual::ApplyIngredientIconLayout(const float BinHalfHeight)
-{
-	const FSDayIngredientBinIconTune DefaultTune;
-	const FSDayIngredientBinIconTune* AuthoredTune = IngredientIconTunes.Find(IngredientId);
-	const FSDayIngredientBinIconTune& Tune = AuthoredTune ? *AuthoredTune : DefaultTune;
-
-	IngredientIcon->SetRelativeScale3D(FVector(FMath::Max(Tune.Scale, 0.01f)));
-	IngredientIcon->SetRelativeLocation(
-		Tune.OffsetFromBinTop + FVector(0.0f, 0.0f, FMath::Max(BinHalfHeight, 0.0f)));
-}
-#pragma endregion K2 moonyfli
 
 void ASDayIngredientBinVisual::SetLabelFont(UFont* InFont)
 {
@@ -1656,6 +1631,7 @@ void ASDayBoardPresenter::Tick(const float DeltaSeconds)
 
 	if (bUseExternalPointerDriver)
 	{
+		UpdateDraggedIcon(LastPointerPosition);
 		return;
 	}
 
@@ -1673,6 +1649,10 @@ void ASDayBoardPresenter::Tick(const float DeltaSeconds)
 	else if (!bPointerDown && bPointerWasDown)
 	{
 		HandlePointerReleased(LastPointerPosition);
+	}
+	if (bPointerDown)
+	{
+		UpdateDraggedIcon(ScreenPosition);
 	}
 	bPointerWasDown = bPointerDown;
 }
@@ -1862,11 +1842,11 @@ void ASDayBoardPresenter::BuildCells()
 			}
 		}
 		Visual->SetLabelFont(ResolveLabelFont());
-		Visual->SetDishIconConfig(Config); //add by K2
+		Visual->SetDishIconConfig(Config);
 		Visual->Configure(Row.CellIndex, Row.VisualRadius, LogicBoard.Get());
 #pragma region K2 moonyfli
 		// The art mesh owns the visible holes; keep the logical trace surface but remove
-		// the old whitebox cylinder. Pieces and labels remain visible.
+		// the old whitebox cylinder. Plated food remains represented by PieceIcon.
 		Visual->CellMesh->SetVisibility(!bUseDayArt);
 		if (bUseDayArt)
 		{
@@ -1877,6 +1857,7 @@ void ASDayBoardPresenter::BuildCells()
 			Visual->CellMesh->SetRelativeScale3D(FVector(CellScale, CellScale, 0.12f));
 			Visual->SetSeatedInWell(true);
 		}
+		Visual->SetUseAuthoredVisuals(bUseDayArt);
 #pragma endregion K2 moonyfli
 		CellVisuals.Add(Visual);
 	}
@@ -1896,10 +1877,29 @@ void ASDayBoardPresenter::BuildBins()
 	{
 		BinClass = Config->IngredientBinClass;
 	}
-	const TArray<FName> Ids = {DayLingGuId, DayYinShanJunId, DayChiYanJiaoId, DayYueLinYuId, DayXuanYuQinId};
-
-	for (int32 Index = 0; Index < Ids.Num(); ++Index)
+	for (int32 Index = 0; Index < DayIngredientBinCount; ++Index)
 	{
+		FName IngredientId = NAME_None;
+		if (Config)
+		{
+			for (const FSDayIngredientBinOutput& Output : Config->IngredientBinOutputs)
+			{
+				if (Output.BinIndex == Index)
+				{
+					IngredientId = Output.IngredientId;
+					break;
+				}
+			}
+		}
+		if (IngredientId.IsNone())
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Day ingredient bin %d has no configured IngredientId; its hit zone remains but it will not spawn a piece."),
+				Index);
+		}
+
 		const FVector Location(-380.0f + Index * 190.0f, -690.0f + FMath::Abs(2 - Index) * 18.0f, 45.0f);
 #pragma region K2 moonyfli
 		const FDayArtPiece ArtBin = FindDayArtPiece(World, DayArtBinTag(Index));
@@ -1935,10 +1935,11 @@ void ASDayBoardPresenter::BuildBins()
 			}
 		}
 		Bin->SetLabelFont(ResolveLabelFont());
-		Bin->Configure(Ids[Index], IngredientDisplayName(this, Ids[Index]));
+		Bin->Configure(
+			Index,
+			IngredientId,
+			IngredientId.IsNone() ? TEXT("未配置") : IngredientDisplayName(this, IngredientId));
 #pragma region K2 moonyfli
-		Bin->SetIngredientIcon(ResolveIngredientIcon(Ids[Index]));
-		float IconBinHalfHeight = 35.0f;
 		if (ArtBin.IsValid())
 		{
 			// The imported box supplies the visible geometry. This hidden cube is sized to
@@ -1946,9 +1947,7 @@ void ASDayBoardPresenter::BuildBins()
 			Bin->BinMesh->SetRelativeScale3D(ArtBinExtent / 50.0f);
 			Bin->BinMesh->SetVisibility(false);
 			Bin->Label->SetRelativeLocation(FVector(0.0f, 0.0f, ArtBinExtent.Z + 30.0f));
-			IconBinHalfHeight = ArtBinExtent.Z;
 		}
-		Bin->ApplyIngredientIconLayout(IconBinHalfHeight);
 #pragma endregion K2 moonyfli
 		IngredientBins.Add(Bin);
 	}
@@ -2357,14 +2356,22 @@ void ASDayBoardPresenter::RefreshFromLogic()
 
 void ASDayBoardPresenter::SimulatePointerEvent(const FVector2D ScreenPosition, const bool bPressed)
 {
+	LastPointerPosition = ScreenPosition;
 	if (bPressed)
 	{
 		HandlePointerPressed(ScreenPosition);
+		UpdateDraggedIcon(ScreenPosition);
 	}
 	else
 	{
 		HandlePointerReleased(ScreenPosition);
 	}
+}
+
+void ASDayBoardPresenter::SimulatePointerMove(const FVector2D ScreenPosition)
+{
+	LastPointerPosition = ScreenPosition;
+	UpdateDraggedIcon(ScreenPosition);
 }
 
 void ASDayBoardPresenter::SetUseExternalPointerDriver(const bool bEnabled)
@@ -2518,17 +2525,9 @@ USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(cons
 #pragma endregion K2 moonyfli
 }
 
-void ASDayBoardPresenter::PlayIngredientBinAnimation(const FName IngredientId)
+void ASDayBoardPresenter::PlayIngredientBinAnimation(const int32 BinIndex)
 {
-	const TArray<FName> IngredientIds = {
-		DayLingGuId,
-		DayYinShanJunId,
-		DayChiYanJiaoId,
-		DayYueLinYuId,
-		DayXuanYuQinId
-	};
-	const int32 BinIndex = IngredientIds.IndexOfByKey(IngredientId);
-	if (BinIndex == INDEX_NONE)
+	if (BinIndex < 0 || BinIndex >= DayIngredientBinCount)
 	{
 		return;
 	}
@@ -2663,6 +2662,69 @@ bool ASDayBoardPresenter::TryDecomposeInIngredientArea(
 }
 #pragma endregion K2 moonyfli
 
+void ASDayBoardPresenter::UpdateDraggedIcon(const FVector2D& ScreenPosition)
+{
+	ASMergeBoard* Board = LogicBoard.Get();
+	if (!Board || !Board->IsDragging())
+	{
+		return;
+	}
+
+	ASDayCellVisual* Cell = GetCellVisual(Board->GetActiveDragCellIndex());
+	if (!Cell || !Cell->PieceIcon || !Cell->PieceIcon->IsVisible())
+	{
+		return;
+	}
+
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PlayerController)
+	{
+		return;
+	}
+
+	FVector RayOrigin;
+	FVector RayDirection;
+	if (!UGameplayStatics::DeprojectScreenToWorld(
+		PlayerController,
+		ScreenPosition,
+		RayOrigin,
+		RayDirection))
+	{
+		return;
+	}
+
+	const FVector PlaneNormal = Cell->GetActorUpVector();
+	const float Denominator = FVector::DotProduct(RayDirection, PlaneNormal);
+	if (FMath::Abs(Denominator) <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float Distance = FVector::DotProduct(
+		Cell->GetActorLocation() - RayOrigin,
+		PlaneNormal) / Denominator;
+	if (Distance < 0.0f)
+	{
+		return;
+	}
+
+	if (!bDragIconTuneResolved)
+	{
+		const USDayBoardVisualConfig* Config = VisualConfig.LoadSynchronous();
+		DragIconTune = DayBoardPresentationPrivate::ResolveDishIconTune(Config);
+		bDragIconTuneResolved = true;
+	}
+
+	// Keep the icon on the same screen ray while lifting it toward the camera so the pan
+	// art cannot occlude it. This uses the touch/mouse ray identically on mobile and desktop.
+	const float CameraPush = FMath::Max(
+		0.0f,
+		DragIconTune.CameraPush + DragIconTune.SelectedLift);
+	const FVector IconWorldLocation =
+		RayOrigin + RayDirection * Distance - RayDirection * CameraPush;
+	Cell->SetDragIconWorldLocation(IconWorldLocation);
+}
+
 bool ASDayBoardPresenter::GetPointerState(FVector2D& OutScreenPosition) const
 {
 	const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
@@ -2742,7 +2804,7 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 #pragma region K2 moonyfli
 		if (Board->TrySpawnFromMotherPiece(Bin->IngredientId))
 		{
-			PlayIngredientBinAnimation(Bin->IngredientId);
+			PlayIngredientBinAnimation(Bin->BinIndex);
 		}
 #pragma endregion K2 moonyfli
 		RefreshFromLogic();
@@ -2936,7 +2998,6 @@ void USDayHUD::BuildWidgetTree()
 		Button->AddChild(Text);
 		return Button;
 	};
-#pragma region K2 moonyfli
 	auto MakeIngredientButton = [this, &MakeText](const TCHAR* Name, const TCHAR* Label, const FName IngredientId)
 	{
 		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
@@ -2948,7 +3009,6 @@ void USDayHUD::BuildWidgetTree()
 			*FString::Printf(TEXT("%s_Icon"), Name));
 		if (UTexture2D* Texture = ResolveIngredientIcon(IngredientId))
 		{
-			// Never match the source PNG size (up to 524x391): these are compact HUD icons.
 			Icon->SetBrushFromTexture(Texture, false);
 		}
 		Icon->SetDesiredSizeOverride(FVector2D(46.0f, 40.0f));
@@ -2961,8 +3021,6 @@ void USDayHUD::BuildWidgetTree()
 		Button->AddChild(Content);
 		return Button;
 	};
-#pragma endregion K2 moonyfli
-
 	PhaseText = MakeText(TEXT("PhaseText"), 24, FLinearColor(0.10f, 0.95f, 0.75f));
 	ControlsHost->AddChildToVerticalBox(PhaseText)->SetPadding(FMargin(18.0f, 12.0f, 18.0f, 4.0f));
 

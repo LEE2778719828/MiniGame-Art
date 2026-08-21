@@ -48,61 +48,50 @@ struct MINIGAME_API FSDayBoardLayoutRow : public FTableRowBase
 	float VisualRadius = 85.0f;
 };
 
-/** Per-ingredient placement for the icon floating above an authored ingredient bin. */
+/** Gameplay output of one authored ingredient bin. Array entries keep the existing bin hit areas. */
 USTRUCT(BlueprintType)
-struct MINIGAME_API FSDayIngredientBinIconTune
+struct MINIGAME_API FSDayIngredientBinOutput
 {
 	GENERATED_BODY()
 
-	/** World-space billboard scale. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.01"))
-	float Scale = 0.85f;
+	/** Existing art/hit-zone index: 0 maps to the first bin, 1 to the second, and so on. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins", meta = (ClampMin = "0"))
+	int32 BinIndex = 0;
 
-	/** Local offset measured from the top centre of the authored bin bounds. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
-	FVector OffsetFromBinTop = FVector(0.0f, -75.0f, 45.0f);
+	/** IngredientId consumed from inventory and placed into the board. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins")
+	FName IngredientId = NAME_None;
 };
 
-/** DT_SDayDishIconTune single row Default: plated-food size and clearance. */
+/** DT_SDayDishIconTune single row: plated-food size and clearance. */
 USTRUCT(BlueprintType)
 struct MINIGAME_API FSDayDishIconTuneRow : public FTableRowBase
 {
 	GENERATED_BODY()
 
-	/** Width in centimetres of a Lv0 dish quad, including the transparent margin of the art. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "1.0"))
 	float WorldSize = 180.0f;
 
-	/** Added per merge level, as a fraction of the Lv0 size. Art carries the real change. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.0"))
 	float ScalePerLevel = 0.12f;
 
-	/** Enlargement while the piece is picked up. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "1.0"))
 	float SelectedScale = 1.18f;
 
-	/** Spin of the artwork within the well plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float Yaw = 0.0f;
 
-	/** Cell-local nudge inside the well plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	FVector LocalOffset = FVector::ZeroVector;
 
-	/**
-	 * Centimetres to move the quad towards the camera. The whitebox cells sit well behind the
-	 * pan art, so without this only the leading edge of the dish clears it. Pushing along the
-	 * view axis keeps the dish where the well is on screen, since the day camera is orthographic.
-	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "0.0"))
 	float CameraPush = 104.0f;
 
-	/** Extra push towards the camera while the piece is picked up. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float SelectedLift = 14.0f;
 };
 
-/** Per-level artwork for one ingredient chain; index 0 is the Lv0 dish. */
+/** Explicit per-level artwork overrides for one ingredient chain. */
 USTRUCT(BlueprintType)
 struct MINIGAME_API FSDayDishIconSet
 {
@@ -151,6 +140,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layout")
 	TSoftObjectPtr<UDataTable> CellLayout;
 
+	/** Maps the existing authored bin index to the ingredient it produces. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ingredient Bins", meta = (TitleProperty = "IngredientId"))
+	TArray<FSDayIngredientBinOutput> IngredientBinOutputs;
+
 	/**
 	 * Offline font used by every world-space label. TextRenderComponent cannot use runtime
 	 * fonts, so the engine default only ships ASCII glyphs and renders CJK as boxes.
@@ -167,43 +160,35 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
 	TSubclassOf<class ASDayCharacterStandIn> CharacterStandInClass;
 
-#pragma region K2 moonyfli
-	/** Plate the food artwork instead of the tinted whitebox sphere. */
+	/** Enable generated food artwork on occupied plate cells. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	bool bUseDishIcons = true;
 
-	/**
-	 * Quad the artwork is drawn on. It lies in the well plane rather than facing the camera:
-	 * the pan is nearly face-on, so a camera-facing sprite is almost coplanar with it and all
-	 * but a sliver of the dish ends up buried in the pan. Defaults to the engine plane.
-	 */
+	/** Plane used to display the plated-food texture. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	TSoftObjectPtr<UStaticMesh> DishIconMesh;
 
-	/** Unlit texture material; defaults to the cookingUI layer material. */
+	/** Unlit texture material used by the plated-food plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	TSoftObjectPtr<UMaterialInterface> DishIconMaterial;
 
-	/** Texture parameter the artwork is pushed into on DishIconMaterial. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	FName DishIconTextureParameter = TEXT("Tex");
 
-	/** Size and clearance; row Default. Defaults to /Game/Day/Data/DT_SDayDishIconTune. */
+	/** Optional tuning table; row Default is used when present. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	TSoftObjectPtr<UDataTable> DishIconTune;
 
-	/** Keeps the "灵 Lv1" debug text visible on top of the artwork. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	bool bShowPieceLabelWithIcon = false;
 
-	/** Ingredient id to artwork stem; LingGu -> rice resolves food_rice_V2 at level 2. */
+	/** IngredientId to food-art stem, e.g. LingGu -> rice. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	TMap<FName, FName> DishArtStemByIngredient;
 
 	/** Explicit artwork per level; a set entry wins over the naming convention. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dish Icons")
 	TMap<FName, FSDayDishIconSet> DishIconOverrides;
-#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -225,9 +210,10 @@ public:
 	 * projects on screen as the dish sliding out of its hole.
 	 */
 	void SetSeatedInWell(bool bInSeated);
-
-	/** Without a config the cell keeps the whitebox sphere, so this is optional. */
+	/** Lets authored scene textures own the cell visuals without changing the hit surface. */
+	void SetUseAuthoredVisuals(bool bInUse);
 	void SetDishIconConfig(USDayBoardVisualConfig* InConfig);
+	void SetDragIconWorldLocation(const FVector& InWorldLocation);
 #pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
@@ -245,20 +231,17 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> PieceLabel;
 
-#pragma region K2 moonyfli
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UStaticMeshComponent> PieceIcon;
-#pragma endregion K2 moonyfli
 
 private:
 	TWeakObjectPtr<ASMergeBoard> Board;
 	float VisualRadius = 85.0f;
-#pragma region K2 moonyfli
+	bool bUseAuthoredVisuals = false;
 	TWeakObjectPtr<USDayBoardVisualConfig> IconConfig;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> DishIconMaterial;
-#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -269,32 +252,21 @@ class MINIGAME_API ASDayIngredientBinVisual : public AActor
 public:
 	ASDayIngredientBinVisual();
 
-	void Configure(FName InIngredientId, const FString& InDisplayName);
+	void Configure(int32 InBinIndex, FName InIngredientId, const FString& InDisplayName);
 
 	void SetLabelFont(UFont* InFont);
 
-#pragma region K2 moonyfli
-	void SetIngredientIcon(UTexture2D* InTexture);
-	void ApplyIngredientIconLayout(float BinHalfHeight);
-
-	/** Independent icon size and top-relative placement keyed by IngredientId. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "S Day Board|Ingredient Icon")
-	TMap<FName, FSDayIngredientBinIconTune> IngredientIconTunes;
-#pragma endregion K2 moonyfli
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	FName IngredientId = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
+	int32 BinIndex = INDEX_NONE;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UStaticMeshComponent> BinMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UTextRenderComponent> Label;
-
-#pragma region K2 moonyfli
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
-	TObjectPtr<UBillboardComponent> IngredientIcon;
-#pragma endregion K2 moonyfli
 };
 
 UCLASS(Blueprintable)
@@ -438,6 +410,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Day Board")
 	void SimulatePointerEvent(FVector2D ScreenPosition, bool bPressed);
 
+	/** Updates the held drag visual without changing the board's drop state. */
+	void SimulatePointerMove(FVector2D ScreenPosition);
+
 	void SetUseExternalPointerDriver(bool bEnabled); //add by K2
 	void CancelPointerInteraction(); //add by K2
 
@@ -503,7 +478,7 @@ private:
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
 #pragma region K2 moonyfli
-	void PlayIngredientBinAnimation(FName IngredientId);
+	void PlayIngredientBinAnimation(int32 BinIndex);
 	void CloseIngredientBinAnimation(int32 BinIndex);
 	void RestIngredientBinAnimation(int32 BinIndex);
 	USkeletalMeshComponent* FindIngredientBinAnimComponent(int32 BinIndex) const;
@@ -512,6 +487,7 @@ private:
 	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
 	void HandlePointerPressed(const FVector2D& ScreenPosition);
 	void HandlePointerReleased(const FVector2D& ScreenPosition);
+	void UpdateDraggedIcon(const FVector2D& ScreenPosition);
 	bool GetPointerState(FVector2D& OutScreenPosition) const;
 	AActor* HitTest(const FVector2D& ScreenPosition) const;
 	TArray<FSDayBoardLayoutRow> GetLayoutRows() const;
@@ -533,8 +509,10 @@ private:
 	bool bPointerWasDown = false;
 	bool bUseExternalPointerDriver = false; //add by K2
 	bool bDropHandledOnPress = false;
+	bool bDragIconTuneResolved = false;
 	float SeatRefreshCountdown = 0.0f;
 	FVector2D LastPointerPosition = FVector2D::ZeroVector;
+	FSDayDishIconTuneRow DragIconTune;
 };
 
 UCLASS(Blueprintable)

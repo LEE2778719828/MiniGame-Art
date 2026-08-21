@@ -176,6 +176,10 @@ void ASDayPlayerController::HandlePointerStarted()
 void ASDayPlayerController::HandlePointerUpdated()
 {
 	ReadPointerScreenPosition(LastScreenPosition, bActivePointerIsTouch);
+	if (ASDayBoardPresenter* Presenter = BoardPresenter.Get())
+	{
+		Presenter->SimulatePointerMove(LastScreenPosition);
+	}
 }
 
 void ASDayPlayerController::HandlePointerCompleted()
@@ -187,6 +191,7 @@ void ASDayPlayerController::HandlePointerCompleted()
 
 	if (ASDayBoardPresenter* Presenter = BoardPresenter.Get())
 	{
+		Presenter->SimulatePointerMove(LastScreenPosition);
 		Presenter->SimulatePointerEvent(LastScreenPosition, false);
 		if (FVector2D::Distance(PressScreenPosition, LastScreenPosition) >= DragThresholdPixels)
 		{
