@@ -16,6 +16,7 @@ class UCameraComponent;
 class UDirectionalLightComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class USkeletalMeshComponent; //add by K2
 class USkyLightComponent;
 class UFont;
 class USceneComponent;
@@ -441,6 +442,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float PortraitOrthoWidth = 1100.0f;
 
+#pragma region K2 moonyfli
+	/**
+	 * Seconds the bin stays fully open before it starts closing.
+	 * Playback speed is not configured here: it comes from the BoxAnim component PlayRate
+	 * in BP_SDayCanguan multiplied by the RateScale of the box*_Anim sequence.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Bin Animation", meta = (ClampMin = "0.0"))
+	float BinAnimHoldSeconds = 0.15f;
+
+	/** When false the bin lid holds the last frame instead of closing itself. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Bin Animation")
+	bool bBinAnimAutoClose = true;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TObjectPtr<UCameraComponent> Camera;
 
@@ -465,6 +480,12 @@ private:
 	void RefreshCharacters();
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+#pragma region K2 moonyfli
+	void PlayIngredientBinAnimation(FName IngredientId);
+	void CloseIngredientBinAnimation(int32 BinIndex);
+	void RestIngredientBinAnimation(int32 BinIndex);
+	USkeletalMeshComponent* FindIngredientBinAnimComponent(int32 BinIndex) const;
+#pragma endregion K2 moonyfli
 	bool IsInIngredientDropZone(const FVector2D& ScreenPosition) const;
 	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
 	void HandlePointerPressed(const FVector2D& ScreenPosition);
@@ -483,6 +504,8 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
+
+	TMap<int32, FTimerHandle> BinAnimTimers; //add by K2
 
 	bool bUsingSceneAuthoredSeats = false; //add by K2
 	bool bPointerWasDown = false;

@@ -16,6 +16,7 @@
 #include "Components/Image.h"
 #include "Components/SafeZone.h"
 #include "Components/ScrollBox.h"
+#include "Components/SkeletalMeshComponent.h" //add by K2
 #include "Components/SkyLightComponent.h"
 #include "Components/SizeBox.h"
 #include "Components/StaticMeshComponent.h"
@@ -26,6 +27,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WrapBox.h"
 #include "Components/WidgetComponent.h"
+#include "Animation/AnimationAsset.h" //add by K2
+#include "Animation/AnimSequenceBase.h" //add by K2
+#include "TimerManager.h" //add by K2
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -2400,6 +2404,150 @@ ASDayIngredientBinVisual* ASDayBoardPresenter::GetIngredientBin(const FName Ingr
 	return nullptr;
 }
 
+#pragma region K2 moonyfli
+namespace
+{
+	UAnimSequenceBase* LoadIngredientBinAnimation(const int32 BinIndex)
+	{
+		const FString AnimationPath = FString::Printf(
+			TEXT("/Game/Day/Art/canguan/animation/box%d_Anim.box%d_Anim"),
+			BinIndex + 1,
+			BinIndex + 1);
+		return LoadObject<UAnimSequenceBase>(nullptr, *AnimationPath);
+	}
+
+	// Speed is authored outside this class: the component PlayRate drives the single node
+	// instance and the engine multiplies the sequence RateScale on top of it.
+	float GetIngredientBinBaseRate(const USkeletalMeshComponent& AnimatedBox)
+	{
+		const float AuthoredRate = FMath::Abs(AnimatedBox.AnimationData.SavedPlayRate);
+		return AuthoredRate > UE_KINDA_SMALL_NUMBER ? AuthoredRate : 1.0f;
+	}
+
+	/** Returns 0 when the effective rate cannot advance the sequence, meaning it never reaches an end. */
+	float GetIngredientBinPlaySeconds(const USkeletalMeshComponent& AnimatedBox, const UAnimSequenceBase& Animation)
+	{
+		const float EffectiveRate = GetIngredientBinBaseRate(AnimatedBox) * FMath::Abs(Animation.RateScale);
+		return EffectiveRate > UE_KINDA_SMALL_NUMBER ? Animation.GetPlayLength() / EffectiveRate : 0.0f;
+	}
+}
+
+USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(const int32 BinIndex) const
+{
+	const UWorld* World = GetWorld();
+	if (!World || BinIndex < 0)
+	{
+		return nullptr;
+	}
+
+	const FName ComponentName(*FString::Printf(TEXT("BoxAnim_%d"), BinIndex));
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Environment = *It;
+		if (!Environment || !Environment->ActorHasTag(DayArtEnvironmentTag))
+		{
+			continue;
+		}
+
+		TInlineComponentArray<USkeletalMeshComponent*> AnimatedBoxes;
+		Environment->GetComponents(AnimatedBoxes);
+		for (USkeletalMeshComponent* AnimatedBox : AnimatedBoxes)
+		{
+			if (AnimatedBox && AnimatedBox->GetFName() == ComponentName)
+			{
+				return AnimatedBox;
+			}
+		}
+	}
+	return nullptr;
+}
+
+void ASDayBoardPresenter::PlayIngredientBinAnimation(const FName IngredientId)
+{
+	const TArray<FName> IngredientIds = {
+		DayLingGuId,
+		DayYinShanJunId,
+		DayChiYanJiaoId,
+		DayYueLinYuId,
+		DayXuanYuQinId
+	};
+	const int32 BinIndex = IngredientIds.IndexOfByKey(IngredientId);
+	if (BinIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UAnimSequenceBase* Animation = LoadIngredientBinAnimation(BinIndex);
+	USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex);
+	if (!Animation || !AnimatedBox)
+	{
+		return;
+	}
+
+	if (FTimerHandle* PendingTimer = BinAnimTimers.Find(BinIndex))
+	{
+		World->GetTimerManager().ClearTimer(*PendingTimer);
+	}
+
+	AnimatedBox->SetAnimation(Animation);
+	AnimatedBox->SetPlayRate(GetIngredientBinBaseRate(*AnimatedBox));
+	AnimatedBox->SetPosition(0.0f, false);
+	AnimatedBox->Play(false);
+
+	const float OpenSeconds = GetIngredientBinPlaySeconds(*AnimatedBox, *Animation);
+	if (!bBinAnimAutoClose || OpenSeconds <= 0.0f)
+	{
+		return;
+	}
+
+	const float CloseDelay = FMath::Max(OpenSeconds + BinAnimHoldSeconds, UE_KINDA_SMALL_NUMBER);
+	FTimerDelegate CloseDelegate = FTimerDelegate::CreateUObject(this, &ASDayBoardPresenter::CloseIngredientBinAnimation, BinIndex);
+	World->GetTimerManager().SetTimer(BinAnimTimers.FindOrAdd(BinIndex), CloseDelegate, CloseDelay, false);
+}
+
+void ASDayBoardPresenter::CloseIngredientBinAnimation(const int32 BinIndex)
+{
+	UWorld* World = GetWorld();
+	USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex);
+	if (!World || !AnimatedBox)
+	{
+		return;
+	}
+
+	const UAnimSequenceBase* Animation = LoadIngredientBinAnimation(BinIndex);
+	if (!Animation)
+	{
+		return;
+	}
+
+	// A negative play rate rewinds the single-node instance, so the lid closes with the same art.
+	AnimatedBox->SetPosition(Animation->GetPlayLength(), false);
+	AnimatedBox->SetPlayRate(-GetIngredientBinBaseRate(*AnimatedBox));
+	AnimatedBox->Play(false);
+
+	const float CloseSeconds = FMath::Max(GetIngredientBinPlaySeconds(*AnimatedBox, *Animation), UE_KINDA_SMALL_NUMBER);
+	FTimerDelegate RestDelegate = FTimerDelegate::CreateUObject(this, &ASDayBoardPresenter::RestIngredientBinAnimation, BinIndex);
+	World->GetTimerManager().SetTimer(BinAnimTimers.FindOrAdd(BinIndex), RestDelegate, CloseSeconds, false);
+}
+
+void ASDayBoardPresenter::RestIngredientBinAnimation(const int32 BinIndex)
+{
+	if (USkeletalMeshComponent* AnimatedBox = FindIngredientBinAnimComponent(BinIndex))
+	{
+		AnimatedBox->Stop();
+		AnimatedBox->SetPlayRate(GetIngredientBinBaseRate(*AnimatedBox));
+		AnimatedBox->SetPosition(0.0f, false);
+	}
+	BinAnimTimers.Remove(BinIndex);
+}
+#pragma endregion K2 moonyfli
+
 bool ASDayBoardPresenter::IsInIngredientDropZone(const FVector2D& ScreenPosition) const
 {
 	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
@@ -2528,7 +2676,12 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 
 	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitTest(ScreenPosition)))
 	{
-		Board->TrySpawnFromMotherPiece(Bin->IngredientId);
+#pragma region K2 moonyfli
+		if (Board->TrySpawnFromMotherPiece(Bin->IngredientId))
+		{
+			PlayIngredientBinAnimation(Bin->IngredientId);
+		}
+#pragma endregion K2 moonyfli
 		RefreshFromLogic();
 		return;
 	}
