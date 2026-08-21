@@ -128,6 +128,26 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Camera")
 	TObjectPtr<UCameraComponent> Camera;
 
+	// add by K2 (R1) —— 动作镜头反馈
+	/**
+	 * 起跳瞬间加到 FOV 上的度数，正值张开。触发时刻取自 Jump 动画上的 Takeoff 通知，
+	 * 所以动画重新配时相机自动跟着走，这里不存时间、只存幅度。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "-30.0", ClampMax = "30.0"))
+	float TakeoffFovKickDeg = 5.f;
+
+	/** 落地瞬间镜头下沉的厘米数，负值向下。触发时刻取自 Land 通知。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "-200.0", ClampMax = "200.0"))
+	float LandBoomDipCm = -14.f;
+
+	/** 斩击接触瞬间加到 FOV 上的度数，负值收紧成"推近打击感"。触发时刻取自 Contact 通知。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "-30.0", ClampMax = "30.0"))
+	float AttackFovKickDeg = -6.f;
+
+	/** 上面三种冲击回到零的速度，越低余韵越长。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "0.5", ClampMax = "60.0"))
+	float CameraKickRecoverySpeed = 9.f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Feel")
 	TObjectPtr<UNightFeelStubComponent> FeelStub;
 
@@ -206,6 +226,39 @@ protected:
 	 * night scene must not auto-adapt). Framing values are deliberately left to the components.
 	 */
 	void EnforceCameraInvariants();
+
+	/**
+	 * One scheduled camera impulse, queued when an action starts and fired once DelaySeconds runs
+	 * out. Delays are stored already divided by the play rate in force at schedule time, so
+	 * ApplyAdvanceCatchUp has to rescale them when it speeds the action up.
+	 */
+	struct FNightCameraKick
+	{
+		float DelaySeconds = 0.f;
+		float FovDeg = 0.f;
+		float DipCm = 0.f;
+	};
+
+	/** Reads Takeoff / Land / Contact off the clip and queues the matching impulses. */
+	void ScheduleCameraKicksForClip(const UAnimSequenceBase* Clip);
+
+	/** Fires due impulses, decays the live ones, and writes FOV / socket offset. */
+	void UpdateCameraKicks(float DeltaSeconds);
+
+	TArray<FNightCameraKick> PendingCameraKicks;
+
+	/**
+	 * Authored framing, cached at BeginPlay so impulses can be added on top without ever
+	 * overwriting what the Blueprint components carry.
+	 */
+	float BaseFieldOfView = 70.f;
+	FVector BaseSocketOffset = FVector(0.f, 55.f, 160.f);
+
+	float LiveFovKickDeg = 0.f;
+	float LiveBoomDipCm = 0.f;
+
+	/** True while the components hold impulse-modified values, so they get restored exactly once. */
+	bool bCameraKickApplied = false;
 
 	FVector AdvanceTargetLocation = FVector::ZeroVector;
 	FRotator AdvanceTargetRotation = FRotator::ZeroRotator;

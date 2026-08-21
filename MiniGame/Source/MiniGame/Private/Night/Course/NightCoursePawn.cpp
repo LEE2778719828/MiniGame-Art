@@ -105,6 +105,22 @@ ANightCoursePawn::ANightCoursePawn()
 	SpringArm->SocketOffset = FVector(0.f, 55.f, 160.f);
 	SpringArm->SetRelativeRotation(FRotator(-28.f, 0.f, 0.f));
 
+	// add by K2 (R1) —— follow lag
+	// Tick drives the hop with VInterpConstantTo, so the hero leaves and arrives at full speed,
+	// and its yaw is assigned outright rather than interpolated. Lag on the boom is what turns
+	// both of those into an eased follow. Speed is the knob: lower trails further and feels
+	// heavier, higher tightens. Under a constant advance the boom settles roughly
+	// AdvanceSpeed / CameraLagSpeed behind the hero, which at the default 1400 cm/s is ~117cm of
+	// extra depth — read as the camera straining to keep up.
+	SpringArm->bEnableCameraLag = true;
+	SpringArm->CameraLagSpeed = 12.f;
+	SpringArm->bEnableCameraRotationLag = true;
+	SpringArm->CameraRotationLagSpeed = 10.f;
+	// A guard rather than a look. UpdateDesiredArmLocation clamps the lagged target to within this
+	// distance of the real one, which also absorbs the course-start teleport in StartNight; without
+	// it the boom would sweep across the level on the first frame of the night.
+	SpringArm->CameraLagMaxDistance = 200.f;
+
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
@@ -149,10 +165,124 @@ void ANightCoursePawn::EnforceCameraInvariants()
 	}
 }
 
+#pragma region K2 moonyfli
+namespace NightCameraNotify
+{
+	// The names the notifies were authored under, measured by Tools/ProbeAnimNotifyPoints.py.
+	// Renaming one on the animation without renaming it here silently drops that impulse.
+	static const FName Takeoff(TEXT("Takeoff"));
+	static const FName Land(TEXT("Land"));
+	static const FName Contact(TEXT("Contact"));
+}
+
+void ANightCoursePawn::ScheduleCameraKicksForClip(const UAnimSequenceBase* Clip)
+{
+	PendingCameraKicks.Reset();
+	if (!Clip)
+	{
+		return;
+	}
+
+	// Times come off the clip rather than a UPROPERTY so that retiming an animation moves the
+	// camera with it. Storing them here as constants would desync the moment art re-exports.
+	const float Rate = FMath::Max(0.05f, HeroAnimPlayRate);
+	for (const FAnimNotifyEvent& Event : Clip->Notifies)
+	{
+		FNightCameraKick Kick;
+		if (Event.NotifyName == NightCameraNotify::Takeoff)
+		{
+			Kick.FovDeg = TakeoffFovKickDeg;
+		}
+		else if (Event.NotifyName == NightCameraNotify::Land)
+		{
+			Kick.DipCm = LandBoomDipCm;
+		}
+		else if (Event.NotifyName == NightCameraNotify::Contact)
+		{
+			Kick.FovDeg = AttackFovKickDeg;
+		}
+		else
+		{
+			continue;
+		}
+
+		Kick.DelaySeconds = Event.GetTriggerTime() / Rate;
+		PendingCameraKicks.Add(Kick);
+	}
+}
+
+void ANightCoursePawn::UpdateCameraKicks(float DeltaSeconds)
+{
+	for (int32 Index = PendingCameraKicks.Num() - 1; Index >= 0; --Index)
+	{
+		FNightCameraKick& Kick = PendingCameraKicks[Index];
+		Kick.DelaySeconds -= DeltaSeconds;
+		if (Kick.DelaySeconds > 0.f)
+		{
+			continue;
+		}
+
+		LiveFovKickDeg += Kick.FovDeg;
+		LiveBoomDipCm += Kick.DipCm;
+		PendingCameraKicks.RemoveAtSwap(Index);
+	}
+
+	const float Recovery = FMath::Max(0.5f, CameraKickRecoverySpeed);
+	LiveFovKickDeg = FMath::FInterpTo(LiveFovKickDeg, 0.f, DeltaSeconds, Recovery);
+	LiveBoomDipCm = FMath::FInterpTo(LiveBoomDipCm, 0.f, DeltaSeconds, Recovery);
+
+	// Idle frames deliberately leave the components alone: writing every tick would stomp any
+	// runtime Set on FOV or socket offset from Blueprint. One final write settles them back.
+	const bool bActive = !PendingCameraKicks.IsEmpty()
+		|| FMath::Abs(LiveFovKickDeg) > 0.01f
+		|| FMath::Abs(LiveBoomDipCm) > 0.01f;
+	if (!bActive)
+	{
+		if (bCameraKickApplied)
+		{
+			if (Camera)
+			{
+				Camera->SetFieldOfView(BaseFieldOfView);
+			}
+			if (SpringArm)
+			{
+				SpringArm->SocketOffset = BaseSocketOffset;
+			}
+			bCameraKickApplied = false;
+		}
+		return;
+	}
+
+	if (Camera)
+	{
+		Camera->SetFieldOfView(BaseFieldOfView + LiveFovKickDeg);
+	}
+	if (SpringArm)
+	{
+		// Socket offset is applied after the lag maths, so the dip lands crisply instead of being
+		// damped away like a TargetOffset change would be.
+		SpringArm->SocketOffset = BaseSocketOffset + FVector(0.f, 0.f, LiveBoomDipCm);
+	}
+	bCameraKickApplied = true;
+}
+#pragma endregion K2 moonyfli
+
 void ANightCoursePawn::BeginPlay()
 {
 	Super::BeginPlay();
 	EnforceCameraInvariants();
+
+	// add by K2 (R1): the components own the framing, so the impulse baseline is read from them
+	// rather than from a constant here.
+	if (Camera)
+	{
+		BaseFieldOfView = Camera->FieldOfView;
+	}
+	if (SpringArm)
+	{
+		BaseSocketOffset = SpringArm->SocketOffset;
+	}
+
 	ApplyConfiguredHeroVisual();
 	if (UWorld* World = GetWorld())
 	{
@@ -341,6 +471,7 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 
 	bLastActionWasAttack = bAttack;
 	HeroAnimPlayRate = FMath::Max(0.05f, bAttack ? AttackAnimRate : JumpAnimRate);
+	ScheduleCameraKicksForClip(Clip); //add by K2
 
 	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
 	{
@@ -394,6 +525,11 @@ float ANightCoursePawn::GetHeroActionRemainingSeconds() const
 void ANightCoursePawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Runs unconditionally: the slash plays while standing still, so gating this on bTrackAdvancing
+	// would drop the contact impulse entirely and leave a half-decayed kick frozen on screen.
+	UpdateCameraKicks(DeltaSeconds); //add by K2
+
 	if (!bTrackAdvancing)
 	{
 		return;
@@ -511,7 +647,16 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 	// add by K2 (R1): 表现时钟跟着判定走 —— 位移压缩多少倍，正在播的动作就加速多少倍
 	if (HeroSkelMesh && HeroSkelMesh->GetSkeletalMeshAsset())
 	{
-		HeroAnimPlayRate *= BaseTime / TargetTime;
+		const float CatchUpRate = BaseTime / TargetTime;
+		HeroAnimPlayRate *= CatchUpRate;
+
+		// Queued impulses hold delays in seconds, so speeding the clip up has to pull them in by
+		// the same factor or the landing dip would fire after the hero has already landed.
+		for (FNightCameraKick& Kick : PendingCameraKicks)
+		{
+			Kick.DelaySeconds /= CatchUpRate;
+		}
+
 		if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
 		{
 			if (UAnimMontage* Active = Instance->GetCurrentActiveMontage())
