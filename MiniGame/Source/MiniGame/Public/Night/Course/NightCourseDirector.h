@@ -125,6 +125,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course|Debug")
 	FString GetLastFailureReason() const { return LastFailureReason; }
 
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Debug")
+	bool DidEnterRuntimeCourse() const { return bDidEnterRuntimeCourse; }
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsAwaitingInput() const { return bRunning && bWindowOpen && !bAdvancing; }
 
@@ -202,6 +205,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
 	ENightCoursePhase Phase = ENightCoursePhase::Idle;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")
+	bool bDidEnterRuntimeCourse = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Result")
 	bool bHasResult = false;

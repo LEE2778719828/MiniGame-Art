@@ -257,6 +257,39 @@ namespace NightCourseAtom_Private
 			: Fallback;
 	}
 
+	static EIngredientId PickIngredientDropId(
+		FRandomStream& Rng,
+		const UNightG1CourseConfig* Config,
+		const EIngredientId AuthoredFallback)
+	{
+		if (!Config || !Config->bRandomizeEnemyDrops)
+		{
+			return AuthoredFallback != EIngredientId::None
+				? AuthoredFallback
+				: (Config ? Config->DefaultDropId : EIngredientId::F01_LingGu);
+		}
+
+		TArray<EIngredientId> ValidPool;
+		for (const EIngredientId Candidate : Config->IngredientDropPool)
+		{
+			if (Candidate != EIngredientId::None)
+			{
+				ValidPool.Add(Candidate);
+			}
+		}
+		if (ValidPool.Num() == 0)
+		{
+			ValidPool = {
+				EIngredientId::F01_LingGu,
+				EIngredientId::F02_YinShanJun,
+				EIngredientId::F03_ChiYanJiao,
+				EIngredientId::F04_YueLinYu,
+				EIngredientId::F05_XuanYuQin
+			};
+		}
+		return ValidPool[Rng.RandRange(0, ValidPool.Num() - 1)];
+	}
+
 	static bool SelectWeightedTemplate(
 		const TArray<FNightRuleAtomEntry>& Templates,
 		FRandomStream& Rng,
@@ -773,7 +806,15 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				: EFoeId::None;
 			if (LocalStones[ActionIndex + 1].bHasFoe)
 			{
-				if (LocalStones[ActionIndex + 1].DropId == EIngredientId::None)
+				if (Config->bRandomizeEnemyDrops)
+				{
+					LocalStones[ActionIndex + 1].DropId =
+						NightCourseAtom_Private::PickIngredientDropId(
+							RuleRandomStream,
+							Config,
+							LocalStones[ActionIndex + 1].DropId);
+				}
+				else if (LocalStones[ActionIndex + 1].DropId == EIngredientId::None)
 				{
 					LocalStones[ActionIndex + 1].DropId = Config->DefaultDropId;
 				}
@@ -1644,6 +1685,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	LastFailureReason.Reset();
 	bHasResult = false;
 	LastResult = FNightResult();
+	bDidEnterRuntimeCourse = false;
 	UE_LOG(
 		LogTemp,
 		Display,
@@ -1758,6 +1800,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		VisualBindings.Num());
 
 	bRunning = true;
+	bDidEnterRuntimeCourse = true;
 	ElapsedSeconds = 0.f;
 	CurrentStoneIndex = 0;
 	ActiveBeatIndex = INDEX_NONE;
@@ -2339,15 +2382,18 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		int32 DropCount = StoneSpecs[Beat.ToStoneIndex].DropCount;
 		if (bBranchBeat && bHasActiveRouteRule)
 		{
-			const int32 Rhythm = FMath::Max(1, ActiveRouteRule.DropRhythmEveryN);
-			if ((BranchBeatCount % Rhythm) != 0)
+			if (!Config->bDropIngredientOnEveryEnemyKill)
 			{
-				DropCount = 0;
-			}
-			if (ActiveRouteRule.DropCycle.Num() > 0)
-			{
-				DropId = ActiveRouteRule.DropCycle[
-					(BranchBeatCount - 1) % ActiveRouteRule.DropCycle.Num()];
+				const int32 Rhythm = FMath::Max(1, ActiveRouteRule.DropRhythmEveryN);
+				if ((BranchBeatCount % Rhythm) != 0)
+				{
+					DropCount = 0;
+				}
+				if (ActiveRouteRule.DropCycle.Num() > 0)
+				{
+					DropId = ActiveRouteRule.DropCycle[
+						(BranchBeatCount - 1) % ActiveRouteRule.DropCycle.Num()];
+				}
 			}
 			DropCount *= FMath::Max(1, ActiveRouteRule.BranchDropCountMul);
 		}
@@ -2591,9 +2637,14 @@ void UNightCourseDirector::UpdateRouteEffects(float DeltaTime)
 
 	if (INightFeelBridge* Feel = GetFeel())
 	{
+		const float DrainScale = Config
+			? FMath::Max(0.f, Config->ForkSoulDrainScale)
+			: 1.f;
 		INightFeelBridge::Execute_ApplySoulPenalty(
 			FeelBridgeObject,
-			ActiveRouteRule.DotSoulPerSecond * FMath::Max(0.f, DeltaTime),
+			ActiveRouteRule.DotSoulPerSecond
+				* DrainScale
+				* FMath::Max(0.f, DeltaTime),
 			ENightJudgeOutcome::Miss);
 		if (INightFeelBridge::Execute_GetSoul(FeelBridgeObject) <= 0.f)
 		{
@@ -2893,6 +2944,7 @@ void UNightCourseDirector::ResetCourse()
 		SetComponentTickEnabled(false);
 	}
 	bRunning = false;
+	bDidEnterRuntimeCourse = false;
 	bWindowOpen = false;
 	bAdvancing = false;
 	SetPhase(ENightCoursePhase::Idle);

@@ -1,12 +1,14 @@
 #include "Night/Course/NightCourseHost.h"
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightBridgeSegmentActor.h"
+#include "Night/Course/NightCourseGameMode.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "../../../SStandaloneSandbox.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h" //add by K2
 #include "Components/ExponentialHeightFogComponent.h"
@@ -15,6 +17,8 @@
 #include "Components/BoxComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/GameplayStatics.h"
@@ -219,6 +223,49 @@ namespace NightCourseStage_Private
 			TintMesh(SMC, Mat, Color);
 		}
 		return Actor;
+	}
+
+	static ENightLevelId ToNightLevelId(const FName LevelId)
+	{
+		if (LevelId == TEXT("L1"))
+		{
+			return ENightLevelId::L1;
+		}
+		if (LevelId == TEXT("L2"))
+		{
+			return ENightLevelId::L2;
+		}
+		if (LevelId == TEXT("L3"))
+		{
+			return ENightLevelId::L3;
+		}
+		return ENightLevelId::T0;
+	}
+
+	static ENightForkPair ToNightForkPair(const FName ForkPair)
+	{
+		if (ForkPair == TEXT("AC"))
+		{
+			return ENightForkPair::AC;
+		}
+		if (ForkPair == TEXT("BC"))
+		{
+			return ENightForkPair::BC;
+		}
+		return ENightForkPair::AB;
+	}
+
+	static FNightBootstrap MakeNightBootstrap(const FSNightBootstrap& Source)
+	{
+		FNightBootstrap Bootstrap;
+		Bootstrap.LevelId = ToNightLevelId(Source.LevelId);
+		Bootstrap.ForkPair = ToNightForkPair(Source.ForkPair);
+		Bootstrap.GiftBuffs.bGuideKite = Source.GiftBuffState.bGuideKite;
+		Bootstrap.GiftBuffs.bSpareLamp = Source.GiftBuffState.bLifeLamp;
+		Bootstrap.GiftBuffs.bKeyCoin = Source.GiftBuffState.bBeatCoin;
+		Bootstrap.GiftBuffs.bTaotieBox = Source.GiftBuffState.bGluttonBox;
+		Bootstrap.Seed = Source.Seed;
+		return Bootstrap;
 	}
 }
 
@@ -503,6 +550,58 @@ void ANightCourseHost::RebuildEditorPreview()
 		EditorPreviewMeshActors.Num());
 }
 
+void ANightCourseHost::PrepareChefNightFlow()
+{
+	if (!bUseChefDayFlow)
+	{
+		return;
+	}
+
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	if (!GameInstance)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Stage=Flow] No USChefGameInstance found; using the Host Bootstrap without Day flow."));
+		return;
+	}
+
+	if (GameInstance->Phase == ESGamePhase::Boot
+		|| GameInstance->Phase == ESGamePhase::PrepareNight)
+	{
+		if (!GameInstance->StartNight())
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=Flow] Could not establish NightRunning in USChefGameInstance."));
+			return;
+		}
+	}
+
+	if (GameInstance->Phase == ESGamePhase::NightRunning)
+	{
+		Bootstrap = NightCourseStage_Private::MakeNightBootstrap(
+			GameInstance->GetPendingNightBootstrap());
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=Flow] NightRunning established from Day flow: stage=%s seed=%d forkPair=%s."),
+			*GameInstance->StageId.ToString(),
+			Bootstrap.Seed,
+			*GameInstance->GetPendingNightBootstrap().ForkPair.ToString());
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Stage=Flow] GameInstance phase=%d; Host Bootstrap was not replaced."),
+			static_cast<int32>(GameInstance->Phase));
+	}
+}
+
 void ANightCourseHost::BeginPlay()
 {
 	Super::BeginPlay();
@@ -514,6 +613,7 @@ void ANightCourseHost::BeginPlay()
 		Config ? *Config->GetPathName() : TEXT("<null>"),
 		*GetNameSafe(Director),
 		bAutoStart ? 1 : 0);
+	PrepareChefNightFlow();
 	if (LayoutBounds)
 	{
 		LayoutBounds->SetBoxExtent(LayoutBoundsExtent);
@@ -838,6 +938,10 @@ bool ANightCourseHost::StartNight_Implementation(
 
 void ANightCourseHost::ResetCourse()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RetryTimer);
+	}
 	if (Director)
 	{
 		Director->ResetCourse();
@@ -887,6 +991,152 @@ void ANightCourseHost::HandleFinished(const FNightResult& Result)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("  Drop Id=%d Count=%d"), static_cast<int32>(Stack.Id), Stack.Count);
 	}
+
+	USChefGameInstance* GameInstance =
+		bUseChefDayFlow ? GetGameInstance<USChefGameInstance>() : nullptr;
+	const bool bDayFlowAccepted = GameInstance
+		? GameInstance->ConsumeNightCourseResult(Result)
+		: !bUseChefDayFlow;
+	if (bUseChefDayFlow && !GameInstance)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Flow] Night result cannot reach Day: USChefGameInstance is missing."));
+	}
+	else if (bUseChefDayFlow && !bDayFlowAccepted)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Flow] Day rejected the Night result; automatic transition/retry was not applied."));
+	}
+
+	if (Result.bSuccess && !Result.bFailedMidway)
+	{
+		if (bDayFlowAccepted)
+		{
+			TravelToDay();
+		}
+		return;
+	}
+
+	if (bAutoRetryOnFailure
+		&& !Result.bSuccess
+		&& Director
+		&& Director->DidEnterRuntimeCourse()
+		&& bDayFlowAccepted)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				RetryTimer,
+				this,
+				&ANightCourseHost::RetryAfterFailure,
+				FMath::Max(0.05f, AutoRetryDelaySeconds),
+				false);
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=Flow] Gameplay failure accepted; retry scheduled in %.2fs."),
+				FMath::Max(0.05f, AutoRetryDelaySeconds));
+		}
+	}
+}
+
+void ANightCourseHost::RetryAfterFailure()
+{
+	USChefGameInstance* GameInstance =
+		bUseChefDayFlow ? GetGameInstance<USChefGameInstance>() : nullptr;
+	if (GameInstance)
+	{
+		if (GameInstance->Phase != ESGamePhase::NightRunning
+			&& !GameInstance->StartNight())
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=Flow] Automatic retry could not re-enter NightRunning."));
+			return;
+		}
+		if (GameInstance->Phase == ESGamePhase::NightRunning)
+		{
+			Bootstrap = NightCourseStage_Private::MakeNightBootstrap(
+				GameInstance->GetPendingNightBootstrap());
+		}
+	}
+
+	FString Error;
+	if (!TryStartCourse(Error))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Flow] Automatic retry failed to start the course: %s."),
+			Error.IsEmpty() ? TEXT("<empty>") : *Error);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=Flow] Automatic retry started with seed=%d."),
+			Bootstrap.Seed);
+	}
+}
+
+void ANightCourseHost::TravelToDay()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const ANightCourseGameMode* NightGameMode =
+		Cast<ANightCourseGameMode>(World->GetAuthGameMode());
+	if (!NightGameMode || !NightGameMode->bTravelToDayOnSuccess)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=Flow] Day travel is disabled or the current GameMode is not ANightCourseGameMode."));
+		return;
+	}
+
+	const FSoftObjectPath DayLevelPath =
+		NightGameMode->SuccessDayLevel.ToSoftObjectPath();
+	const FString DayLevelPackage = DayLevelPath.GetLongPackageName();
+	if (DayLevelPackage.IsEmpty())
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Flow] SuccessDayLevel is not configured; staying in the Night map."));
+		return;
+	}
+
+	FString Options;
+	const FSoftObjectPath DayGameModePath =
+		NightGameMode->SuccessDayGameMode.ToSoftObjectPath();
+	if (!DayGameModePath.IsNull())
+	{
+		Options = FString::Printf(
+			TEXT("?game=%s"),
+			*DayGameModePath.ToString());
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Flow] Night succeeded; opening Day level='%s' gameMode='%s'."),
+		*DayLevelPackage,
+		DayGameModePath.IsNull() ? TEXT("<map default>") : *DayGameModePath.ToString());
+	UGameplayStatics::OpenLevel(
+		this,
+		FName(*DayLevelPackage),
+		true,
+		Options);
 }
 
 void ANightCourseHost::HandleDirectorDebugMessage(

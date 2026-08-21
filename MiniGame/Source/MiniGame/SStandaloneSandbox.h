@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/SaveGame.h"
+#include "Night/Shared/NightSharedTypes.h"
 #include "SStandaloneSandbox.generated.h"
 
 class UTextBlock;
@@ -698,6 +699,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	bool ConsumeNightResult(const FSNightResult& Result);
+
+	/** Convert a playable NightCourse result into the Day inventory/settlement contract. */
+	UFUNCTION(BlueprintCallable, Category = "S Flow")
+	bool ConsumeNightCourseResult(const FNightResult& Result);
 
 	UFUNCTION(BlueprintCallable, Category = "S Inventory")
 	bool AddIngredient(FName IngredientId, int32 Quantity);

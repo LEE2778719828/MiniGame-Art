@@ -65,11 +65,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")
 	float StartingSoul = 100.f;
 
+	/** Multiplier applied to the authored continuous soul drain on a selected Fork route. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Fork", meta = (ClampMin = "0.0"))
+	float ForkSoulDrainScale = 0.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Drops")
 	EIngredientId DefaultDropId = EIngredientId::F01_LingGu;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Drops")
 	int32 DefaultDropCount = 1;
+
+	/**
+	 * When enabled, every successful Enemy beat grants an ingredient.
+	 * When disabled, branch DropRhythmEveryN/DropCycle rules may limit drops.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Drops")
+	bool bDropIngredientOnEveryEnemyKill = true;
+
+	/** Repeated ingredient IDs act as weights for random enemy drops. Empty uses all Day ingredients. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Drops")
+	TArray<EIngredientId> IngredientDropPool;
+
+	/** When enabled, authored landing-point drop IDs are replaced by a deterministic random pool pick. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Drops")
+	bool bRandomizeEnemyDrops = true;
 
 	/** Repeated IDs act as weights for procedural enemy selection. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")

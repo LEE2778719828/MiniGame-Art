@@ -43,6 +43,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
 	bool bAutoStart = true;
 
+	/** Use USChefGameInstance's Night → Day inventory and retry flow when present. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	bool bUseChefDayFlow = true;
+
+	/** Automatically restart a run after a gameplay failure. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	bool bAutoRetryOnFailure = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (ClampMin = "0.05"))
+	float AutoRetryDelaySeconds = 0.5f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course|Layout")
 	TObjectPtr<UBoxComponent> LayoutBounds;
 
@@ -178,6 +189,9 @@ protected:
 	void BuildPlayableStage();
 	void ClearCourseResult();
 	void EmitDebugMessage(const FString& Message, bool bIsError);
+	void PrepareChefNightFlow();
+	void RetryAfterFailure();
+	void TravelToDay();
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> StageCubeMesh;
@@ -186,5 +200,6 @@ protected:
 	TObjectPtr<UMaterialInterface> StageMaterial;
 
 	FTimerHandle AutoStartTimer;
+	FTimerHandle RetryTimer;
 };
 #pragma endregion K2 moonyfli
