@@ -295,12 +295,20 @@ public:
 #pragma region K2 moonyfli
 	void SetPortrait(UTexture2D* InTexture);
 	void SetSceneSeatEnabled(bool bEnabled);
-	void NotifySeatOccupied(const FString& OccupantKey, bool bSpecialNpc);
+	void NotifySeatOccupied(
+		const FString& OccupantKey,
+		bool bSpecialNpc,
+		FName IngredientId,
+		int32 Level);
 	void NotifySeatVacated();
 	void NotifyServeSucceeded(bool bSpecialNpc);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
-	void OnSeatOccupied(const FString& OccupantKey, bool bSpecialNpc);
+	void OnSeatOccupied(
+		const FString& OccupantKey,
+		bool bSpecialNpc,
+		FName IngredientId,
+		int32 Level);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
 	void OnSeatVacated();

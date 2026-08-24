@@ -1085,9 +1085,8 @@ TSharedRef<SWidget> USDayDragPreview::RebuildWidget()
 		DragImage = WidgetTree->ConstructWidget<UImage>(
 			UImage::StaticClass(),
 			TEXT("DayDragPreviewImage"));
-		// The world-space dish plane is viewed from its reverse UV side; mirror the UMG copy to match.
-		DragImage->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
-		DragImage->SetRenderScale(FVector2D(-1.0f, 1.0f));
+		// Keep the drag preview in the texture's authored orientation. The world-space dish
+		// plane applies its own horizontal correction when it is scaled below.
 		DragImage->SetVisibility(ESlateVisibility::HitTestInvisible);
 		WidgetTree->RootWidget = DragImage;
 	}
@@ -1321,7 +1320,10 @@ void ASDayCellVisual::RefreshVisual()
 			* (1.0f + Tune.ScalePerLevel * static_cast<float>(Piece.Level))
 			* (bSelected ? Tune.SelectedScale : 1.0f);
 		DishIconMaterial->SetTextureParameterValue(TextureParameter, DishIcon);
-		PieceIcon->SetRelativeScale3D(FVector(IconSize / 100.0f));
+		// The camera sees the engine plane from its reverse UV side. Negating local X restores
+		// the texture's authored left/right orientation without rotating it upside down.
+		const float IconScale = IconSize / 100.0f;
+		PieceIcon->SetRelativeScale3D(FVector(-IconScale, IconScale, IconScale));
 		PieceIcon->SetRelativeRotation(FRotator(0.0f, Tune.Yaw, 0.0f));
 		PieceIcon->SetRelativeLocation(Tune.LocalOffset);
 		const float Push = Tune.CameraPush + (bSelected ? Tune.SelectedLift : 0.0f);
@@ -1519,14 +1521,16 @@ void ASDayCharacterStandIn::SetSceneSeatEnabled(const bool bEnabled)
 
 void ASDayCharacterStandIn::NotifySeatOccupied(
 	const FString& OccupantKey,
-	const bool bSpecialNpc)
+	const bool bSpecialNpc,
+	const FName IngredientId,
+	const int32 Level)
 {
 	if (PresentedOccupantKey == OccupantKey)
 	{
 		return;
 	}
 	PresentedOccupantKey = OccupantKey;
-	OnSeatOccupied(OccupantKey, bSpecialNpc);
+	OnSeatOccupied(OccupantKey, bSpecialNpc, IngredientId, Level);
 }
 
 void ASDayCharacterStandIn::NotifySeatVacated()
@@ -2270,7 +2274,11 @@ void ASDayBoardPresenter::RefreshCharacters()
 			Seat->CustomerId = Customer.CustomerId;
 			Seat->bOccupied = true;
 			Seat->SetPortrait(ResolveCustomerPortrait(Customer.DisplayName));
-			Seat->NotifySeatOccupied(Customer.CustomerId, false);
+			Seat->NotifySeatOccupied(
+				Customer.CustomerId,
+				false,
+				Customer.Order.IngredientId,
+				Customer.Order.Level);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -2302,7 +2310,11 @@ void ASDayBoardPresenter::RefreshCharacters()
 			Seat->NpcId = SeatedNpc.NpcId;
 			Seat->bOccupied = true;
 			Seat->SetPortrait(ResolveSpecialNpcPortrait(SeatedNpc.NpcId));
-			Seat->NotifySeatOccupied(SeatedNpc.NpcId.ToString(), true);
+			Seat->NotifySeatOccupied(
+				SeatedNpc.NpcId.ToString(),
+				true,
+				SeatedNpc.Order.IngredientId,
+				SeatedNpc.Order.Level);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
 			Seat->SetHeadline(
 				FString::Printf(
