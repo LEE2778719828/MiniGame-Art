@@ -15,6 +15,7 @@ class UCheckBox; //add by K2
 class UCanvasPanelSlot;
 class UCameraComponent;
 class UDirectionalLightComponent;
+class UImage;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class USkeletalMeshComponent; //add by K2
@@ -77,6 +78,11 @@ struct MINIGAME_API FSDayDishIconTuneRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board", meta = (ClampMin = "1.0"))
 	float SelectedScale = 1.18f;
+
+	/** Screen-space multiplier used only while the dish follows the mouse or finger. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board",
+		meta = (ClampMin = "0.1", UIMin = "0.25", UIMax = "2.0"))
+	float DragPreviewScale = 0.75f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	float Yaw = 0.0f;
@@ -389,6 +395,31 @@ public:
 };
 #pragma endregion K2 moonyfli
 
+/**
+ * Screen-space dish shown while a board piece follows the pointer. Keeping the preview in
+ * the viewport prevents the authored stove/pan meshes from occluding it on desktop or mobile.
+ */
+UCLASS()
+class MINIGAME_API USDayDragPreview : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void ShowPreview(
+		UTexture2D* Texture,
+		const FVector2D& ScreenPosition,
+		const FVector2D& PreviewSize);
+	void MovePreview(const FVector2D& ScreenPosition);
+	void HidePreview();
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> DragImage;
+};
+
 UCLASS(Blueprintable)
 class MINIGAME_API ASDayBoardPresenter : public AActor
 {
@@ -470,6 +501,8 @@ public:
 
 private:
 	void BuildWhitebox();
+	void EnsureDragPreview();
+	void HideDragPreview();
 	void BuildCells();
 	void BuildBins();
 	void BuildCharacters();
@@ -502,6 +535,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ASDayCharacterStandIn>> CharacterStandIns;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USDayDragPreview> DragPreview;
 
 	TMap<int32, FTimerHandle> BinAnimTimers; //add by K2
 
