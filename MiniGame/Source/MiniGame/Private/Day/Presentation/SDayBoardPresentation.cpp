@@ -1078,6 +1078,63 @@ using namespace DayBoardPresentationPrivate;
 
 #pragma region K2 moonyfli
 
+TSharedRef<SWidget> USDayDragPreview::RebuildWidget()
+{
+	if (WidgetTree && !WidgetTree->RootWidget)
+	{
+		DragImage = WidgetTree->ConstructWidget<UImage>(
+			UImage::StaticClass(),
+			TEXT("DayDragPreviewImage"));
+		// The world-space dish plane is viewed from its reverse UV side; mirror the UMG copy to match.
+		DragImage->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+		DragImage->SetRenderScale(FVector2D(-1.0f, 1.0f));
+		DragImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+		WidgetTree->RootWidget = DragImage;
+	}
+
+	return Super::RebuildWidget();
+}
+
+void USDayDragPreview::ShowPreview(
+	UTexture2D* Texture,
+	const FVector2D& ScreenPosition,
+	const FVector2D& PreviewSize)
+{
+	if (!Texture)
+	{
+		HidePreview();
+		return;
+	}
+
+	if (!DragImage)
+	{
+		TakeWidget();
+	}
+	if (!DragImage)
+	{
+		return;
+	}
+
+	DragImage->SetBrushFromTexture(Texture, true);
+	DragImage->SetDesiredSizeOverride(PreviewSize);
+	SetDesiredSizeInViewport(PreviewSize);
+	// Centre horizontally and lift the preview above a finger so the touch point stays visible.
+	SetAlignmentInViewport(FVector2D(0.5f, 1.15f));
+	MovePreview(ScreenPosition);
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void USDayDragPreview::MovePreview(const FVector2D& ScreenPosition)
+{
+	// Pointer positions arrive in physical viewport pixels; let UMG remove the DPI scale.
+	SetPositionInViewport(ScreenPosition, true);
+}
+
+void USDayDragPreview::HidePreview()
+{
+	SetVisibility(ESlateVisibility::Collapsed);
+}
+
 ASDayCellVisual::ASDayCellVisual()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -1565,6 +1622,7 @@ void ASDayBoardPresenter::BeginPlay()
 	DisableDayArtCollision(GetWorld());
 #pragma endregion K2 moonyfli
 	BuildWhitebox();
+	EnsureDragPreview();
 
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
@@ -1613,6 +1671,11 @@ void ASDayBoardPresenter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
 		GameInstance->OnSandboxStateChanged.RemoveDynamic(this, &ASDayBoardPresenter::RefreshFromLogic);
+	}
+	if (DragPreview)
+	{
+		DragPreview->RemoveFromParent();
+		DragPreview = nullptr;
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -2381,6 +2444,7 @@ void ASDayBoardPresenter::SetUseExternalPointerDriver(const bool bEnabled)
 
 void ASDayBoardPresenter::CancelPointerInteraction()
 {
+	HideDragPreview();
 	ASMergeBoard* Board = LogicBoard.Get();
 	if (!Board)
 	{
@@ -2665,14 +2729,81 @@ bool ASDayBoardPresenter::TryDecomposeInIngredientArea(
 void ASDayBoardPresenter::UpdateDraggedIcon(const FVector2D& ScreenPosition)
 {
 	ASMergeBoard* Board = LogicBoard.Get();
+	if (!Board)
+	{
+		Board = ASMergeBoard::FindBoard(this);
+		LogicBoard = Board;
+	}
 	if (!Board || !Board->IsDragging())
+	{
+		HideDragPreview();
+		return;
+	}
+
+	const int32 CellIndex = Board->GetActiveDragCellIndex();
+	ASDayCellVisual* Cell = GetCellVisual(CellIndex);
+	if (!Cell)
+	{
+		HideDragPreview();
+		return;
+	}
+
+	FSDishPiece Piece;
+	if (!Board->TryGetPiece(CellIndex, Piece))
+	{
+		HideDragPreview();
+		return;
+	}
+
+	const USDayBoardVisualConfig* Config = VisualConfig.LoadSynchronous();
+	UTexture2D* Texture = DayBoardPresentationPrivate::ResolveDishIcon(
+		Config,
+		Piece.IngredientId,
+		Piece.Level);
+	if (!Texture)
+	{
+		HideDragPreview();
+		return;
+	}
+
+	EnsureDragPreview();
+	if (!DragPreview)
 	{
 		return;
 	}
 
-	ASDayCellVisual* Cell = GetCellVisual(Board->GetActiveDragCellIndex());
-	if (!Cell || !Cell->PieceIcon || !Cell->PieceIcon->IsVisible())
+	if (!bDragIconTuneResolved)
 	{
+		DragIconTune = DayBoardPresentationPrivate::ResolveDishIconTune(Config);
+		bDragIconTuneResolved = true;
+	}
+
+	const float PreviewSize = DragIconTune.WorldSize
+		* (1.0f + DragIconTune.ScalePerLevel * static_cast<float>(Piece.Level))
+		* DragIconTune.SelectedScale
+		* DragIconTune.DragPreviewScale;
+	DragPreview->ShowPreview(
+		Texture,
+		ScreenPosition,
+		FVector2D(PreviewSize, PreviewSize));
+
+	// The cell refresh still owns the resting icon. Hide it only while the pointer preview is live,
+	// so click-release-click selection continues to show the selected dish between clicks.
+	if (Cell->PieceIcon)
+	{
+		Cell->PieceIcon->SetVisibility(false);
+	}
+}
+
+void ASDayBoardPresenter::EnsureDragPreview()
+{
+	if (IsValid(DragPreview))
+	{
+		// Day startup replaces pre-existing widgets before installing the formal HUD.
+		if (!DragPreview->IsInViewport())
+		{
+			DragPreview->AddToViewport(200);
+		}
 		return;
 	}
 
@@ -2682,47 +2813,23 @@ void ASDayBoardPresenter::UpdateDraggedIcon(const FVector2D& ScreenPosition)
 		return;
 	}
 
-	FVector RayOrigin;
-	FVector RayDirection;
-	if (!UGameplayStatics::DeprojectScreenToWorld(
+	DragPreview = CreateWidget<USDayDragPreview>(
 		PlayerController,
-		ScreenPosition,
-		RayOrigin,
-		RayDirection))
+		USDayDragPreview::StaticClass());
+	if (DragPreview)
 	{
-		return;
+		// Day HUD uses 80 and the debug overlays use at most 120.
+		DragPreview->AddToViewport(200);
+		DragPreview->HidePreview();
 	}
+}
 
-	const FVector PlaneNormal = Cell->GetActorUpVector();
-	const float Denominator = FVector::DotProduct(RayDirection, PlaneNormal);
-	if (FMath::Abs(Denominator) <= KINDA_SMALL_NUMBER)
+void ASDayBoardPresenter::HideDragPreview()
+{
+	if (DragPreview)
 	{
-		return;
+		DragPreview->HidePreview();
 	}
-
-	const float Distance = FVector::DotProduct(
-		Cell->GetActorLocation() - RayOrigin,
-		PlaneNormal) / Denominator;
-	if (Distance < 0.0f)
-	{
-		return;
-	}
-
-	if (!bDragIconTuneResolved)
-	{
-		const USDayBoardVisualConfig* Config = VisualConfig.LoadSynchronous();
-		DragIconTune = DayBoardPresentationPrivate::ResolveDishIconTune(Config);
-		bDragIconTuneResolved = true;
-	}
-
-	// Keep the icon on the same screen ray while lifting it toward the camera so the pan
-	// art cannot occlude it. This uses the touch/mouse ray identically on mobile and desktop.
-	const float CameraPush = FMath::Max(
-		0.0f,
-		DragIconTune.CameraPush + DragIconTune.SelectedLift);
-	const FVector IconWorldLocation =
-		RayOrigin + RayDirection * Distance - RayDirection * CameraPush;
-	Cell->SetDragIconWorldLocation(IconWorldLocation);
 }
 
 bool ASDayBoardPresenter::GetPointerState(FVector2D& OutScreenPosition) const
@@ -2837,6 +2944,7 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 
 void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 {
+	HideDragPreview();
 	ASMergeBoard* Board = LogicBoard.Get();
 	if (!Board)
 	{
