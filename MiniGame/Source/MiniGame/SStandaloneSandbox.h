@@ -1690,6 +1690,22 @@ class MINIGAME_API ASChefGameMode : public AGameModeBase
 public:
 	ASChefGameMode();
 
+	/** Fallback transition switch used when the Day level has no destination override. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Day|Flow")
+	bool bTravelToNightOnDayEnd = true;
+
+	/** Fallback Night level; normally configure the placed Day presenter / level instead. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Day|Flow")
+	TSoftObjectPtr<UWorld> SuccessNightLevel;
+
+	/** Fallback Night GameMode; normally configure the placed Day presenter / level instead. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Day|Flow")
+	TSoftClassPtr<AGameModeBase> SuccessNightGameMode;
+
+	/** Open the configured Night level after a successful Day settlement. Mirrors ANightCourseHost::TravelToDay. */
+	UFUNCTION(BlueprintCallable, Category = "Day|Flow")
+	void TravelToNight();
+
 protected:
 	virtual void BeginPlay() override;
 };
