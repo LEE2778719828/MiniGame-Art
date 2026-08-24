@@ -75,8 +75,10 @@ ANightCoursePawn::ANightCoursePawn()
 	HeroSkelMesh->SetVisibility(false);
 	HeroSkelMesh->SetHiddenInGame(true);
 
+	// 美术 0824 交付的跳跃（492ms，Takeoff 45ms / Land 331ms）。它替掉了 Jump_noknife2，
+	// 后者留在资产里作为通知量法的参照。
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpClip(
-		TEXT("/Game/Night/Character/Anims/Jump_noknife2.Jump_noknife2"));
+		TEXT("/Game/Night/Character/Anims/Jump.Jump"));
 	// 常速斩击（美术 0819 重导）。200ms 的 Slash_fast_Armature_Armature_kan 留作追赶加速的备选：
 	// 姿势与这条相同，但出刀提前到 36%，天生适合赶拍。
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> AttackClip(
@@ -486,7 +488,7 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 
 	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
 	{
-		// Zero blend on both ends. The clips are only ~370ms, so the montage defaults (250ms in,
+		// Zero blend on both ends. The clips are only 370-490ms, so the montage defaults (250ms in,
 		// 250ms out) would still be fading the slash in at its 179ms contact frame and would
 		// already have started fading it out before reaching it. Playing the sequence as a
 		// dynamic montage keeps the sequence's own notifies, so Contact / Land stay where they

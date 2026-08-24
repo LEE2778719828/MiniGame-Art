@@ -26,7 +26,7 @@ BASE = "/Game/Night/Character/Anims/"
 JUMP_TRAVERSAL_MS = 300.0
 ATTACK_TRAVERSAL_MS = 114.0
 
-JUMP_CLIPS = ["Jump_noknife2", "Jump_noknife2_fast"]
+JUMP_CLIPS = ["Jump", "Jump_noknife2", "Jump_noknife2_fast"]
 ATTACK_CLIPS = ["Slash", "Slash_fast_Armature_Armature_kan"]
 
 # Pairs to test for "is the short one just the long one retimed?". If the poses line up at

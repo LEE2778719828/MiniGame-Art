@@ -56,10 +56,17 @@ def component_space_pos(anim, bone, time):
     return accumulated.translation
 
 
+# Fixed sampling step instead of one sample per authored frame: the clips arrive at whatever rate
+# the DCC exported (30fps for the mixamo batch, 120fps for the 101 batch) and the reimported ones
+# report an internal resample rate that does not match either. A notify is placed in seconds, so
+# sampling on a uniform grid and reporting ms is both simpler and rate-agnostic.
+SAMPLE_STEP_MS = 5.0
+
+
 def frame_times(anim):
-    """One sample per authored frame, so reported times land on real keys."""
+    """Evenly spaced samples across the clip, one every SAMPLE_STEP_MS."""
     length = anim.get_play_length()
-    count = int(round(length * 30.0))
+    count = max(1, int(round(length * 1000.0 / SAMPLE_STEP_MS)))
     return [(index, length * index / float(count)) for index in range(count + 1)]
 
 
@@ -68,7 +75,7 @@ def report_jump(name):
     if not anim:
         return
 
-    log("=== {} : hips and toe height per frame (30fps, {:.0f}ms) ===".format(
+    log("=== {} : hips and toe height, {:.0f}ms long ===".format(
         name, anim.get_play_length() * 1000.0))
 
     samples = []
@@ -149,13 +156,13 @@ def report_slash(name):
             TRAIL_THRESHOLD * 100.0))
 
 
-# The _fast variants are not wired up right now, but JumpAnim / AttackAnim on BP_NightHero can be
-# pointed at them, and a swap would silently lose every notify. Measure them too so the marks can
-# be placed before that happens rather than after someone wonders where the effects went.
-for clip_name in ("Jump_noknife2", "Jump_noknife2_fast"):
+# Jump is what JumpAnim points at now; Jump_noknife2 is the clip it replaced and is kept in the
+# list as the reference whose notify placement is already known good, so a regression in this
+# script shows up as the old clip's numbers moving.
+for clip_name in ("Jump", "Jump_noknife2"):
     report_jump(clip_name)
 
-for clip_name in ("Slash", "Slash_fast_Armature_Armature_kan"):
+for clip_name in ("Slash",):
     report_slash(clip_name)
 
 log("done")

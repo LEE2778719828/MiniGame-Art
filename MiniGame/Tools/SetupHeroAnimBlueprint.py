@@ -1,9 +1,9 @@
 # Fills in the parts of the hero animation setup that have no pins and therefore cannot be reached
 # through graph editing: the sequence player's clip and loop flag.
 #
-# Action clips are not wrapped as montage assets. PlayHeroAction feeds Slash / Jump_noknife2 into
-# DefaultSlot via PlaySlotAnimationAsDynamicMontage with blend in/out of 0, so the Contact / Land
-# notifies stay aligned with AttackAnchorMs / JumpAnchorMs.
+# Action clips are not wrapped as montage assets. PlayHeroAction feeds whatever AttackAnim /
+# JumpAnim point at into DefaultSlot via PlaySlotAnimationAsDynamicMontage with blend in/out of 0,
+# so the Contact / Land notifies stay aligned with AttackAnchorMs / JumpAnchorMs.
 #
 # Run from the editor: py "D:/myProject/MiniGame/MiniGame/Tools/SetupHeroAnimBlueprint.py"
 # (the console resolves relative paths against the engine binaries directory, not the project)
@@ -11,7 +11,7 @@
 import unreal
 
 ABP_PATH = "/Game/Night/Character/ABP_NightHero"
-IDLE_CLIP = "/Game/Night/Character/Anims/Sitting"
+IDLE_CLIP = "/Game/Night/Character/Anims/Idle_Breath"
 
 
 def log(msg):

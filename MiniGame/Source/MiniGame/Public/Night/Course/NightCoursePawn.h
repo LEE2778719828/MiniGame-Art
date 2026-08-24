@@ -112,7 +112,7 @@ public:
 	 * 等 TA 在接触帧打上 AnimNotify 后，这两个值应改为运行时读取。
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
-	float JumpAnchorMs = 266.f;
+	float JumpAnchorMs = 331.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
 	float AttackAnchorMs = 179.f;

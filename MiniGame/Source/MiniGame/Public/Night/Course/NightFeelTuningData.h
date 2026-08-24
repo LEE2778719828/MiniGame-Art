@@ -98,7 +98,7 @@ public:
 
 	/** 位移与动作的对齐锚点（ms，倍率 1.0 下）：跳跃取落地帧、斩击取接触帧。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim 动作", meta = (ClampMin = "10.0", EditCondition = "bAnimDrivenAdvance"))
-	float JumpAnchorMs = 266.f;
+	float JumpAnchorMs = 331.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim 动作", meta = (ClampMin = "10.0", EditCondition = "bAnimDrivenAdvance"))
 	float AttackAnchorMs = 179.f;
