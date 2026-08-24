@@ -1,5 +1,6 @@
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Components/SceneComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -70,7 +71,50 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	FoeRuntimeBaseScale = FoeCapsule
 		? FoeCapsule->GetRelativeScale3D()
 		: FVector::OneVector;
+	FoeSkeletalRuntimeBaseScale = FoeSkeletalMeshComponent
+		? FoeSkeletalMeshComponent->GetRelativeScale3D()
+		: FVector::OneVector;
+	FoeRuntimeBaseLocation = FoeCapsule
+		? FoeCapsule->GetRelativeLocation()
+		: FVector::ZeroVector;
+	FoeSkeletalRuntimeBaseLocation = FoeSkeletalMeshComponent
+		? FoeSkeletalMeshComponent->GetRelativeLocation()
+		: FVector::ZeroVector;
+	bFoeVisualBaseTransformCached = true;
+	ApplyFoeZCompensation(false);
 	ApplyColors();
+}
+
+void ANightCourseStoneActor::ApplyFoeZCompensation(bool bPreview)
+{
+	if (!bFoeVisualBaseTransformCached)
+	{
+		FoeRuntimeBaseLocation = FoeCapsule
+			? FoeCapsule->GetRelativeLocation()
+			: FVector::ZeroVector;
+		FoeSkeletalRuntimeBaseLocation = FoeSkeletalMeshComponent
+			? FoeSkeletalMeshComponent->GetRelativeLocation()
+			: FVector::ZeroVector;
+		bFoeVisualBaseTransformCached = true;
+	}
+
+	const bool bApplyCompensation =
+		!bPreview || bApplyFoeZCompensationInPreview;
+	const float AppliedOffset = bApplyCompensation
+		? FoeZCompensationCm
+		: 0.f;
+	if (FoeCapsule)
+	{
+		FVector Location = FoeRuntimeBaseLocation;
+		Location.Z += AppliedOffset;
+		FoeCapsule->SetRelativeLocation(Location);
+	}
+	if (FoeSkeletalMeshComponent)
+	{
+		FVector Location = FoeSkeletalRuntimeBaseLocation;
+		Location.Z += AppliedOffset;
+		FoeSkeletalMeshComponent->SetRelativeLocation(Location);
+	}
 }
 
 void ANightCourseStoneActor::ApplyConfiguredFoeVisual()
@@ -181,19 +225,29 @@ void ANightCourseStoneActor::SetFoeArtTransform(
 			+ FoeRotation.RotateVector((FoePivotOffsetCm - MeshCenter) * FoeScale));
 		FoeCapsule->SetRelativeScale3D(FVector(FoeScale));
 		FoeRuntimeBaseScale = FoeCapsule->GetRelativeScale3D();
+		FoeRuntimeBaseLocation = FoeCapsule->GetRelativeLocation();
+		bFoeVisualBaseTransformCached = true;
+		ApplyFoeZCompensation(false);
 	}
 }
 
 void ANightCourseStoneActor::ShowFoe()
 {
-	if (!FoeCapsule)
-	{
-		return;
-	}
-
 	Spec.bHasFoe = true;
-	FoeCapsule->SetHiddenInGame(false);
-	FoeCapsule->SetVisibility(true);
+	bClearingFoe = false;
+	FoeClearAlpha = 1.f;
+	const bool bUseSkeletalFoe =
+		FoeSkeletalMeshComponent && FoeSkeletalMeshComponent->GetSkeletalMeshAsset();
+	if (FoeCapsule)
+	{
+		FoeCapsule->SetHiddenInGame(bUseSkeletalFoe);
+		FoeCapsule->SetVisibility(!bUseSkeletalFoe);
+	}
+	if (FoeSkeletalMeshComponent)
+	{
+		FoeSkeletalMeshComponent->SetHiddenInGame(!bUseSkeletalFoe);
+		FoeSkeletalMeshComponent->SetVisibility(bUseSkeletalFoe);
+	}
 	ApplyColors();
 }
 
@@ -213,7 +267,12 @@ void ANightCourseStoneActor::SetHighlight(bool bHighlight)
 
 void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 {
-	if (!Spec.bHasFoe && (!FoeCapsule || FoeCapsule->bHiddenInGame))
+	const bool bCapsuleVisible = FoeCapsule && FoeCapsule->IsVisible();
+	const bool bSkeletalVisible =
+		FoeSkeletalMeshComponent
+		&& FoeSkeletalMeshComponent->GetSkeletalMeshAsset()
+		&& FoeSkeletalMeshComponent->IsVisible();
+	if (!Spec.bHasFoe && !bCapsuleVisible && !bSkeletalVisible)
 	{
 		return;
 	}
@@ -224,8 +283,16 @@ void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 
 	if (!bAnimate)
 	{
-		FoeCapsule->SetHiddenInGame(true);
-		FoeCapsule->SetVisibility(false);
+		if (FoeCapsule)
+		{
+			FoeCapsule->SetHiddenInGame(true);
+			FoeCapsule->SetVisibility(false);
+		}
+		if (FoeSkeletalMeshComponent)
+		{
+			FoeSkeletalMeshComponent->SetHiddenInGame(true);
+			FoeSkeletalMeshComponent->SetVisibility(false);
+		}
 		SetActorTickEnabled(false);
 		return;
 	}
@@ -238,20 +305,41 @@ void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 void ANightCourseStoneActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!bClearingFoe || !FoeCapsule)
+	if (!bClearingFoe)
 	{
 		return;
 	}
 
 	FoeClearAlpha -= DeltaSeconds * 2.5f;
 	const float Alpha = FMath::Clamp(FoeClearAlpha, 0.f, 1.f);
-	FoeCapsule->SetRelativeScale3D(FoeRuntimeBaseScale * Alpha);
-	FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
+	if (FoeCapsule)
+	{
+		FoeCapsule->SetRelativeScale3D(FoeRuntimeBaseScale * Alpha);
+		FoeCapsule->AddLocalRotation(FRotator(0.f, 0.f, 360.f * DeltaSeconds));
+	}
+	if (FoeSkeletalMeshComponent && FoeSkeletalMeshComponent->GetSkeletalMeshAsset())
+	{
+		FoeSkeletalMeshComponent->SetRelativeScale3D(
+			FoeSkeletalRuntimeBaseScale * Alpha);
+		FoeSkeletalMeshComponent->AddLocalRotation(
+			FRotator(0.f, 0.f, 360.f * DeltaSeconds));
+	}
 
 	if (Alpha <= 0.01f)
 	{
-		FoeCapsule->SetHiddenInGame(true);
-		FoeCapsule->SetVisibility(false);
+		if (FoeCapsule)
+		{
+			FoeCapsule->SetHiddenInGame(true);
+			FoeCapsule->SetVisibility(false);
+			FoeCapsule->SetRelativeScale3D(FoeRuntimeBaseScale);
+		}
+		if (FoeSkeletalMeshComponent)
+		{
+			FoeSkeletalMeshComponent->SetHiddenInGame(true);
+			FoeSkeletalMeshComponent->SetVisibility(false);
+			FoeSkeletalMeshComponent->SetRelativeScale3D(
+				FoeSkeletalRuntimeBaseScale);
+		}
 		bClearingFoe = false;
 		SetActorTickEnabled(false);
 	}
@@ -264,9 +352,15 @@ void ANightCourseStoneActor::ApplyColors()
 	{
 		TintMesh(FoeCapsule, FoeColor);
 	}
+	if (FoeSkeletalMeshComponent
+		&& FoeSkeletalMeshComponent->GetSkeletalMeshAsset()
+		&& FoeSkeletalMeshComponent->IsVisible())
+	{
+		TintMesh(FoeSkeletalMeshComponent, FoeColor);
+	}
 }
 
-void ANightCourseStoneActor::TintMesh(UStaticMeshComponent* Mesh, const FLinearColor& Color)
+void ANightCourseStoneActor::TintMesh(UMeshComponent* Mesh, const FLinearColor& Color)
 {
 	if (!Mesh)
 	{

@@ -83,8 +83,28 @@ for name, mesh_path in (
 config = load_asset("/Game/Night/Course/Config/DA_Course")
 if config:
     config.set_editor_property("HeroClass", hero.generated_class())
+    # EFoeId is not always exported as a top-level unreal module symbol.
+    # Reuse the reflected enum type held by the existing config property so
+    # MapProperty receives native enum keys instead of Python strings.
+    existing_default_foe = config.get_editor_property("DefaultFoeId")
+    foe_enum = type(existing_default_foe)
+    foe_map = {}
+    for index, bp in enumerate(foes, 1):
+        if not bp:
+            raise RuntimeError("Missing foe Blueprint M{:02d}".format(index))
+        foe_name = f"M{index:02d}"
+        generated_class = bp.generated_class()
+        if generated_class is None:
+            raise RuntimeError("Foe Blueprint has no generated class: {}".format(bp.get_name()))
+        if not unreal.MathLibrary.class_is_child_of(
+                generated_class, unreal.NightCourseStoneActor):
+            raise RuntimeError(
+                "{} is not a NightCourseStoneActor Blueprint".format(bp.get_name()))
+        foe_key = getattr(foe_enum, foe_name)
+        foe_map[foe_key] = generated_class
+    config.set_editor_property("FoeActorMap", foe_map)
     config.modify()
     config.MarkPackageDirtyForEditor()
-    print("DA_Course modified in memory; use UE Save All manually.")
+    print("DA_Course HeroClass and FoeActorMap modified in memory; use UE Save All manually.")
 
 print("VISUAL_BP_MIGRATION_COMPLETE")

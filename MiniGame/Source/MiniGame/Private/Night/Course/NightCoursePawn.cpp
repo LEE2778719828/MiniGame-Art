@@ -16,6 +16,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "InputActionValue.h"
 #include "UObject/ConstructorHelpers.h"
@@ -41,6 +42,12 @@ namespace
 			return nullptr;
 		}
 		return Mesh->GetAnimInstance();
+	}
+
+	bool IsEditorPreviewWorld(const UObject* Object)
+	{
+		const UWorld* World = Object ? Object->GetWorld() : nullptr;
+		return World && !World->IsGameWorld();
 	}
 }
 
@@ -386,9 +393,50 @@ void ANightCoursePawn::ApplyHeroMesh(
 	BodyMesh->SetRelativeLocation(
 		FVector(0.f, 0.f, 90.f) + (PivotOffsetCm - MeshCenter) * AppliedHeroScale);
 	BodyMesh->SetRelativeScale3D(FVector(AppliedHeroScale));
+	HeroStaticRuntimeBaseLocation = BodyMesh->GetRelativeLocation();
+	bHeroStaticRuntimeBaseLocationCached = true;
 	HeadMesh->SetVisibility(false);
 	HeadMesh->SetHiddenInGame(true);
 	ApplyHeroMaterial(BodyMesh, MaterialOverride); //add by K2
+	ApplyHeroZCompensation(IsEditorPreviewWorld(this));
+}
+
+void ANightCoursePawn::ApplyHeroZCompensation(bool bPreview)
+{
+	const bool bApplyCompensation =
+		!bPreview || bApplyHeroZCompensationInPreview;
+	const float AppliedOffset = bApplyCompensation
+		? HeroZCompensationCm
+		: 0.f;
+
+	if (bPreferSkeletalHero
+		&& HeroSkelMesh
+		&& HeroSkelMesh->GetSkeletalMeshAsset())
+	{
+		if (!bHeroRuntimeBaseLocationCached)
+		{
+			HeroRuntimeBaseLocation = HeroSkelMesh->GetRelativeLocation();
+			bHeroRuntimeBaseLocationCached = true;
+		}
+		FVector Location = HeroRuntimeBaseLocation;
+		Location.Z += AppliedOffset;
+		HeroSkelMesh->SetRelativeLocation(Location);
+		return;
+	}
+
+	if (!bPreferSkeletalHero
+		&& BodyMesh
+		&& BodyMesh->GetStaticMesh())
+	{
+		if (!bHeroStaticRuntimeBaseLocationCached)
+		{
+			HeroStaticRuntimeBaseLocation = BodyMesh->GetRelativeLocation();
+			bHeroStaticRuntimeBaseLocationCached = true;
+		}
+		FVector Location = HeroStaticRuntimeBaseLocation;
+		Location.Z += AppliedOffset;
+		BodyMesh->SetRelativeLocation(Location);
+	}
 }
 
 void ANightCoursePawn::ApplyConfiguredHeroVisual()
@@ -452,8 +500,10 @@ void ANightCoursePawn::ResolveHeroArt()
 	{
 		HeroSkelMesh->SetRelativeRotation(HeroMeshRotation);
 		// 位置要带上 R2 的枢轴补偿，否则 ApplyConfiguredHeroVisual 刚算好的偏移会被这里抹掉
-		HeroSkelMesh->SetRelativeLocation(
-			HeroMeshOffset + HeroPivotOffsetCm * FMath::Max(0.01f, HeroScale));
+		HeroRuntimeBaseLocation =
+			HeroMeshOffset + HeroPivotOffsetCm * FMath::Max(0.01f, HeroScale);
+		bHeroRuntimeBaseLocationCached = true;
+		ApplyHeroZCompensation(IsEditorPreviewWorld(this));
 		HeroSkelMesh->SetVisibility(bSkeletalReady);
 		HeroSkelMesh->SetHiddenInGame(!bSkeletalReady);
 	}

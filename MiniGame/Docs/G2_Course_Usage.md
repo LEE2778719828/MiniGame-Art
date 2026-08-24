@@ -17,6 +17,7 @@
 - `UNightCourseDirector` 的 `ForkChoice → BranchEnterBuffer → BranchSegment → ExitBuffer`；
 - `UNightForkController` 的 AB/AC/BC、Q/E 选路和超时策略；
 - `UNightRouteRulesAsset` 的可见块、扣魂倍率、DoT、进场掉落、节奏、循环和带出；
+- `DA_Course.FoeActorMap` 的 EFoeId→敌人 Blueprint 映射；运行时由 Director 直接生成映射 Actor；
 - 魂归零失败、重复启动清理、真实 `RouteTaken`、HUD 和控制台调试。
 
 原先本页的 `DistanceFade`、`BranchA/BBeatCount` 等字段不是当前 C++ 契约，不能按旧字段配置；可见性目前由 `FNightRouteRuleRow::VisibleBlockCount` 控制。资产引用、BP 编译和 Save All 仍由用户手动完成。
@@ -79,7 +80,7 @@ G2 白模以 **AB** 为主。**AC/BC 与 C 规则 / 换键** 见 `Docs/G3_Course
 
 当前 Director 不使用距离淡出材质；路线规则通过
 `FNightRouteRuleRow::VisibleBlockCount` 对当前石块之后的可见范围进行硬裁剪，
-并同步隐藏/禁用对应的石块、桥和 Atom 视觉 Actor。
+并同步隐藏/禁用对应的石块、桥和已生成的敌人 Actor。
 
 ```text
 LastVisibleStone = CurrentStoneIndex + max(1, VisibleBlockCount)
@@ -106,7 +107,7 @@ LastVisibleStone = CurrentStoneIndex + max(1, VisibleBlockCount)
 
 ## PIE 步骤
 
-1. 打开 `/Game/Night/Course/Maps/L_Night_G1`，手动确认 `DA_Course`、`DA_Rules`、`DA_Atoms`、BranchRoutes 和 `DA_RouteRules` 已绑定
+1. 打开唯一正式关卡 `/Game/Night/Course/Maps/L_Night_G1_ForkTest`，确认 `DA_Course`、`DA_Rules`、`DA_Atoms`、BranchRoutes 和 `DA_RouteRules` 已绑定
 2. 在 `DA_Rules` 设置 `BaseAtomCount`；启用岔路时设置 `ForkAfterBaseAtomIndex`，并为 A/B/C 队列设置 `TargetAtomCount`
 3. 确认 `bEnableFork=true` 且 `ForkAfterBaseAtomIndex` 不超过生成的基础段长度
 4. 打完基础段 → HUD 出现 `FORK` 与左右牌 → **Q 选左** 或 **E 选右**
@@ -131,6 +132,7 @@ LastVisibleStone = CurrentStoneIndex + max(1, VisibleBlockCount)
 - `CourseRuleData.BaseAtomCount`、`CourseRuleData.BaseRoute`
 - `CourseRuleData.BranchRoutes[A/B/C].TargetAtomCount`、各队列 `Atoms[].Weight`
 - `RouteRules.Rows[A/B/C]`
+- `DA_Course.FoeActorMap[M01..M05]`：每项必须是 `ANightCourseStoneActor` 子类 Blueprint
 - `DA_Course` 不再提供旧 BeatCount/Proc fallback；缺少 canonical 引用会直接校验失败
 - `FNightBootstrap.GiftBuffs.bGuideKite` 开启岔路优势提示；其余礼物效果见 G3
 

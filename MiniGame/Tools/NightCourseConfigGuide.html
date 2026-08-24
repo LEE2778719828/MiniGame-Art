@@ -285,8 +285,8 @@
   <header>
     <h1>NightCourse 配置数据流与 UE 资产索引</h1>
     <p>
-      这页只描述当前 canonical Atom 管线：策划配置规则，艺术配置 Atom BP，
-      <code>DA_Course</code> 负责把两者和运行入口接起来。页面不会自动保存 UE 资产。
+      这页描述当前 canonical Night 管线：策划配置规则，艺术配置 Atom BP 和道路装饰 BP，
+      <code>DA_Course</code> 负责把它们和运行入口接起来。页面不会自动保存 UE 资产。
     </p>
     <div class="toolbar">
       <label>
@@ -306,7 +306,7 @@
       <div class="flow">
         <div class="flow-card">
           <span class="tag">入口</span>
-          <strong>L_Night_G1</strong>
+          <strong>L_Night_G1_ForkTest</strong>
           <span>选择地图 / PIE</span>
         </div>
         <div class="flow-card">
@@ -317,7 +317,7 @@
         <div class="flow-card">
           <span class="tag">汇总</span>
           <strong>DA_Course</strong>
-          <span>玩法数值、规则、Atom 库、分支规则</span>
+          <span>玩法数值、规则、Atom 库、分支规则、房屋/杆子配置</span>
         </div>
         <div class="flow-card">
           <span class="tag">策划</span>
@@ -327,7 +327,7 @@
         <div class="flow-card">
           <span class="tag">美术</span>
           <strong>DA_Atoms</strong>
-          <span>AtomKey → Atom BP；Entry/Exit/落脚点/桥/怪</span>
+          <span>AtomKey → Atom BP；Entry/Exit/落脚点/桥与临时预览</span>
         </div>
         <div class="flow-card">
           <span class="tag">组合</span>
@@ -342,7 +342,8 @@
       </div>
       <div class="note warn">
         <b>重要：</b>相邻 Atom 的衔接是长距离 Jump，使用 <code>DA_Atoms.TransitionJumpGapCm</code>，
-        不会自动在两个 Atom 之间生成一座桥。Atom 内部的桥和怪属于 Atom BP 的视觉配置。
+        不会自动在两个 Atom 之间生成一座桥。桥由 Atom BP 配置，敌人运行时 Blueprint 统一由
+        <code>DA_Course.FoeActorMap</code> 决定；Atom 只保留临时预览。
       </div>
     </section>
 
@@ -351,7 +352,8 @@
       <ol class="steps">
         <li>
           <h3>先做 Atom BP</h3>
-          在 Atom BP 中摆好 <code>Entry</code>、<code>Exit</code>、落脚点，以及每个落脚点的桥/怪视觉。
+          在 Atom BP 中摆好 <code>Entry</code>、<code>Exit</code>、落脚点和桥；如需对准位置，
+          可在落脚点填写 <code>Temporary Preview Prefab</code>，该引用不会进入运行时。
           一个动作数组长度为 N 时，Atom 应有 N+1 个有效落脚点。
         </li>
         <li>
@@ -369,7 +371,9 @@
         <li>
           <h3>汇总到 DA_Course</h3>
           将 <code>AtomRoute=DA_Atoms</code>、<code>CourseRuleData=DA_Rules</code>、
-          <code>RouteRules=DA_RouteRules</code>、<code>HeroClass=BP_NightHero</code> 绑定到同一个课程配置。
+          <code>RouteRules=DA_RouteRules</code>、<code>HeroClass=BP_NightHero</code> 绑定到同一个课程配置，
+          并在 <code>FoeActorMap</code> 中为每个 <code>EFoeId</code> 指定一个敌人 BP；
+          按需启用 <code>HouseRoadside</code> / <code>PoleRoadside</code> 并填入道路装饰 BP 池。
         </li>
         <li>
           <h3>绑定运行入口</h3>
@@ -383,15 +387,60 @@
           再执行 PIE。若需要看状态，使用 <code>Night.Course.Dump</code>。
         </li>
       </ol>
-      <div class="note error">
-        <b>当前工程检查提醒：</b>当前编辑器里曾检测到 <code>BP_NightCourseGameMode.CourseConfig</code> 为空、
-        <code>BP_NightCourseHost.Config</code> 仍指向旧的 <code>DA_NightG1_T0</code>，
-        且 <code>DA_Course.AtomRoute</code> 仍指向旧的 Atom 库。请按上面的目标引用重新检查并由你手动保存。
+      <div class="note">
+        <b>唯一正式入口：</b><code>L_Night_G1_ForkTest</code> 使用
+        <code>BP_NightCourseGameMode</code>、<code>BP_NightCourseHost</code> 和 canonical
+        <code>DA_Course</code>。旧测试关卡与测试 DA 已从工程清理。
       </div>
     </section>
 
     <section>
-      <h2>3. UE 资产索引</h2>
+      <h2>3. 道路两侧装饰</h2>
+      <p class="muted">
+        道路装饰由 <code>CourseDirector</code> 根据已组合的石头和桥在运行时生成；
+        Host 预览整条道路，Atom 只提供单段对位预览。
+      </p>
+      <div class="two-col">
+        <div>
+          <h3>DA_Course 配置</h3>
+          <ul>
+            <li><code>HouseRoadside</code> 和 <code>PoleRoadside</code> 是独立配置。</li>
+            <li><code>BlueprintPool</code> 支持多个 <code>ANightRoadsideSegmentActor</code> 子类；
+              每项 <code>Weight</code> 控制确定性随机选择。</li>
+            <li><code>SpacingCm</code> 是 End 到下一个 Start 的间距；房屋使用 <code>0</code> 保持连续。</li>
+            <li><code>LeftBridgeOffsetCm</code> / <code>RightBridgeOffsetCm</code> 是左右偏移；
+              房屋以路线起点的世界 <code>Y</code> 为基准，杆子以道路/桥中心线为基准。</li>
+            <li>房屋沿世界固定 <code>X</code> 轴排列，不跟随 Atom 方向；右侧生成会自动使用
+              <code>Y=-1</code> 镜像。房屋统一使用路线第一个节点的世界 <code>Z</code>，
+              再叠加 <code>ZOffsetCm</code>；杆子仍按道路/桥方向和采样高度排列。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>道路装饰 Blueprint</h3>
+          <ul>
+            <li>父类：<code>ANightRoadsideSegmentActor</code>。</li>
+            <li>移动 <code>StartMarker</code> 和 <code>EndMarker</code> 定义模块占用长度。</li>
+            <li>网格、材质、动画和缩放由 Blueprint 自己控制，生成器不覆盖缩放。</li>
+            <li>装饰默认无碰撞，不参与跳跃、攻击或石头判定。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note">
+        <b>随机规则：</b>房屋随机替换 Blueprint 但保持固定世界 <code>X</code> 轴上的标记首尾连续；杆子可以使用
+        <code>RandomYawRangeDeg</code>。随机流由课程 Seed、类别、左右侧和
+        <code>RandomSeedOffset</code> 派生，不影响 Atom、敌人或掉落随机。
+      </div>
+      <div class="note warn">
+        <b>Host LayoutBounds：</b>必须开启 <code>bEnforceLayoutBounds</code>；
+        <code>LayoutBoundsExtent</code> 表示以 Bounds 中心为原点的半尺寸。若当前 Atom 的
+        所有候选角度都越界，运行时会只沿世界 <code>Y</code> 轴把完整 Atom 平移到 Bounds 内，
+        <code>X/Z</code> 保持原值，再继续生成。该应急平移可能改变当前 Atom 与前一段的过渡距离，
+        但可避免整局直接生成失败；若仅靠 Y 平移仍无法放入 Bounds 时会失败。
+      </div>
+    </section>
+
+    <section>
+      <h2>4. UE 资产索引</h2>
       <p class="muted">
         路径就是 UE Content Browser 的对象路径。点击“复制路径”后可粘贴到 Content Browser 搜索框、
         DataAsset 引用槽或蓝图资产引用槽。
@@ -411,7 +460,7 @@
 
     <section class="two-col">
       <div>
-        <h2>4. 最小 canonical Rule JSON</h2>
+        <h2>5. 最小 canonical Rule JSON</h2>
         <p class="muted">
           将下面 JSON 复制到 <code>DA_Rules.EditorJson</code>，再在 UE 中点击
           <code>Import Editor Json</code>。Route 是模板池，按 Weight 生成目标数量；
@@ -456,11 +505,14 @@
         </div>
       </div>
       <div>
-        <h2>5. 运行前检查</h2>
+        <h2>6. 运行前检查</h2>
         <ul class="checklist" id="checklist">
-          <li><input type="checkbox" data-check="map"><span>打开 <code>L_Night_G1</code>，确认使用 <code>BP_NightCourseGameMode</code>。</span></li>
+          <li><input type="checkbox" data-check="map"><span>打开 <code>L_Night_G1_ForkTest</code>，确认使用 <code>BP_NightCourseGameMode</code>。</span></li>
           <li><input type="checkbox" data-check="gameMode"><span>GameMode 的 <code>CourseConfig</code> 指向 <code>DA_Course</code>。</span></li>
           <li><input type="checkbox" data-check="host"><span>关卡 Host 的 <code>Config</code> 指向同一个 <code>DA_Course</code>。</span></li>
+          <li><input type="checkbox" data-check="foes"><span><code>DA_Course.FoeActorMap</code> 的 M01–M05 都指向 <code>NightCourseStoneActor</code> 子类。</span></li>
+          <li><input type="checkbox" data-check="roadside"><span>启用道路装饰时，<code>HouseRoadside</code> / <code>PoleRoadside</code> 的 BP 均为
+            <code>ANightRoadsideSegmentActor</code> 子类且 Start/End 标记有效。</span></li>
           <li><input type="checkbox" data-check="rules"><span><code>DA_Rules</code> 已启用，Seed 与队列有效。</span></li>
           <li><input type="checkbox" data-check="atoms"><span><code>DA_Atoms</code> 已启用，AtomMap 中的 BP 均能加载。</span></li>
           <li><input type="checkbox" data-check="landing"><span>每个 Atom 的落脚点数量 = 对应 Actions 数量 + 1。</span></li>
@@ -472,7 +524,7 @@
     </section>
 
     <section>
-      <h2>6. 运行时数据流细节</h2>
+      <h2>7. 运行时数据流细节</h2>
       <div class="commands">
         <div class="command">
           <code>1. GameMode.BeginPlay</code>
@@ -492,7 +544,8 @@
         </div>
         <div class="command">
           <code>5. 视觉与判定</code>
-          <span>Atom BP 提供视觉绑定；Director 生成 gameplay carrier，并按落脚点顺序绑定 Actions。</span>
+          <span>Atom BP 提供桥与落点布局；Director 从 <code>FoeActorMap</code> 生成敌人，并从
+            <code>HouseRoadside</code> / <code>PoleRoadside</code> 生成道路装饰。</span>
         </div>
         <div class="command">
           <code>6. 结果接口</code>
@@ -506,13 +559,11 @@
     </section>
 
     <section>
-      <h2>7. 不要再挂载的旧配置</h2>
-      <p class="muted">这些资产可以保留作历史参考，但不应再作为 canonical 运行链的引用。</p>
+      <h2>8. Canonical 资产边界</h2>
+      <p class="muted">Night 运行链只从正式地图和 canonical DataAsset 读取配置；旧测试资源已从内容目录移除。</p>
       <div class="legacy">
-        <div><code>/Game/Night/Course/Data/DA_NightG1_T0</code><br><span class="small">旧总课程配置；不要再绑定到 Host。</span></div>
-        <div><code>/Game/Night/Course/Data/DA_NightAtomLibrary_Art_Test</code><br><span class="small">旧 Atom 库；目标是 Config/DA_Atoms。</span></div>
-        <div><code>/Game/Night/Course/Data/DA_NightAtomRoute_Test</code><br><span class="small">旧 Route 资产；规则队列现在由 DA_Rules 持有。</span></div>
-        <div><code>/Game/Night/Course/Data/DA_NightCourseRules_Test</code><br><span class="small">旧规则测试资产；不要替代 DA_Rules。</span></div>
+        <div><code>/Game/Night/Course/Maps/L_Night_G1_ForkTest</code><br><span class="small">唯一正式 Night 入口。</span></div>
+        <div><code>DA_Course</code> + <code>DA_Atoms</code> + <code>DA_Rules</code><br><span class="small">唯一运行时课程配置链；敌人由 <code>FoeActorMap</code> 选择。</span></div>
       </div>
     </section>
 
@@ -527,10 +578,10 @@
     const ASSETS = [
       {
         group: "入口地图",
-        name: "L_Night_G1",
-        path: "/Game/Night/Course/Maps/L_Night_G1",
-        role: "打开后 PIE 的主测试关卡；地图本身不承载动作队列。",
-        state: "入口",
+        name: "L_Night_G1_ForkTest",
+        path: "/Game/Night/Course/Maps/L_Night_G1_ForkTest",
+        role: "唯一正式 Night 入口；地图本身不承载动作队列。",
+        state: "正式入口",
         stateClass: ""
       },
       {
@@ -569,7 +620,7 @@
         group: "中心配置",
         name: "DA_Course",
         path: "/Game/Night/Course/Config/DA_Course",
-        role: "运行时唯一汇总入口：玩法参数 + HeroClass + DA_Rules + DA_Atoms + DA_RouteRules。",
+        role: "运行时唯一汇总入口：玩法参数 + HeroClass + FoeActorMap + HouseRoadside + PoleRoadside + DA_Rules + DA_Atoms + DA_RouteRules。",
         state: "核心",
         stateClass: ""
       },
@@ -608,13 +659,16 @@
     ];
 
     const FLOW_TEXT = [
-      "打开 L_Night_G1",
+      "打开 L_Night_G1_ForkTest",
       "确认 GameMode = BP_NightCourseGameMode",
       "GameMode.CourseConfig = DA_Course",
       "Host.Config = DA_Course",
       "DA_Course.CourseRuleData = DA_Rules",
       "DA_Course.AtomRoute = DA_Atoms",
       "DA_Course.RouteRules = DA_RouteRules",
+      "DA_Course.FoeActorMap = M01–M05 敌人 BP",
+      "DA_Course.HouseRoadside / PoleRoadside = 道路装饰 BP 池 + 间距 + 偏移",
+      "道路装饰 BP 设置 StartMarker / EndMarker，房屋 SpacingCm=0 保持连续",
       "DA_Rules 写 Seed + 总数 + Actions + Weight",
       "DA_Atoms 写 AtomKey → Atom BP",
       "Compile / Save / Night.Course.Validate / PIE"

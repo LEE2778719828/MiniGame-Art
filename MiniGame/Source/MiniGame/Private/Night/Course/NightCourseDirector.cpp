@@ -6,12 +6,14 @@
 #include "Night/Course/NightForkController.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightBridgeSegmentActor.h"
+#include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Components/BoxComponent.h"
+#include "Math/RotationMatrix.h"
 #include "Misc/PackageName.h"
 
 #pragma region K2 moonyfli
@@ -128,6 +130,7 @@ bool UNightCourseDirector::EnsureCourse(FString& OutError)
 	BeatSpecs.Reset();
 	BridgeSpecs.Reset();
 	VisualBindings.Reset();
+	RoadsideSpecs.Reset();
 	UE_LOG(
 		LogTemp,
 		Display,
@@ -154,14 +157,26 @@ bool UNightCourseDirector::EnsureCourse(FString& OutError)
 		UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=Compose] EnsureCourse failed: %s."), *OutError);
 		return false;
 	}
+	if (!BuildRoadsideSpecs(RoadsideSpecs))
+	{
+		OutError = TEXT("Roadside decoration composition failed; see the first roadside error.");
+		UE_LOG(LogTemp, Error, TEXT("[NightCourse][Stage=Compose] EnsureCourse failed: %s."), *OutError);
+		StoneSpecs.Reset();
+		BeatSpecs.Reset();
+		BridgeSpecs.Reset();
+		VisualBindings.Reset();
+		RoadsideSpecs.Reset();
+		return false;
+	}
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Compose] EnsureCourse complete stones=%d beats=%d bridges=%d visualBindings=%d."),
+		TEXT("[NightCourse][Stage=Compose] EnsureCourse complete stones=%d beats=%d bridges=%d visualBindings=%d roadside=%d."),
 		StoneSpecs.Num(),
 		BeatSpecs.Num(),
 		BridgeSpecs.Num(),
-		VisualBindings.Num());
+		VisualBindings.Num(),
+		RoadsideSpecs.Num());
 	return true;
 }
 
@@ -331,6 +346,459 @@ namespace NightCourseAtom_Private
 	}
 }
 
+namespace NightCourseRoadside_Private
+{
+	struct FPathNode
+	{
+		FVector Location = FVector::ZeroVector;
+		int32 StoneIndex = INDEX_NONE;
+	};
+
+	struct FPath
+	{
+		TArray<FPathNode> Nodes;
+		TArray<float> CumulativeDistances;
+		float Length = 0.f;
+	};
+
+	struct FPathSample
+	{
+		FVector Location = FVector::ZeroVector;
+		FVector Tangent = FVector::ForwardVector;
+		FVector Right = FVector::RightVector;
+		int32 SegmentIndex = INDEX_NONE;
+		int32 FromStoneIndex = INDEX_NONE;
+		int32 ToStoneIndex = INDEX_NONE;
+	};
+
+	struct FResolvedEntry
+	{
+		UClass* Class = nullptr;
+		float Weight = 0.f;
+		FVector Start = FVector::ZeroVector;
+		FVector End = FVector::ZeroVector;
+		float Span = 0.f;
+	};
+
+	static FVector ResolveStoneLocation(
+		const UNightG1CourseConfig* Config,
+		const TArray<FNightStoneSpec>& Stones,
+		const int32 StoneIndex)
+	{
+		if (!Stones.IsValidIndex(StoneIndex))
+		{
+			return FVector::ZeroVector;
+		}
+		const FNightStoneSpec& Stone = Stones[StoneIndex];
+		if (Stone.bUseWorldPose)
+		{
+			return Stone.WorldLocation;
+		}
+		const FVector Forward = Config
+			? Config->TrackForward.GetSafeNormal()
+			: FVector::ForwardVector;
+		const FVector SafeForward = Forward.IsNearlyZero()
+			? FVector::ForwardVector
+			: Forward;
+		return (Config ? Config->TrackOrigin : FVector::ZeroVector)
+			+ SafeForward * Stone.TrackDistance;
+	}
+
+	static bool BuildPath(
+		const UNightG1CourseConfig* Config,
+		const TArray<FNightStoneSpec>& Stones,
+		FPath& OutPath)
+	{
+		OutPath = FPath();
+		for (int32 StoneIndex = 0; StoneIndex < Stones.Num(); ++StoneIndex)
+		{
+			const FVector Location = ResolveStoneLocation(Config, Stones, StoneIndex);
+			if (OutPath.Nodes.Num() > 0
+				&& FVector::DistSquared(OutPath.Nodes.Last().Location, Location)
+					<= FMath::Square(KINDA_SMALL_NUMBER))
+			{
+				continue;
+			}
+
+			FPathNode Node;
+			Node.Location = Location;
+			Node.StoneIndex = StoneIndex;
+			OutPath.Nodes.Add(Node);
+			if (OutPath.Nodes.Num() == 1)
+			{
+				OutPath.CumulativeDistances.Add(0.f);
+				continue;
+			}
+
+			const float SegmentLength = FVector::Distance(
+				OutPath.Nodes[OutPath.Nodes.Num() - 2].Location,
+				Location);
+			OutPath.Length += SegmentLength;
+			OutPath.CumulativeDistances.Add(OutPath.Length);
+		}
+		return OutPath.Nodes.Num() >= 2 && OutPath.Length > KINDA_SMALL_NUMBER;
+	}
+
+	static const FNightBridgeSpec* FindBridge(
+		const TArray<FNightBridgeSpec>& Bridges,
+		const int32 FromStoneIndex,
+		const int32 ToStoneIndex)
+	{
+		for (const FNightBridgeSpec& Bridge : Bridges)
+		{
+			if (Bridge.FromStoneIndex == FromStoneIndex
+				&& Bridge.ToStoneIndex == ToStoneIndex)
+			{
+				return &Bridge;
+			}
+		}
+		return nullptr;
+	}
+
+	static FPathSample SamplePath(
+		const FPath& Path,
+		const TArray<FNightBridgeSpec>& Bridges,
+		const FVector& FallbackForward,
+		const float Distance)
+	{
+		FPathSample Sample;
+		if (Path.Nodes.Num() == 0)
+		{
+			return Sample;
+		}
+		if (Path.Nodes.Num() == 1 || Path.Length <= KINDA_SMALL_NUMBER)
+		{
+			Sample.Location = Path.Nodes[0].Location;
+			Sample.Tangent = FallbackForward.GetSafeNormal2D();
+			if (Sample.Tangent.IsNearlyZero())
+			{
+				Sample.Tangent = FVector::ForwardVector;
+			}
+			Sample.Right = FVector::CrossProduct(
+				FVector::UpVector,
+				Sample.Tangent).GetSafeNormal();
+			return Sample;
+		}
+
+		const float ClampedDistance = FMath::Clamp(Distance, 0.f, Path.Length);
+		int32 SegmentIndex = Path.Nodes.Num() - 2;
+		for (int32 Index = 0; Index < Path.Nodes.Num() - 1; ++Index)
+		{
+			if (ClampedDistance <= Path.CumulativeDistances[Index + 1])
+			{
+				SegmentIndex = Index;
+				break;
+			}
+		}
+
+		const FVector A = Path.Nodes[SegmentIndex].Location;
+		const FVector B = Path.Nodes[SegmentIndex + 1].Location;
+		const FVector RawDelta = B - A;
+		const float SegmentLength = RawDelta.Size();
+		const FVector RawTangent = SegmentLength > KINDA_SMALL_NUMBER
+			? RawDelta / SegmentLength
+			: FallbackForward.GetSafeNormal2D();
+		const float SegmentStart = Path.CumulativeDistances[SegmentIndex];
+		const float Alpha = SegmentLength > KINDA_SMALL_NUMBER
+			? FMath::Clamp(
+				(ClampedDistance - SegmentStart) / SegmentLength,
+				0.f,
+				1.f)
+			: 0.f;
+
+		Sample.Location = FMath::Lerp(A, B, Alpha);
+		Sample.Tangent = RawTangent.GetSafeNormal2D();
+		if (const FNightBridgeSpec* Bridge = FindBridge(
+			Bridges,
+			Path.Nodes[SegmentIndex].StoneIndex,
+			Path.Nodes[SegmentIndex + 1].StoneIndex))
+		{
+			const FVector BridgeTangent =
+				FRotator(0.f, Bridge->YawDeg, 0.f).Vector().GetSafeNormal2D();
+			if (!BridgeTangent.IsNearlyZero())
+			{
+				Sample.Tangent = FVector::DotProduct(BridgeTangent, RawTangent) < 0.f
+					? -BridgeTangent
+					: BridgeTangent;
+			}
+		}
+		if (Sample.Tangent.IsNearlyZero())
+		{
+			Sample.Tangent = FVector::ForwardVector;
+		}
+		Sample.Right = FVector::CrossProduct(
+			FVector::UpVector,
+			Sample.Tangent).GetSafeNormal();
+		if (Sample.Right.IsNearlyZero())
+		{
+			Sample.Right = FVector::RightVector;
+		}
+		Sample.SegmentIndex = SegmentIndex;
+		Sample.FromStoneIndex = Path.Nodes[SegmentIndex].StoneIndex;
+		Sample.ToStoneIndex = Path.Nodes[SegmentIndex + 1].StoneIndex;
+		return Sample;
+	}
+
+	static bool ResolveEntries(
+		const FNightRoadsideGenerationSettings& Settings,
+		const TCHAR* Label,
+		TArray<FResolvedEntry>& OutEntries,
+		FString& OutError)
+	{
+		OutEntries.Reset();
+		OutError.Reset();
+		if (!Settings.bEnabled || Settings.BlueprintPool.Num() == 0)
+		{
+			return true;
+		}
+
+		for (int32 EntryIndex = 0; EntryIndex < Settings.BlueprintPool.Num(); ++EntryIndex)
+		{
+			const FNightRoadsideBlueprintEntry& Entry =
+				Settings.BlueprintPool[EntryIndex];
+			if (Entry.Weight <= 0.f)
+			{
+				continue;
+			}
+
+			UClass* PropClass = Entry.Blueprint.LoadSynchronous();
+			if (!PropClass
+				|| !PropClass->IsChildOf(ANightRoadsideSegmentActor::StaticClass()))
+			{
+				OutError = FString::Printf(
+					TEXT("%s roadside Blueprint entry %d is not a valid ANightRoadsideSegmentActor class."),
+					Label,
+					EntryIndex);
+				return false;
+			}
+
+			const ANightRoadsideSegmentActor* Defaults =
+				PropClass->GetDefaultObject<ANightRoadsideSegmentActor>();
+			FResolvedEntry Resolved;
+			Resolved.Class = PropClass;
+			Resolved.Weight = Entry.Weight;
+			if (!Defaults
+				|| !Defaults->GetRoadsideMarkerLocations(
+					Resolved.Start,
+					Resolved.End))
+			{
+				OutError = FString::Printf(
+					TEXT("%s roadside Blueprint '%s' has no StartMarker/EndMarker pair."),
+					Label,
+					*GetNameSafe(PropClass));
+				return false;
+			}
+			Resolved.Span = FVector::Distance(Resolved.Start, Resolved.End);
+			if (Resolved.Span <= KINDA_SMALL_NUMBER)
+			{
+				OutError = FString::Printf(
+					TEXT("%s roadside Blueprint '%s' has a zero-length marker span."),
+					Label,
+					*GetNameSafe(PropClass));
+				return false;
+			}
+			OutEntries.Add(Resolved);
+		}
+		return true;
+	}
+
+	static const FResolvedEntry* PickEntry(
+		FRandomStream& Rng,
+		const TArray<FResolvedEntry>& Entries)
+	{
+		float TotalWeight = 0.f;
+		for (const FResolvedEntry& Entry : Entries)
+		{
+			TotalWeight += FMath::Max(0.f, Entry.Weight);
+		}
+		if (TotalWeight <= 0.f)
+		{
+			return nullptr;
+		}
+
+		const float Pick = Rng.FRandRange(0.f, TotalWeight);
+		float Accumulated = 0.f;
+		for (const FResolvedEntry& Entry : Entries)
+		{
+			Accumulated += FMath::Max(0.f, Entry.Weight);
+			if (Pick <= Accumulated)
+			{
+				return &Entry;
+			}
+		}
+		return &Entries.Last();
+	}
+
+	static int32 MakeSeed(
+		const int32 BaseSeed,
+		const ENightRoadsideKind Kind,
+		const int32 Side,
+		const int32 SeedOffset)
+	{
+		uint32 Hash = static_cast<uint32>(BaseSeed);
+		Hash = Hash * 16777619u ^ static_cast<uint32>(SeedOffset);
+		Hash = Hash * 16777619u ^ static_cast<uint32>(Kind);
+		Hash = Hash * 16777619u ^ static_cast<uint32>(Side + 2);
+		return static_cast<int32>(Hash & 0x7fffffffu);
+	}
+
+	static bool AppendCategory(
+		const UNightG1CourseConfig* Config,
+		const FNightRoadsideGenerationSettings& Settings,
+		const ENightRoadsideKind Kind,
+		const TCHAR* Label,
+		const int32 BaseSeed,
+		const FPath& Path,
+		const TArray<FNightBridgeSpec>& Bridges,
+		TArray<FNightRoadsidePropSpec>& OutSpecs,
+		FString& OutError)
+	{
+		TArray<FResolvedEntry> Entries;
+		if (!ResolveEntries(Settings, Label, Entries, OutError))
+		{
+			return false;
+		}
+		if (Entries.Num() == 0 || Path.Length <= KINDA_SMALL_NUMBER)
+		{
+			return true;
+		}
+
+		const FVector FallbackForward = Config
+			? Config->TrackForward
+			: FVector::ForwardVector;
+		const bool bUseFixedWorldXAxis =
+			Kind == ENightRoadsideKind::House;
+		const FVector FirstPathLocation = Path.Nodes[0].Location;
+		const FVector LastPathLocation = Path.Nodes.Last().Location;
+		const float XDelta = LastPathLocation.X - FirstPathLocation.X;
+		const float FixedXAxisDirection =
+			XDelta < -KINDA_SMALL_NUMBER ? -1.f : 1.f;
+		const float GenerationLength =
+			bUseFixedWorldXAxis && FMath::Abs(XDelta) > KINDA_SMALL_NUMBER
+			? FMath::Abs(XDelta)
+			: Path.Length;
+		for (const int32 Side : { -1, 1 })
+		{
+			FRandomStream Rng(MakeSeed(
+				BaseSeed,
+				Kind,
+				Side,
+				Settings.RandomSeedOffset));
+			float Distance = 0.f;
+			int32 Guard = 0;
+			while (Distance <= GenerationLength + KINDA_SMALL_NUMBER
+				&& Guard++ < 4096)
+			{
+				const FResolvedEntry* Entry = PickEntry(Rng, Entries);
+				if (!Entry)
+				{
+					break;
+				}
+
+				const float SampleDistance = bUseFixedWorldXAxis
+					&& GenerationLength > KINDA_SMALL_NUMBER
+					? Distance / GenerationLength * Path.Length
+					: Distance;
+				const FPathSample Sample = SamplePath(
+					Path,
+					Bridges,
+					FallbackForward,
+					SampleDistance);
+				FVector PlacementLocation = Sample.Location;
+				FVector PlacementTangent = Sample.Tangent;
+				FVector PlacementRight = Sample.Right;
+				if (bUseFixedWorldXAxis)
+				{
+					// Houses form a continuous row on the fixed world X axis.
+					// Their lateral position is anchored to the first path
+					// node, and every house uses the first path node's fixed Z.
+					PlacementLocation.X =
+						FirstPathLocation.X + Distance * FixedXAxisDirection;
+					PlacementLocation.Y = FirstPathLocation.Y;
+					PlacementLocation.Z = FirstPathLocation.Z;
+					PlacementTangent =
+						FVector(FixedXAxisDirection, 0.f, 0.f);
+					PlacementRight = FVector::CrossProduct(
+						FVector::UpVector,
+						PlacementTangent).GetSafeNormal();
+				}
+
+				const FVector MirrorScale = Side > 0
+					? FVector(1.f, -1.f, 1.f)
+					: FVector::OneVector;
+				const FVector MirroredMarkerStart(
+					Entry->Start.X * MirrorScale.X,
+					Entry->Start.Y * MirrorScale.Y,
+					Entry->Start.Z * MirrorScale.Z);
+				const FVector MirroredMarkerEnd(
+					Entry->End.X * MirrorScale.X,
+					Entry->End.Y * MirrorScale.Y,
+					Entry->End.Z * MirrorScale.Z);
+				const FVector LocalMarkerDelta =
+					(MirroredMarkerEnd - MirroredMarkerStart).GetSafeNormal();
+				if (LocalMarkerDelta.IsNearlyZero())
+				{
+					OutError = FString::Printf(
+						TEXT("%s roadside Blueprint '%s' has invalid marker direction."),
+						Label,
+						*GetNameSafe(Entry->Class));
+					return false;
+				}
+
+				const FQuat PathRotation =
+					FRotationMatrix::MakeFromXZ(
+						PlacementTangent,
+						FVector::UpVector).ToQuat();
+				const FQuat MarkerAlignment =
+					FQuat::FindBetweenNormals(
+						LocalMarkerDelta,
+						FVector::ForwardVector);
+				FQuat WorldRotation = PathRotation * MarkerAlignment;
+				if (Kind == ENightRoadsideKind::Pole
+					&& Settings.RandomYawRangeDeg > 0.f)
+				{
+					const float RandomYaw = Rng.FRandRange(
+						-Settings.RandomYawRangeDeg,
+						Settings.RandomYawRangeDeg);
+					WorldRotation =
+						FQuat(
+							FVector::UpVector,
+							FMath::DegreesToRadians(RandomYaw))
+						* WorldRotation;
+				}
+
+				const float SideOffset = Side < 0
+					? Settings.LeftBridgeOffsetCm
+					: Settings.RightBridgeOffsetCm;
+				const FVector StartWorld =
+					PlacementLocation
+					+ PlacementRight * (Side < 0 ? -SideOffset : SideOffset)
+					+ FVector::UpVector * Settings.ZOffsetCm;
+				const FVector ActorLocation =
+					StartWorld
+					- WorldRotation.RotateVector(MirroredMarkerStart);
+
+				FNightRoadsidePropSpec Spec;
+				Spec.Kind = Kind;
+				Spec.Side = Side;
+				Spec.PathSegmentIndex = Sample.SegmentIndex;
+				Spec.FromStoneIndex = Sample.FromStoneIndex;
+				Spec.ToStoneIndex = Sample.ToStoneIndex;
+				Spec.DistanceAlongPath = SampleDistance;
+				Spec.PropClass = Entry->Class;
+				Spec.WorldTransform = FTransform(
+					WorldRotation,
+					ActorLocation,
+					MirrorScale);
+				OutSpecs.Add(Spec);
+
+				Distance += Entry->Span + FMath::Max(0.f, Settings.SpacingCm);
+			}
+		}
+		return true;
+	}
+}
+
 bool UNightCourseDirector::BuildCourseForPreview(
 	TArray<FNightStoneSpec>& OutStones,
 	TArray<FNightBeatSpec>& OutBeats,
@@ -385,6 +853,67 @@ bool UNightCourseDirector::BuildCourseForPreview(
 		*Config->CourseRuleData->GetPathName(),
 		*Config->AtomRoute->GetPathName());
 	return BuildAtomRouteCourse(OutStones, OutBeats, OutBridges, OutVisualBindings);
+}
+
+bool UNightCourseDirector::BuildRoadsideSpecs(
+	TArray<FNightRoadsidePropSpec>& OutSpecs) const
+{
+	return BuildRoadsideSpecs(StoneSpecs, BridgeSpecs, OutSpecs);
+}
+
+bool UNightCourseDirector::BuildRoadsideSpecs(
+	const TArray<FNightStoneSpec>& InStones,
+	const TArray<FNightBridgeSpec>& InBridges,
+	TArray<FNightRoadsidePropSpec>& OutSpecs) const
+{
+	OutSpecs.Reset();
+	if (!Config)
+	{
+		return false;
+	}
+
+	NightCourseRoadside_Private::FPath Path;
+	if (!NightCourseRoadside_Private::BuildPath(Config, InStones, Path))
+	{
+		return true;
+	}
+
+	const bool bUseRuntimeSeed = bHasRuntimeSeed
+		&& (bBuildingRuntimeCourse || bRunning);
+	const int32 BaseSeed = bUseRuntimeSeed
+		? RuntimeSeed
+		: (Config->CourseRuleData ? Config->CourseRuleData->Seed : 1001);
+	FString Error;
+	if (!NightCourseRoadside_Private::AppendCategory(
+		Config,
+		Config->HouseRoadside,
+		ENightRoadsideKind::House,
+		TEXT("House"),
+		BaseSeed,
+		Path,
+		InBridges,
+		OutSpecs,
+		Error)
+		|| !NightCourseRoadside_Private::AppendCategory(
+			Config,
+			Config->PoleRoadside,
+			ENightRoadsideKind::Pole,
+			TEXT("Pole"),
+			BaseSeed,
+			Path,
+			InBridges,
+			OutSpecs,
+			Error))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Compose] Roadside build failed: %s."),
+			Error.IsEmpty() ? TEXT("unknown error") : *Error);
+		OutSpecs.Reset();
+		return false;
+	}
+	return true;
 }
 
 bool UNightCourseDirector::BuildAtomRouteCourse(
@@ -873,7 +1402,9 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		}
 
 		FTransform AtomWorld = BaseAtomWorld;
+		FTransform FallbackAtomWorld = BaseAtomWorld;
 		bool bFoundValidTransform = false;
+		bool bHasFallbackCandidate = false;
 		for (const float CandidateYaw : CandidateYaws)
 		{
 			const FQuat DeltaRotation = FRotator(0.f, CandidateYaw, 0.f).Quaternion();
@@ -882,6 +1413,11 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			Candidate.SetLocation(
 				TargetEntry.GetLocation()
 				+ DeltaRotation.RotateVector(BaseAtomWorld.GetLocation() - TargetEntry.GetLocation()));
+			if (!bHasFallbackCandidate)
+			{
+				FallbackAtomWorld = Candidate;
+				bHasFallbackCandidate = true;
+			}
 			if (IsAtomTransformInsideLayoutBounds(AtomSource, Candidate))
 			{
 				AtomWorld = Candidate;
@@ -891,17 +1427,34 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		}
 		if (!bFoundValidTransform)
 		{
-			UE_LOG(
-				LogTemp,
-				Error,
-				TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' has no valid rotation candidate in scene bounds."),
-				AtomSlotIndex,
-				*AtomKey);
-			if (AtomInstance)
+			if (TryTranslateAtomYIntoLayoutBounds(
+				AtomSource,
+				FallbackAtomWorld))
 			{
-				AtomInstance->Destroy();
+				AtomWorld = FallbackAtomWorld;
+				bFoundValidTransform = true;
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' exceeded scene bounds for every yaw; translated Atom on Y by %.2fcm as fallback."),
+					AtomSlotIndex,
+					*AtomKey,
+					FallbackAtomWorld.GetLocation().Y - BaseAtomWorld.GetLocation().Y);
 			}
-			return false;
+			else
+			{
+				UE_LOG(
+					LogTemp,
+					Error,
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' has no valid rotation or translated fallback in scene bounds."),
+					AtomSlotIndex,
+					*AtomKey);
+				if (AtomInstance)
+				{
+					AtomInstance->Destroy();
+				}
+				return false;
+			}
 		}
 
 		const int32 StoneOffset = OutStones.Num();
@@ -1055,6 +1608,96 @@ bool UNightCourseDirector::IsAtomTransformInsideLayoutBounds(
 	return true;
 }
 
+bool UNightCourseDirector::TryTranslateAtomYIntoLayoutBounds(
+	const ANightCourseAtomActor* AtomDefaults,
+	FTransform& InOutAtomWorld) const
+{
+	if (!bEnforceLayoutBounds || !LayoutBoundsComponent || !AtomDefaults)
+	{
+		return false;
+	}
+
+	const FTransform BoundsTransform =
+		LayoutBoundsComponent->GetComponentTransform();
+	const FVector BoundsExtent =
+		LayoutBoundsComponent->GetScaledBoxExtent();
+	if (BoundsExtent.IsNearlyZero())
+	{
+		return false;
+	}
+
+	FVector LocalMin;
+	FVector LocalMax;
+	AtomDefaults->GetLocalArtBounds(LocalMin, LocalMax);
+	const FVector Corners[8] =
+	{
+		FVector(LocalMin.X, LocalMin.Y, LocalMin.Z),
+		FVector(LocalMin.X, LocalMin.Y, LocalMax.Z),
+		FVector(LocalMin.X, LocalMax.Y, LocalMin.Z),
+		FVector(LocalMin.X, LocalMax.Y, LocalMax.Z),
+		FVector(LocalMax.X, LocalMin.Y, LocalMin.Z),
+		FVector(LocalMax.X, LocalMin.Y, LocalMax.Z),
+		FVector(LocalMax.X, LocalMax.Y, LocalMin.Z),
+		FVector(LocalMax.X, LocalMax.Y, LocalMax.Z)
+	};
+
+	// Only the world Y coordinate is a fallback degree of freedom. X and Z
+	// remain untouched so the Atom keeps its intended longitudinal placement.
+	const FVector BoundsLocalWorldY =
+		BoundsTransform.InverseTransformVector(FVector(0.f, 1.f, 0.f));
+	float MinWorldYTranslation = -TNumericLimits<float>::Max();
+	float MaxWorldYTranslation = TNumericLimits<float>::Max();
+	for (const FVector& LocalCorner : Corners)
+	{
+		const FVector BoundsLocal = BoundsTransform.InverseTransformPosition(
+			InOutAtomWorld.TransformPosition(LocalCorner));
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			const float Direction = BoundsLocalWorldY[Axis];
+			const float Extent = BoundsExtent[Axis];
+			if (FMath::Abs(Direction) <= KINDA_SMALL_NUMBER)
+			{
+				if (BoundsLocal[Axis] < -Extent - KINDA_SMALL_NUMBER
+					|| BoundsLocal[Axis] > Extent + KINDA_SMALL_NUMBER)
+				{
+					return false;
+				}
+				continue;
+			}
+
+			float Lower = (-Extent - BoundsLocal[Axis]) / Direction;
+			float Upper = (Extent - BoundsLocal[Axis]) / Direction;
+			if (Lower > Upper)
+			{
+				Swap(Lower, Upper);
+			}
+			MinWorldYTranslation = FMath::Max(
+				MinWorldYTranslation,
+				Lower);
+			MaxWorldYTranslation = FMath::Min(
+				MaxWorldYTranslation,
+				Upper);
+			if (MinWorldYTranslation > MaxWorldYTranslation
+				+ KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+		}
+	}
+
+	const FVector AtomLocalCenter = (LocalMin + LocalMax) * 0.5f;
+	const FVector AtomWorldCenter =
+		InOutAtomWorld.TransformPosition(AtomLocalCenter);
+	const float DesiredWorldYTranslation =
+		BoundsTransform.GetLocation().Y - AtomWorldCenter.Y;
+	const float WorldYTranslation = FMath::Clamp(
+		DesiredWorldYTranslation,
+		MinWorldYTranslation,
+		MaxWorldYTranslation);
+	InOutAtomWorld.AddToTranslation(FVector(0.f, WorldYTranslation, 0.f));
+	return IsAtomTransformInsideLayoutBounds(AtomDefaults, InOutAtomWorld);
+}
+
 void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 {
 	UWorld* World = GetWorld();
@@ -1071,43 +1714,30 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 	}
 
 	const FNightAtomVisualBinding& Binding = VisualBindings[BindingIndex];
-	TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
-	if (!Binding.bIsBridge
-		&& StoneSpecs.IsValidIndex(Binding.StoneIndex)
-		&& StoneSpecs[Binding.StoneIndex].bHasFoe
-		&& Binding.AlternateVisualPrefabClass)
+	if (!Binding.bIsBridge)
 	{
-		VisualClass = Binding.AlternateVisualPrefabClass;
+		// Enemy landing points are spawned directly by SpawnStoneActor from
+		// Config->FoeActorMap. Atom visual bindings own bridges only.
+		return;
 	}
+	TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
 	if (!VisualClass)
 	{
-		const bool bEnemyVisualRequired =
-			!Binding.bIsBridge
-			&& StoneSpecs.IsValidIndex(Binding.StoneIndex)
-			&& StoneSpecs[Binding.StoneIndex].bHasFoe;
-		if (!Binding.bIsBridge && !bEnemyVisualRequired)
-		{
-			// Normal LandingPoint character previews are editor-only. The
-			// runtime only spawns the alternate enemy prefab for Kill beats.
-			return;
-		}
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("[NightCourse] Visual binding %d has no prefab class (stone=%d bridge=%d)."),
+			TEXT("[NightCourse] Bridge visual binding %d has no prefab class (bridge=%d)."),
 			BindingIndex,
-			Binding.StoneIndex,
 			Binding.BridgeIndex);
 		return;
 	}
 
-	if (!Binding.bIsBridge
-		&& VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+	if (!VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
 	{
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("[NightCourse] LandingPoint visual binding %d resolves to a Bridge BP; bridge visuals must use BridgeVisualComponent."),
+			TEXT("[NightCourse] Bridge visual binding %d resolves to a non-Bridge BP."),
 			BindingIndex);
 		return;
 	}
@@ -1143,29 +1773,7 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 		Binding.StoneIndex,
 		Binding.BridgeIndex);
 
-	if (!Binding.bIsBridge && StoneSpecs.IsValidIndex(Binding.StoneIndex))
-	{
-		if (ANightCourseStoneActor* VisualStone = Cast<ANightCourseStoneActor>(VisualActor))
-		{
-			VisualStone->SetupStone(Binding.StoneIndex, StoneSpecs[Binding.StoneIndex]);
-		}
-		else if (ANightBridgeSegmentActor* VisualBridge = Cast<ANightBridgeSegmentActor>(VisualActor))
-		{
-			FNightBridgeSpec PadSpec;
-			PadSpec.FromStoneIndex = Binding.StoneIndex;
-			PadSpec.ToStoneIndex = Binding.StoneIndex;
-			PadSpec.WorldLocation = Binding.LocalTransform.GetLocation();
-			PadSpec.YawDeg = Binding.LocalTransform.GetRotation().Rotator().Yaw;
-			PadSpec.LengthScale = 1.f;
-			VisualBridge->SetupBridge(
-				PadSpec,
-				nullptr,
-				nullptr,
-				FVector::ZeroVector,
-				1.f);
-		}
-	}
-	else if (Binding.bIsBridge && BridgeSpecs.IsValidIndex(Binding.BridgeIndex))
+	if (BridgeSpecs.IsValidIndex(Binding.BridgeIndex))
 	{
 		if (ANightBridgeSegmentActor* VisualBridge = Cast<ANightBridgeSegmentActor>(VisualActor))
 		{
@@ -1184,41 +1792,23 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 	}
 }
 
-void UNightCourseDirector::SetStoneVisualVisibility(int32 StoneIndex, bool bVisible)
+void UNightCourseDirector::SetStoneFoeVisibility(int32 StoneIndex, bool bVisible)
 {
-	for (int32 BindingIndex = 0; BindingIndex < VisualBindings.Num(); ++BindingIndex)
+	if (!StoneSpecs.IsValidIndex(StoneIndex)
+		|| !SpawnedStones.IsValidIndex(StoneIndex)
+		|| !SpawnedStones[StoneIndex])
 	{
-		const FNightAtomVisualBinding& Binding = VisualBindings[BindingIndex];
-		if (Binding.bIsBridge || Binding.StoneIndex != StoneIndex)
-		{
-			continue;
-		}
+		return;
+	}
 
-		if (StoneSpecs.IsValidIndex(StoneIndex)
-			&& Binding.AlternateVisualPrefabClass
-			&& SpawnedVisualActors.IsValidIndex(BindingIndex)
-			&& ((bVisible && StoneSpecs[StoneIndex].bHasFoe)
-				|| (!bVisible && !StoneSpecs[StoneIndex].bHasFoe)))
-		{
-			if (SpawnedVisualActors[BindingIndex])
-			{
-				SpawnedVisualActors[BindingIndex]->Destroy();
-				SpawnedVisualActors[BindingIndex] = nullptr;
-			}
-			SpawnVisualBinding(BindingIndex);
-		}
-
-		if (SpawnedVisualActors.IsValidIndex(BindingIndex)
-			&& SpawnedVisualActors[BindingIndex])
-		{
-			SpawnedVisualActors[BindingIndex]->SetActorHiddenInGame(false);
-			SpawnedVisualActors[BindingIndex]->SetActorEnableCollision(true);
-			if (!bVisible && !Binding.AlternateVisualPrefabClass)
-			{
-				SpawnedVisualActors[BindingIndex]->SetActorHiddenInGame(true);
-				SpawnedVisualActors[BindingIndex]->SetActorEnableCollision(false);
-			}
-		}
+	ANightCourseStoneActor* Stone = SpawnedStones[StoneIndex];
+	if (bVisible)
+	{
+		Stone->ShowFoe();
+	}
+	else if (Stone->Spec.bHasFoe)
+	{
+		Stone->ClearFoe(false);
 	}
 }
 
@@ -1237,12 +1827,24 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 		return;
 	}
 
-	// Atom visuals are authored by the Atom BP. The native stone is retained
-	// only as the gameplay/collision carrier; no legacy Config mesh fallback is
-	// allowed to replace an artist-authored visual.
 	UClass* SpawnClass = ANightCourseStoneActor::StaticClass();
 	if (StoneSpecs[Index].bHasFoe)
 	{
+		FString FoeError;
+		SpawnClass = Config
+			? Config->ResolveFoeActorClass(StoneSpecs[Index].FoeId, FoeError)
+			: nullptr;
+		if (!SpawnClass)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=SpawnStone] index=%d FoeId=%d has no valid mapped Blueprint: %s."),
+				Index,
+				static_cast<int32>(StoneSpecs[Index].FoeId),
+				FoeError.IsEmpty() ? TEXT("Course Config is null.") : *FoeError);
+			return;
+		}
 		UE_LOG(
 			LogTemp,
 			Verbose,
@@ -1275,6 +1877,89 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 	Stone->SetupStone(Index, StoneSpecs[Index]);
 	Stone->SetTrackPose(GetStoneWorldLocation(Index), Facing);
 	SpawnedStones[Index] = Stone;
+}
+
+bool UNightCourseDirector::SpawnRoadsideActors()
+{
+	SpawnedRoadsideActors.Init(nullptr, RoadsideSpecs.Num());
+	if (RoadsideSpecs.Num() == 0)
+	{
+		return true;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=SpawnRoadside] No World for %d roadside specs."),
+			RoadsideSpecs.Num());
+		return false;
+	}
+
+	for (int32 Index = 0; Index < RoadsideSpecs.Num(); ++Index)
+	{
+		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[Index];
+		if (!Spec.PropClass)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=SpawnRoadside] index=%d has no Blueprint class."),
+				Index);
+			for (ANightRoadsideSegmentActor* Spawned : SpawnedRoadsideActors)
+			{
+				if (Spawned)
+				{
+					Spawned->Destroy();
+				}
+			}
+			SpawnedRoadsideActors.Reset();
+			return false;
+		}
+
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ANightRoadsideSegmentActor* Actor =
+			World->SpawnActor<ANightRoadsideSegmentActor>(
+				Spec.PropClass,
+				Spec.WorldTransform,
+				Params);
+		if (!Actor)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=SpawnRoadside] index=%d failed to spawn class='%s'."),
+				Index,
+				*GetNameSafe(Spec.PropClass));
+			for (ANightRoadsideSegmentActor* Spawned : SpawnedRoadsideActors)
+			{
+				if (Spawned)
+				{
+					Spawned->Destroy();
+				}
+			}
+			SpawnedRoadsideActors.Reset();
+			return false;
+		}
+
+		Actor->SetActorEnableCollision(false);
+		SpawnedRoadsideActors[Index] = Actor;
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("[NightCourse][Stage=SpawnRoadside] index=%d kind=%d side=%d class='%s' fromStone=%d toStone=%d."),
+			Index,
+			static_cast<int32>(Spec.Kind),
+			Spec.Side,
+			*GetNameSafe(Spec.PropClass),
+			Spec.FromStoneIndex,
+			Spec.ToStoneIndex);
+	}
+	return true;
 }
 
 void UNightCourseDirector::SpawnBridgeActor(int32 Index)
@@ -1341,6 +2026,13 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 
 void UNightCourseDirector::ClearSpawnedCourseActors()
 {
+	for (ANightRoadsideSegmentActor* Roadside : SpawnedRoadsideActors)
+	{
+		if (Roadside)
+		{
+			Roadside->Destroy();
+		}
+	}
 	for (AActor* Actor : SpawnedVisualActors)
 	{
 		if (Actor)
@@ -1362,23 +2054,38 @@ void UNightCourseDirector::ClearSpawnedCourseActors()
 			Stone->Destroy();
 		}
 	}
+	SpawnedRoadsideActors.Reset();
 	SpawnedVisualActors.Reset();
 	SpawnedBridges.Reset();
 	SpawnedStones.Reset();
 }
 
-void UNightCourseDirector::SpawnCourseActors()
+bool UNightCourseDirector::SpawnCourseActors()
 {
 	SpawnedStones.Init(nullptr, StoneSpecs.Num());
 	SpawnedBridges.Init(nullptr, BridgeSpecs.Num());
 	SpawnedVisualActors.Init(nullptr, VisualBindings.Num());
+	SpawnedRoadsideActors.Init(nullptr, RoadsideSpecs.Num());
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Spawn] Begin carriers stones=%d bridges=%d visualBindings=%d."),
+	TEXT("[NightCourse][Stage=Spawn] Begin actors stones=%d bridges=%d visualBindings=%d roadside=%d."),
 		StoneSpecs.Num(),
 		BridgeSpecs.Num(),
-		VisualBindings.Num());
+		VisualBindings.Num(),
+		RoadsideSpecs.Num());
+
+	// Automation tests exercise the Director state machine without owning a
+	// UWorld. Keep that supported as a headless composition mode; a real
+	// runtime Host always has a world and therefore takes the spawn path below.
+	if (!GetWorld())
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("[NightCourse][Stage=Spawn] No World; skipping headless actor materialization."));
+		return true;
+	}
 
 	for (int32 Index = 0; Index < BridgeSpecs.Num(); ++Index)
 	{
@@ -1392,6 +2099,10 @@ void UNightCourseDirector::SpawnCourseActors()
 	{
 		SpawnVisualBinding(Index);
 	}
+	if (!SpawnRoadsideActors())
+	{
+		return false;
+	}
 
 	int32 MissingStoneActors = 0;
 	for (const ANightCourseStoneActor* Stone : SpawnedStones)
@@ -1399,16 +2110,41 @@ void UNightCourseDirector::SpawnCourseActors()
 		MissingStoneActors += Stone ? 0 : 1;
 	}
 	int32 MissingBridgeActors = 0;
-	for (const ANightBridgeSegmentActor* Bridge : SpawnedBridges)
+	for (int32 BridgeIndex = 0; BridgeIndex < SpawnedBridges.Num(); ++BridgeIndex)
 	{
-		MissingBridgeActors += Bridge ? 0 : 1;
+		if (SpawnedBridges[BridgeIndex])
+		{
+			continue;
+		}
+
+		// An authored Atom bridge is itself the runtime bridge actor and is
+		// stored in SpawnedVisualActors rather than SpawnedBridges. Do not
+		// report that valid actor as a missing native fallback.
+		bool bHasAuthoredBridgeActor = false;
+		for (int32 BindingIndex = 0;
+			BindingIndex < VisualBindings.Num();
+			++BindingIndex)
+		{
+			const FNightAtomVisualBinding& Binding = VisualBindings[BindingIndex];
+			if (!Binding.bIsBridge || Binding.BridgeIndex != BridgeIndex)
+			{
+				continue;
+			}
+			bHasAuthoredBridgeActor =
+				SpawnedVisualActors.IsValidIndex(BindingIndex)
+				&& Cast<ANightBridgeSegmentActor>(
+					SpawnedVisualActors[BindingIndex]) != nullptr;
+			break;
+		}
+		MissingBridgeActors += bHasAuthoredBridgeActor ? 0 : 1;
 	}
 	int32 SpawnedVisualCount = 0;
 	for (const AActor* Visual : SpawnedVisualActors)
 	{
 		SpawnedVisualCount += Visual ? 1 : 0;
 	}
-	if (MissingStoneActors == 0 && MissingBridgeActors == 0)
+	const bool bSpawnSucceeded = MissingStoneActors == 0 && MissingBridgeActors == 0;
+	if (bSpawnSucceeded)
 	{
 		UE_LOG(
 			LogTemp,
@@ -1438,6 +2174,7 @@ void UNightCourseDirector::SpawnCourseActors()
 			MissingStoneActors,
 			MissingBridgeActors);
 	}
+	return bSpawnSucceeded;
 }
 
 bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
@@ -1479,6 +2216,11 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 		|| Config->DefaultKeySwapSafetySeconds < 0.f)
 	{
 		OutError = TEXT("Course Config contains a negative value or non-positive branch gap.");
+		return FailValidation();
+	}
+	if (Config->DefaultFoeId == EFoeId::None)
+	{
+		OutError = TEXT("Course Config DefaultFoeId must be a mapped foe ID.");
 		return FailValidation();
 	}
 
@@ -1535,6 +2277,42 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 	if (!Config->CourseRuleData->ValidateRuleAgainstLibrary(Config->AtomRoute, OutError))
 	{
 		return FailValidation();
+	}
+	if (!Config->ValidateFoeActorMap(OutError))
+	{
+		return FailValidation();
+	}
+	if (!Config->ValidateRoadsideConfiguration(OutError))
+	{
+		return FailValidation();
+	}
+	TSet<EFoeId> RequiredFoeIds;
+	if (Config->DefaultFoeId != EFoeId::None)
+	{
+		RequiredFoeIds.Add(Config->DefaultFoeId);
+	}
+	for (const EFoeId FoeId : Config->FoeWeightPool)
+	{
+		if (FoeId != EFoeId::None)
+		{
+			RequiredFoeIds.Add(FoeId);
+		}
+	}
+	for (const EFoeId FoeId : ActiveBootstrap.FoeWeightOverride)
+	{
+		if (FoeId != EFoeId::None)
+		{
+			RequiredFoeIds.Add(FoeId);
+		}
+	}
+	for (const EFoeId FoeId : RequiredFoeIds)
+	{
+		FString FoeError;
+		if (!Config->ResolveFoeActorClass(FoeId, FoeError))
+		{
+			OutError = FoeError;
+			return FailValidation();
+		}
 	}
 
 	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
@@ -1811,7 +2589,11 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	BeatConsumed.Init(0, BeatSpecs.Num());
 	BaseBeatCount = BeatSpecs.Num();
 	UE_LOG(LogTemp, Display, TEXT("[NightCourse][Stage=Start] spawning runtime actors."));
-	SpawnCourseActors();
+	if (!SpawnCourseActors())
+	{
+		BeginFailure(TEXT("Runtime actor spawning failed; verify the canonical FoeActorMap and bridge bindings."));
+		return;
+	}
 
 	ProgressDistance = StoneSpecs.IsValidIndex(0) ? StoneSpecs[0].TrackDistance : 0.f;
 	SyncPawnToProgress(true);
@@ -2079,6 +2861,7 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 	TArray<FNightBeatSpec> NewBeats;
 	TArray<FNightBridgeSpec> NewBridges;
 	TArray<FNightAtomVisualBinding> NewVisualBindings;
+	TArray<FNightRoadsidePropSpec> NewRoadsideSpecs;
 	if (!BuildCourseForPreview(
 		NewStones,
 		NewBeats,
@@ -2086,6 +2869,11 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		NewVisualBindings))
 	{
 		OutError = TEXT("Selected branch composition failed; no partial branch was installed.");
+		return false;
+	}
+	if (!BuildRoadsideSpecs(NewStones, NewBridges, NewRoadsideSpecs))
+	{
+		OutError = TEXT("Selected branch roadside composition failed; no partial branch was installed.");
 		return false;
 	}
 	if (NewBeats.Num() <= BaseBeatCount)
@@ -2129,6 +2917,7 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 	BeatSpecs = MoveTemp(NewBeats);
 	BridgeSpecs = MoveTemp(NewBridges);
 	VisualBindings = MoveTemp(NewVisualBindings);
+	RoadsideSpecs = MoveTemp(NewRoadsideSpecs);
 	BeatConsumed.Init(0, BeatSpecs.Num());
 	for (int32 Index = 0; Index < FMath::Min(BaseBeatCount, BeatConsumed.Num()); ++Index)
 	{
@@ -2174,7 +2963,11 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		NextKeySwapCueIndex = 1;
 	}
 
-	SpawnCourseActors();
+	if (!SpawnCourseActors())
+	{
+		OutError = TEXT("Branch runtime actor spawning failed; verify the canonical FoeActorMap and bridge bindings.");
+		return false;
+	}
 	SyncPawnToProgress(true);
 	BranchEnterBufferEndTime =
 		ElapsedSeconds + FMath::Max(0.f, Config->BranchEnterBufferSeconds);
@@ -2209,17 +3002,13 @@ void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 	const FNightBeatSpec& Beat = BeatSpecs[BeatIndex];
 	if (Beat.Action == ENightNodeKind::Enemy && StoneSpecs.IsValidIndex(Beat.ToStoneIndex))
 	{
-		FNightStoneSpec& TargetStone = StoneSpecs[Beat.ToStoneIndex];
+		const FNightStoneSpec& TargetStone = StoneSpecs[Beat.ToStoneIndex];
 		if (!TargetStone.bHasFoe)
 		{
-			TargetStone.bHasFoe = true;
-			TargetStone.FoeId = Config->DefaultFoeId;
+			BeginFailure(TEXT("Enemy beat target was composed without a mapped foe actor."));
+			return;
 		}
-		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
-		{
-			SpawnedStones[Beat.ToStoneIndex]->ShowFoe();
-		}
-		SetStoneVisualVisibility(Beat.ToStoneIndex, true);
+		SetStoneFoeVisibility(Beat.ToStoneIndex, true);
 	}
 	FNightJudgeRequest Request;
 	Request.NodeIndex = BeatIndex;
@@ -2406,7 +3195,7 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 				DropCount);
 		}
 		StoneSpecs[Beat.ToStoneIndex].bHasFoe = false;
-		SetStoneVisualVisibility(Beat.ToStoneIndex, false);
+		SetStoneFoeVisibility(Beat.ToStoneIndex, false);
 	}
 	else if (Outcome != ENightJudgeOutcome::Success && bAttackBeat
 		&& SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
@@ -2414,7 +3203,7 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		// Wrong/Miss still advances onto the stone but foe can stay or clear — clear to keep chain readable.
 		SpawnedStones[Beat.ToStoneIndex]->ClearFoe(false);
 		StoneSpecs[Beat.ToStoneIndex].bHasFoe = false;
-		SetStoneVisualVisibility(Beat.ToStoneIndex, false);
+		SetStoneFoeVisibility(Beat.ToStoneIndex, false);
 	}
 
 	if (INightFeelBridge* Feel = GetFeel())
@@ -2606,6 +3395,25 @@ void UNightCourseDirector::UpdateRouteVisibility()
 			SpawnedBridges[BridgeIndex]->SetActorHiddenInGame(!bVisible);
 			SpawnedBridges[BridgeIndex]->SetActorEnableCollision(bVisible);
 		}
+	}
+	UpdateRoadsideVisibility(LastVisibleStone);
+}
+
+void UNightCourseDirector::UpdateRoadsideVisibility(const int32 LastVisibleStone)
+{
+	for (int32 Index = 0; Index < RoadsideSpecs.Num(); ++Index)
+	{
+		if (!SpawnedRoadsideActors.IsValidIndex(Index)
+			|| !SpawnedRoadsideActors[Index])
+		{
+			continue;
+		}
+		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[Index];
+		const bool bVisible =
+			Spec.ToStoneIndex == INDEX_NONE
+			|| Spec.ToStoneIndex <= LastVisibleStone;
+		SpawnedRoadsideActors[Index]->SetActorHiddenInGame(!bVisible);
+		SpawnedRoadsideActors[Index]->SetActorEnableCollision(false);
 	}
 }
 

@@ -90,10 +90,11 @@ Content 根：`/Game/Night/Course/`
 - [x] 成功劈怪 → 累加掉落；失败 → Soul 惩罚  
 - [x] 出口缓冲 → `FNightResult`  
 - [x] 调试：`Night.Course.Dump|SkipToExit|Finish`；Director 多播  
-- [x] 引擎资产：`/Game/Night/Course/**` + `L_Night_G1`  
+- [x] 引擎资产：`/Game/Night/Course/**` + 唯一正式关卡 `L_Night_G1_ForkTest`
+- [x] 敌人生成：`DA_Course.FoeActorMap` 直接指定 M01–M05 Blueprint Actor
 - [x] 后上方第三人称；**action-driven**（不按键不推进）  
 
-**完成标准：** PIE `L_Night_G1`，站石按 Q/E 前进；结束 Log 有 Ingredients。  
+**完成标准：** PIE `L_Night_G1_ForkTest`，站石按 Q/E 前进；结束 Log 有 Ingredients。
 用法：`Docs/G1_Course_Usage.md`  
 规则记忆：`.cursor/rules/blade-heart-stone-chain.mdc`  
 

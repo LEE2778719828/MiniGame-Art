@@ -10,6 +10,7 @@ class UArrowComponent;
 class UBoxComponent;
 class UChildActorComponent;
 class USceneComponent;
+class ANightRoadsideSegmentActor;
 
 #pragma region K2 moonyfli
 USTRUCT(BlueprintType)
@@ -34,9 +35,6 @@ struct MINIGAME_API FNightAtomVisualBinding
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
 	TSubclassOf<AActor> VisualPrefabClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
-	TSubclassOf<AActor> AlternateVisualPrefabClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
 	FTransform LocalTransform = FTransform::Identity;
@@ -99,6 +97,23 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Course")
 	TArray<FNightBridgeSpec> LocalBridges;
+
+	/** Optional editor-only representative house for this Atom. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Roadside Preview")
+	TSubclassOf<ANightRoadsideSegmentActor> HouseRoadsidePreviewPrefab;
+
+	/** Optional editor-only representative pole for this Atom. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Roadside Preview")
+	TSubclassOf<ANightRoadsideSegmentActor> PoleRoadsidePreviewPrefab;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Roadside Preview", meta = (ClampMin = "0.0"))
+	float RoadsidePreviewLeftOffsetCm = 350.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Roadside Preview", meta = (ClampMin = "0.0"))
+	float RoadsidePreviewRightOffsetCm = 350.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Roadside Preview")
+	float RoadsidePreviewZOffsetCm = 0.f;
 
 	UFUNCTION(BlueprintPure, Category = "Night|Atom")
 	FTransform GetEntryAnchorTransform() const;

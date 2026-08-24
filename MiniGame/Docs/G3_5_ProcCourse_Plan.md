@@ -18,7 +18,8 @@ Standalone `FNightProcCourseParams` / `UNightTrackGenerator` 仅保留给独立�
 ## 目标
 
 1. **错键不推进**：跳只能跳、砍只能砍；WrongButton 扣魂但窗口保留。
-2. **美术桥/角/怪**：分类后的 `ArtSubmit/Character`、`ArtSubmit/Stones/Bridge`、`ArtSubmit/Foes` → `/Game/Night/Course/Art/**`；资产绑定由用户手动完成。
+2. **美术桥/角/怪**：桥继续由 Atom BP 的 `BridgeVisualComponent` 配置；敌人 BP 统一登记到
+   `DA_Course.FoeActorMap`，Atom 落脚点只保留可选的 `Temporary Preview Prefab`。
 3. **Seed Atom 组合**：同 Seed 得到相同 Atom key/变换，不同 Seed 在有候选时得到不同合法组合。
 4. **HTML 俯视设计器**：导出 `BaseRoute/BranchRoutes` UE 可读 JSON。
 
@@ -46,10 +47,11 @@ Standalone `FNightProcCourseParams` / `UNightTrackGenerator` 仅保留给独立�
 |---|---|---|
 | `ArtSubmit/Stones/Bridge/mini_qiao/muban1.fbx` `muban2.fbx` | `/Game/Night/Course/Art/Bridge/` | Atom BP 的 BridgeVisualComponent |
 | `ArtSubmit/Character/mini_zhujue/zhujue.fbx` | `/Game/Night/Course/Art/Hero/` | `BP_NightHero` |
-| `ArtSubmit/Foes/mini_fish` / `mini_cantingguai` / `mini_box` | `/Game/Night/Course/Art/Foe/` | Atom BP LandingPoint 的 FoeVisualPrefab |
+| `ArtSubmit/Foes/mini_fish` / `mini_cantingguai` / `mini_box` | `/Game/Night/Course/Art/Foe/` | `BP_NightFoeM01`–`M05`，再登记到 `DA_Course.FoeActorMap` |
 | `ArtSubmit/Environment/mini_canguan/` | `/Game/Night/Course/Art/Environment/` | Environment mesh |
 
-导入后由美术在 Atom BP 组件中绑定视觉 Prefab；策划不填写 Mesh/Transform。
+导入后由美术在敌人 BP 中绑定 Mesh/碰撞/动画，并在 `DA_Course.FoeActorMap` 绑定
+`EFoeId`。Atom BP 只在需要对准位置时填写临时预览 Prefab；策划不填写运行时 Mesh/Transform。
 资产绑定和 Save All 由用户手动完成。
 
 ## 完成标准

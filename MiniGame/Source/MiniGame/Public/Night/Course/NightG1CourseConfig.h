@@ -8,9 +8,11 @@
 #include "NightG1CourseConfig.generated.h"
 
 class ANightCoursePawn;
+class ANightCourseStoneActor;
 class UNightCourseAtomRouteData;
 class UNightCourseRuleData;
 class UNightRouteRulesAsset;
+class ANightRoadsideSegmentActor;
 
 USTRUCT(BlueprintType)
 struct MINIGAME_API FNightLevelCourseRule
@@ -97,6 +99,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")
 	EFoeId DefaultFoeId = EFoeId::M01;
 
+	/** Explicit runtime actor class for each logical foe ID. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Combat")
+	TMap<EFoeId, TSoftClassPtr<ANightCourseStoneActor>> FoeActorMap;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Roadside|House")
+	FNightRoadsideGenerationSettings HouseRoadside;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Roadside|Pole")
+	FNightRoadsideGenerationSettings PoleRoadside;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5")
 	bool bEnableFork = true;
 
@@ -156,5 +168,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Night|G1|Editor")
 	void MarkPackageDirtyForEditor();
+
+	UClass* ResolveFoeActorClass(EFoeId FoeId, FString& OutError) const;
+	bool ValidateFoeActorMap(FString& OutError) const;
+	bool ValidateRoadsideConfiguration(FString& OutError) const;
 };
 #pragma endregion K2 moonyfli

@@ -6,13 +6,13 @@
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseStoneActor.h"
+#include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
 #include "../../../SStandaloneSandbox.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h" //add by K2
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/StaticMeshActor.h"
@@ -157,6 +157,7 @@ namespace NightCourseStage_Private
 			if (ANightCourseStoneActor* StoneActor = Cast<ANightCourseStoneActor>(Actor))
 			{
 				StoneActor->SetupStone(StoneIndex, *StoneSpec);
+				StoneActor->ApplyFoeZCompensation(true);
 			}
 			else if (ANightBridgeSegmentActor* BridgeActor = Cast<ANightBridgeSegmentActor>(Actor))
 			{
@@ -186,6 +187,47 @@ namespace NightCourseStage_Private
 					1.f);
 			}
 		}
+		return Actor;
+	}
+
+	static ANightRoadsideSegmentActor* SpawnEditorPreviewRoadside(
+		UWorld* World,
+		const FNightRoadsidePropSpec& Spec,
+		const int32 Index)
+	{
+		if (!World || !Spec.PropClass)
+		{
+			return nullptr;
+		}
+
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		Params.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ANightRoadsideSegmentActor* Actor =
+			World->SpawnActor<ANightRoadsideSegmentActor>(
+				Spec.PropClass,
+				Spec.WorldTransform,
+				Params);
+		if (!Actor)
+		{
+			return nullptr;
+		}
+
+#if WITH_EDITOR
+		Actor->SetActorLabel(
+			FString::Printf(
+				TEXT("EditorPreview_Roadside_%s_%s_%d"),
+				Spec.Kind == ENightRoadsideKind::House
+					? TEXT("House")
+					: TEXT("Pole"),
+				Spec.Side < 0 ? TEXT("Left") : TEXT("Right"),
+				Index));
+#endif
+		Actor->SetActorTransform(Spec.WorldTransform);
+		Actor->SetIsTemporarilyHiddenInEditor(false);
+		Actor->SetActorHiddenInGame(false);
+		Actor->SetActorEnableCollision(false);
 		return Actor;
 	}
 
@@ -280,27 +322,6 @@ ANightCourseHost::ANightCourseHost()
 	NightFog->DirectionalInscatteringExponent = 4.f;
 	NightFog->DirectionalInscatteringStartDistance = 0.f;
 
-	PreviewBridgeA = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewBridgeA"));
-	PreviewBridgeA->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewBridgeA->SetHiddenInGame(true);
-	PreviewBridgeB = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewBridgeB"));
-	PreviewBridgeB->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewBridgeB->SetHiddenInGame(true);
-	PreviewFoeM01 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM01"));
-	PreviewFoeM01->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewFoeM01->SetHiddenInGame(true);
-	PreviewFoeM02 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM02"));
-	PreviewFoeM02->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewFoeM02->SetHiddenInGame(true);
-	PreviewFoeM03 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM03"));
-	PreviewFoeM03->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewFoeM03->SetHiddenInGame(true);
-	PreviewFoeM04 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM04"));
-	PreviewFoeM04->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewFoeM04->SetHiddenInGame(true);
-	PreviewFoeM05 = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PreviewFoeM05"));
-	PreviewFoeM05->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewFoeM05->SetHiddenInGame(true);
 	PreviewKeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("PreviewKeyLight"));
 	PreviewKeyLight->SetRelativeRotation(FRotator(-35.f, -35.f, 0.f));
 	PreviewKeyLight->Intensity = 5000.f;
@@ -345,32 +366,6 @@ void ANightCourseHost::RebuildEditorPreview()
 		*GetNameSafe(Director),
 		bEnforceLayoutBounds ? 1 : 0);
 
-	if (!PreviewBridgeA || !PreviewBridgeB
-		|| !PreviewFoeM01 || !PreviewFoeM02 || !PreviewFoeM03
-		|| !PreviewFoeM04 || !PreviewFoeM05)
-	{
-		UE_LOG(
-			LogTemp,
-			Error,
-			TEXT("[NightCourse][Stage=Preview] Rebuild aborted: one or more preview instanced components are missing on Host='%s'."),
-			*GetNameSafe(this));
-		return;
-	}
-
-	PreviewBridgeA->ClearInstances();
-	PreviewBridgeB->ClearInstances();
-	PreviewFoeM01->ClearInstances();
-	PreviewFoeM02->ClearInstances();
-	PreviewFoeM03->ClearInstances();
-	PreviewFoeM04->ClearInstances();
-	PreviewFoeM05->ClearInstances();
-	PreviewBridgeA->SetVisibility(false);
-	PreviewBridgeB->SetVisibility(false);
-	PreviewFoeM01->SetVisibility(false);
-	PreviewFoeM02->SetVisibility(false);
-	PreviewFoeM03->SetVisibility(false);
-	PreviewFoeM04->SetVisibility(false);
-	PreviewFoeM05->SetVisibility(false);
 	for (AActor* Actor : EditorPreviewMeshActors)
 	{
 		if (Actor)
@@ -405,6 +400,7 @@ void ANightCourseHost::RebuildEditorPreview()
 	TArray<FNightBeatSpec> PreviewBeats;
 	TArray<FNightBridgeSpec> PreviewBridges;
 	TArray<FNightAtomVisualBinding> VisualBindings;
+	TArray<FNightRoadsidePropSpec> PreviewRoadsideSpecs;
 	if (!Director->BuildCourseForPreview(
 		PreviewStones,
 		PreviewBeats,
@@ -418,76 +414,109 @@ void ANightCourseHost::RebuildEditorPreview()
 			*Config->GetPathName());
 		return;
 	}
+	if (!Director->BuildRoadsideSpecs(
+		PreviewStones,
+		PreviewBridges,
+		PreviewRoadsideSpecs))
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Preview] Roadside build failed for Config='%s'."),
+			*Config->GetPathName());
+		return;
+	}
 
 	TSet<int32> ArtBridgeIndexes;
-	TSet<int32> ArtStoneIndexes;
+	TSet<int32> PreviewedFoeStoneIndexes;
 	for (const FNightAtomVisualBinding& Binding : VisualBindings)
 	{
-		TSubclassOf<AActor> VisualClass = Binding.VisualPrefabClass;
-		if (!Binding.bIsBridge
-			&& PreviewStones.IsValidIndex(Binding.StoneIndex)
-			&& PreviewStones[Binding.StoneIndex].bHasFoe
-			&& Binding.AlternateVisualPrefabClass)
-		{
-			VisualClass = Binding.AlternateVisualPrefabClass;
-		}
 		if (Binding.bIsBridge)
 		{
-			ArtBridgeIndexes.Add(Binding.BridgeIndex);
-		}
-		else if (VisualClass)
-		{
-			ArtStoneIndexes.Add(Binding.StoneIndex);
-		}
-		if (!VisualClass)
-		{
-			// A landing point's normal character preview is editor-only. If
-			// this point is not an Enemy beat, there is no runtime/Host
-			// landing actor to spawn.
+			UClass* VisualClass = Binding.VisualPrefabClass.Get();
+			if (!VisualClass)
+			{
+				UE_LOG(
+					LogTemp,
+					Error,
+					TEXT("[NightCourse][Stage=Preview] Bridge binding %d has no Blueprint class."),
+					Binding.BridgeIndex);
+				continue;
+			}
+			if (!PreviewBridges.IsValidIndex(Binding.BridgeIndex))
+			{
+				UE_LOG(
+					LogTemp,
+					Error,
+					TEXT("[NightCourse][Stage=Preview] Bridge binding %d has no matching bridge spec."),
+					Binding.BridgeIndex);
+				continue;
+			}
+			if (!VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+			{
+				UE_LOG(
+					LogTemp,
+					Error,
+					TEXT("[NightCourse][Stage=Preview] Bridge binding %d resolves to a non-Bridge BP."),
+					Binding.BridgeIndex);
+				continue;
+			}
+			if (PreviewBridges.IsValidIndex(Binding.BridgeIndex))
+			{
+				if (AActor* Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+					GetWorld(),
+					VisualClass,
+					Binding.LocalTransform,
+					nullptr,
+					INDEX_NONE,
+					&PreviewBridges[Binding.BridgeIndex],
+					FString::Printf(
+						TEXT("EditorPreview_Atom_%s_Bridge_%d"),
+						Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
+						Binding.BridgeIndex)))
+				{
+					EditorPreviewMeshActors.Add(Actor);
+					ArtBridgeIndexes.Add(Binding.BridgeIndex);
+				}
+			}
 			continue;
 		}
-		if (!Binding.bIsBridge
-			&& VisualClass->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
+
+		if (!PreviewStones.IsValidIndex(Binding.StoneIndex)
+			|| !PreviewStones[Binding.StoneIndex].bHasFoe)
+		{
+			continue;
+		}
+
+		FString FoeError;
+		UClass* FoeClass = Config->ResolveFoeActorClass(
+			PreviewStones[Binding.StoneIndex].FoeId,
+			FoeError);
+		if (!FoeClass)
 		{
 			UE_LOG(
 				LogTemp,
 				Error,
-				TEXT("[NightCourse] LandingPoint preview binding %d resolves to a Bridge BP; configure a character/enemy BP."),
-				Binding.StoneIndex);
+				TEXT("[NightCourse][Stage=Preview] stone=%d FoeId=%d has no mapped Blueprint: %s."),
+				Binding.StoneIndex,
+				static_cast<int32>(PreviewStones[Binding.StoneIndex].FoeId),
+				FoeError.IsEmpty() ? TEXT("<unknown>") : *FoeError);
 			continue;
 		}
-		AActor* Actor = nullptr;
-		if (Binding.bIsBridge && PreviewBridges.IsValidIndex(Binding.BridgeIndex))
-		{
-			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
-				GetWorld(),
-				VisualClass.Get(),
-				Binding.LocalTransform,
-				nullptr,
-				INDEX_NONE,
-				&PreviewBridges[Binding.BridgeIndex],
-				FString::Printf(
-					TEXT("EditorPreview_Atom_%s_Bridge_%d"),
-					Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
-					Binding.BridgeIndex));
-		}
-		else if (!Binding.bIsBridge && PreviewStones.IsValidIndex(Binding.StoneIndex))
-		{
-			Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
-				GetWorld(),
-				VisualClass.Get(),
-				Binding.LocalTransform,
-				&PreviewStones[Binding.StoneIndex],
-				Binding.StoneIndex,
-				nullptr,
-				FString::Printf(
-					TEXT("EditorPreview_Atom_%s_Landing_%d"),
-					Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
-					Binding.StoneIndex));
-		}
-		if (Actor)
+		if (AActor* Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+			GetWorld(),
+			FoeClass,
+			Binding.LocalTransform,
+			&PreviewStones[Binding.StoneIndex],
+			Binding.StoneIndex,
+			nullptr,
+			FString::Printf(
+				TEXT("EditorPreview_Atom_%s_Foe_%d"),
+				Binding.AtomKey.IsEmpty() ? TEXT("Legacy") : *Binding.AtomKey,
+				Binding.StoneIndex)))
 		{
 			EditorPreviewMeshActors.Add(Actor);
+			PreviewedFoeStoneIndexes.Add(Binding.StoneIndex);
 		}
 	}
 	for (const FNightBridgeSpec& Bridge : PreviewBridges)
@@ -514,7 +543,7 @@ void ANightCourseHost::RebuildEditorPreview()
 	for (int32 StoneIndex = 0; StoneIndex < PreviewStones.Num(); ++StoneIndex)
 	{
 		const FNightStoneSpec& Stone = PreviewStones[StoneIndex];
-		if (ArtStoneIndexes.Contains(StoneIndex))
+		if (PreviewedFoeStoneIndexes.Contains(StoneIndex))
 		{
 			continue;
 		}
@@ -522,19 +551,49 @@ void ANightCourseHost::RebuildEditorPreview()
 		{
 			continue;
 		}
-		// Enemy visuals are authored by the Atom LandingPoint. A missing
-		// visual intentionally produces only the native gameplay carrier.
-		UClass* FoeClass = ANightCourseStoneActor::StaticClass();
-		FActorSpawnParameters Params;
-		Params.ObjectFlags |= RF_Transient;
-		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		if (ANightCourseStoneActor* Actor = GetWorld()->SpawnActor<ANightCourseStoneActor>(
-			FoeClass, Stone.WorldLocation, FRotator(0.f, Stone.YawDeg, 0.f), Params))
+		FString FoeError;
+		UClass* FoeClass = Config->ResolveFoeActorClass(Stone.FoeId, FoeError);
+		if (!FoeClass)
 		{
-			Actor->SetupStone(StoneIndex, Stone);
-			Actor->SetActorLabel(FString::Printf(
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=Preview] fallback stone=%d FoeId=%d has no mapped Blueprint: %s."),
+				StoneIndex,
+				static_cast<int32>(Stone.FoeId),
+				FoeError.IsEmpty() ? TEXT("<unknown>") : *FoeError);
+			continue;
+		}
+		const FTransform PreviewTransform(
+			FRotator(0.f, Stone.YawDeg, 0.f),
+			Stone.WorldLocation,
+			FVector::OneVector);
+		if (AActor* Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+			GetWorld(),
+			FoeClass,
+			PreviewTransform,
+			&Stone,
+			StoneIndex,
+			nullptr,
+			FString::Printf(
 				TEXT("EditorPreview_Foe_M%02d_%d"),
-				static_cast<int32>(Stone.FoeId), StoneIndex));
+				static_cast<int32>(Stone.FoeId),
+				StoneIndex)))
+		{
+			EditorPreviewMeshActors.Add(Actor);
+			PreviewedFoeStoneIndexes.Add(StoneIndex);
+		}
+	}
+
+	for (int32 RoadsideIndex = 0;
+		RoadsideIndex < PreviewRoadsideSpecs.Num();
+		++RoadsideIndex)
+	{
+		if (AActor* Actor = NightCourseStage_Private::SpawnEditorPreviewRoadside(
+			GetWorld(),
+			PreviewRoadsideSpecs[RoadsideIndex],
+			RoadsideIndex))
+		{
 			EditorPreviewMeshActors.Add(Actor);
 		}
 	}
@@ -542,11 +601,12 @@ void ANightCourseHost::RebuildEditorPreview()
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Preview] Rebuild complete stones=%d beats=%d bridges=%d visualBindings=%d spawnedPreviewActors=%d."),
+		TEXT("[NightCourse][Stage=Preview] Rebuild complete stones=%d beats=%d bridges=%d visualBindings=%d roadside=%d spawnedPreviewActors=%d."),
 		PreviewStones.Num(),
 		PreviewBeats.Num(),
 		PreviewBridges.Num(),
 		VisualBindings.Num(),
+		PreviewRoadsideSpecs.Num(),
 		EditorPreviewMeshActors.Num());
 }
 
@@ -764,6 +824,9 @@ void ANightCourseHost::WireFeelFromPlayer()
 			CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
 			CoursePawn->HeroScale = HeroDefaults->HeroScale;
 			CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
+			CoursePawn->HeroZCompensationCm = HeroDefaults->HeroZCompensationCm;
+			CoursePawn->bApplyHeroZCompensationInPreview =
+				HeroDefaults->bApplyHeroZCompensationInPreview;
 			CoursePawn->ApplyConfiguredHeroVisual();
 		}
 		else
