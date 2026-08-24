@@ -1735,6 +1735,15 @@ void USChefGameInstance::AdvanceToNextStage()
 		*GetGiftTabSummary());
 	NotifyStateChanged();
 	AutoSaveChefProfile(TEXT("进入下一关夜晚"));
+
+	// Day -> Night travel: after a successful day settlement, open the Night level.
+	if (AGameModeBase* GM = UGameplayStatics::GetGameMode(this))
+	{
+		if (ASChefGameMode* ChefGM = Cast<ASChefGameMode>(GM))
+		{
+			ChefGM->TravelToNight();
+		}
+	}
 }
 
 const TCHAR* USChefGameInstance::DayEndReasonText(const ESDayEndReason Reason)
@@ -5753,6 +5762,10 @@ ASChefGameMode::ASChefGameMode()
 {
 	DefaultPawnClass = nullptr;
 	PlayerControllerClass = ASDayPlayerController::StaticClass(); //add by K2
+
+	// Day -> Night fallback destination. Mirrors ANightCourseGameMode's day-flow defaults.
+	SuccessNightLevel = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Night/Course/Maps/L_Night_G1_ForkTest.L_Night_G1_ForkTest")));
+	SuccessNightGameMode = TSoftClassPtr<AGameModeBase>(FSoftObjectPath(TEXT("/Game/Night/Course/Blueprints/BP_NightCourseGameMode.BP_NightCourseGameMode_C")));
 }
 
 void ASChefGameMode::BeginPlay()
@@ -5787,6 +5800,59 @@ void ASChefGameMode::BeginPlay()
 		GatewayClass = ASFakeNightGateway::StaticClass();
 	}
 	GetWorld()->SpawnActor<ASFakeNightGateway>(GatewayClass);
+}
+
+void ASChefGameMode::TravelToNight()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (!bTravelToNightOnDayEnd)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[DayFlow] Night travel disabled on Day GameMode '%s'."),
+			*GetNameSafe(this));
+		return;
+	}
+
+	FSoftObjectPath NightLevelPath = SuccessNightLevel.ToSoftObjectPath();
+	FSoftObjectPath NightGameModePath = SuccessNightGameMode.ToSoftObjectPath();
+
+	const FString NightLevelPackage = NightLevelPath.GetLongPackageName();
+	if (NightLevelPackage.IsEmpty())
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[DayFlow] No Night level configured. Set SuccessNightLevel on the Day GameMode."));
+		return;
+	}
+
+	FString Options;
+	if (!NightGameModePath.IsNull())
+	{
+		Options = FString::Printf(
+			TEXT("?game=%s"),
+			*NightGameModePath.ToString());
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[DayFlow] Day settled; opening Night level='%s' gameMode='%s'."),
+		*NightLevelPackage,
+		NightGameModePath.IsNull() ? TEXT("<map default>") : *NightGameModePath.ToString());
+
+	UGameplayStatics::OpenLevel(
+		this,
+		FName(*NightLevelPackage),
+		true,
+		Options);
 }
 
 #pragma region K2 moonyfli
