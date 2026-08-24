@@ -81,6 +81,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
 	FVector HeroMeshOffset = FVector(0.f, 0.f, 79.37f);
 
+	/** Additional correction for this Blueprint's model root. Positive values move the visible Hero up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
+	float HeroZCompensationCm = 0.f;
+
+	/**
+	 * Controls only editor previews. Runtime-spawned Heroes always apply HeroZCompensationCm.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
+	bool bApplyHeroZCompensationInPreview = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim")
 	TObjectPtr<UAnimSequence> JumpAnim;
 
@@ -201,6 +211,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|Art")
 	void ApplyConfiguredHeroVisual();
 
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ApplyHeroZCompensation(bool bPreview);
+
 	/**
 	 * add by K2 (R1): 判定成功时播对应动作，bAttack=false 播跳跃。
 	 * 表现时钟从这里起算：随后的 ApplyAdvanceCatchUp 会按同样倍率把它一起加速。
@@ -276,6 +289,10 @@ protected:
 	float AdvanceSpeed = 1400.f;
 	bool bTrackAdvancing = false;
 	bool bUsingHeroArt = false;
+	FVector HeroRuntimeBaseLocation = FVector::ZeroVector;
+	FVector HeroStaticRuntimeBaseLocation = FVector::ZeroVector;
+	bool bHeroRuntimeBaseLocationCached = false;
+	bool bHeroStaticRuntimeBaseLocationCached = false;
 
 	/** 当前动作的播放倍率，追赶加速时在此基础上再乘。 */
 	float HeroAnimPlayRate = 1.f;

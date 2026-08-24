@@ -5,9 +5,12 @@
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseRuleData.h"
+#include "Night/Course/NightCourseStoneActor.h"
+#include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightForkController.h"
 #include "Night/Course/NightRouteRules.h"
 #include "Night/Course/NightTrackGenerator.h"
+#include "Components/BoxComponent.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -58,6 +61,10 @@ namespace NightCourseAutomation_Private
 		Config->ExitBufferSeconds = 0.f;
 		Config->bKeySwapOnlyOnRouteC = false;
 		Config->DefaultFoeId = EFoeId::M01;
+		Config->FoeActorMap.Add(
+			EFoeId::M01,
+			TSoftClassPtr<ANightCourseStoneActor>(
+				ANightCourseStoneActor::StaticClass()));
 
 		UNightCourseAtomRouteData* AtomRoute =
 			NewObject<UNightCourseAtomRouteData>(Config);
@@ -115,6 +122,56 @@ namespace NightCourseAutomation_Private
 		};
 		Config->RouteRules = RouteRules;
 		return Config;
+	}
+
+	static FNightRoadsideGenerationSettings MakeRoadsideSettings(
+		const float SpacingCm,
+		const float LeftOffsetCm,
+		const float RightOffsetCm,
+		const int32 SeedOffset)
+	{
+		FNightRoadsideGenerationSettings Settings;
+		Settings.bEnabled = true;
+		Settings.SpacingCm = SpacingCm;
+		Settings.LeftBridgeOffsetCm = LeftOffsetCm;
+		Settings.RightBridgeOffsetCm = RightOffsetCm;
+		Settings.RandomSeedOffset = SeedOffset;
+		FNightRoadsideBlueprintEntry Entry;
+		Entry.Blueprint = TSoftClassPtr<ANightRoadsideSegmentActor>(
+			ANightRoadsideSegmentActor::StaticClass());
+		Entry.Weight = 1.f;
+		Settings.BlueprintPool.Add(Entry);
+		return Settings;
+	}
+
+	static void MakeStraightRoadsideTestCourse(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBridgeSpec>& OutBridges)
+	{
+		OutStones.Reset();
+		OutBridges.Reset();
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			FNightStoneSpec Stone;
+			Stone.bUseWorldPose = true;
+			Stone.WorldLocation =
+				FVector(Index * 1000.f, Index * 200.f, Index * 120.f);
+			OutStones.Add(Stone);
+		}
+
+		FNightBridgeSpec FirstBridge;
+		FirstBridge.FromStoneIndex = 0;
+		FirstBridge.ToStoneIndex = 1;
+		FirstBridge.WorldLocation = FVector(500.f, 100.f, 60.f);
+		FirstBridge.YawDeg = 0.f;
+		OutBridges.Add(FirstBridge);
+
+		FNightBridgeSpec LastBridge;
+		LastBridge.FromStoneIndex = 2;
+		LastBridge.ToStoneIndex = 3;
+		LastBridge.WorldLocation = FVector(2500.f, 500.f, 300.f);
+		LastBridge.YawDeg = 0.f;
+		OutBridges.Add(LastBridge);
 	}
 
 	static TArray<FString> CaptureAtomKeys(
@@ -511,6 +568,10 @@ bool FNightCourseAtomCompatibilityFailureTest::RunTest(const FString& Parameters
 		NewObject<UNightCourseDirector>(GetTransientPackage());
 	Director->Config = Config;
 	FString Error;
+	AddExpectedError(
+		TEXT("Base route has no compatible Atom BP candidate"),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
 	TestFalse(
 		TEXT("incompatible Atom candidates fail validation"),
 		Director->ValidateConfiguration(Error));
@@ -560,6 +621,332 @@ bool FNightCourseCanonicalAssetReferenceTest::RunTest(const FString& Parameters)
 			Course->RouteRules->GetPathName().StartsWith(
 				TEXT("/Game/Night/Course/Config/DA_RouteRules")));
 	}
+	FString FoeMapError;
+	TestTrue(
+		TEXT("canonical Course foe actor map is valid"),
+		Course->ValidateFoeActorMap(FoeMapError));
+	TestTrue(TEXT("canonical Course maps M01"), Course->FoeActorMap.Contains(EFoeId::M01));
+	TestTrue(TEXT("canonical Course maps M02"), Course->FoeActorMap.Contains(EFoeId::M02));
+	TestTrue(TEXT("canonical Course maps M03"), Course->FoeActorMap.Contains(EFoeId::M03));
+	TestTrue(TEXT("canonical Course maps M04"), Course->FoeActorMap.Contains(EFoeId::M04));
+	TestTrue(TEXT("canonical Course maps M05"), Course->FoeActorMap.Contains(EFoeId::M05));
+	TestEqual(TEXT("canonical Course maps exactly five foe IDs"), Course->FoeActorMap.Num(), 5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseFoeActorMapValidationTest,
+	"MiniGame.Night.Course.FoeActorMapValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseFoeActorMapValidationTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1501);
+	FString Error;
+	TestTrue(
+		TEXT("a mapped NightCourseStoneActor class is accepted"),
+		Config->ValidateFoeActorMap(Error));
+
+	Config->FoeActorMap.Remove(EFoeId::M01);
+	Error.Reset();
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	AddExpectedError(
+		TEXT("FoeActorMap has no Blueprint for FoeId=1."),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	TestFalse(
+		TEXT("a selected foe with no map entry fails course validation"),
+		Director->ValidateConfiguration(Error));
+	TestTrue(
+		TEXT("missing foe mapping reports the map"),
+		Error.Contains(TEXT("FoeActorMap")));
+
+	Config->FoeActorMap.Add(
+		EFoeId::M01,
+		TSoftClassPtr<ANightCourseStoneActor>(
+			ANightCourseAtomActor::StaticClass()));
+	Error.Reset();
+	TestFalse(
+		TEXT("a non-StoneActor class is rejected"),
+		Config->ValidateFoeActorMap(Error));
+	TestTrue(
+		TEXT("invalid foe class reports the mapped foe entry"),
+		Error.Contains(TEXT("FoeActorMap"))
+		|| Error.Contains(TEXT("not an ANightCourseStoneActor")));
+
+	Config->FoeActorMap.Add(
+		EFoeId::M01,
+		TSoftClassPtr<ANightCourseStoneActor>(
+			ANightCourseStoneActor::StaticClass()));
+	Config->DefaultFoeId = EFoeId::None;
+	Error.Reset();
+	AddExpectedError(
+		TEXT("Course Config DefaultFoeId must be a mapped foe ID."),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	TestFalse(
+		TEXT("None cannot be used as the default foe ID"),
+		Director->ValidateConfiguration(Error));
+	TestTrue(
+		TEXT("None default error is explicit"),
+		Error.Contains(TEXT("DefaultFoeId")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseLayoutBoundsFallbackTest,
+	"MiniGame.Night.Course.LayoutBoundsFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseLayoutBoundsFallbackTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1601);
+	Config->TrackOrigin = FVector(0.f, 20000.f, 0.f);
+	Config->TrackForward = FVector::ForwardVector;
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+
+	UBoxComponent* Bounds =
+		NewObject<UBoxComponent>(GetTransientPackage());
+	Bounds->SetBoxExtent(FVector(10000.f, 10000.f, 10000.f));
+
+	TArray<FNightStoneSpec> UnboundedStones;
+	TArray<FNightBeatSpec> UnboundedBeats;
+	TArray<FNightBridgeSpec> UnboundedBridges;
+	TArray<FNightAtomVisualBinding> UnboundedVisualBindings;
+	Director->SetLayoutBoundsComponent(Bounds, false);
+	TestTrue(
+		TEXT("baseline course is valid without bounds enforcement"),
+		Director->BuildCourseForPreview(
+			UnboundedStones,
+			UnboundedBeats,
+			UnboundedBridges,
+			UnboundedVisualBindings));
+
+	Director->SetLayoutBoundsComponent(Bounds, true);
+
+	TArray<FNightStoneSpec> Stones;
+	TArray<FNightBeatSpec> Beats;
+	TArray<FNightBridgeSpec> Bridges;
+	TArray<FNightAtomVisualBinding> VisualBindings;
+	TestTrue(
+		TEXT("course falls back to translating an out-of-bounds Atom"),
+		Director->BuildCourseForPreview(
+			Stones,
+			Beats,
+			Bridges,
+			VisualBindings));
+	for (const FNightStoneSpec& Stone : Stones)
+	{
+		TestTrue(
+			TEXT("translated Atom stones remain inside the Y bounds"),
+			FMath::Abs(Stone.WorldLocation.Y) <= 10000.f);
+	}
+	TestEqual(
+		TEXT("Y-only fallback preserves the stone count"),
+		Stones.Num(),
+		UnboundedStones.Num());
+	if (Stones.Num() == UnboundedStones.Num())
+	{
+		for (int32 StoneIndex = 0; StoneIndex < Stones.Num(); ++StoneIndex)
+		{
+			TestTrue(
+				TEXT("Y-only fallback preserves X and Z"),
+				FMath::IsNearlyEqual(
+					Stones[StoneIndex].WorldLocation.X,
+					UnboundedStones[StoneIndex].WorldLocation.X,
+					0.01f)
+				&& FMath::IsNearlyEqual(
+					Stones[StoneIndex].WorldLocation.Z,
+					UnboundedStones[StoneIndex].WorldLocation.Z,
+					0.01f));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseRoadsideGenerationTest,
+	"MiniGame.Night.Course.RoadsideGeneration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseRoadsideGenerationTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NewObject<UNightG1CourseConfig>(GetTransientPackage());
+	Config->HouseRoadside =
+		NightCourseAutomation_Private::MakeRoadsideSettings(
+			0.f,
+			300.f,
+			450.f,
+			17);
+	Config->PoleRoadside =
+		NightCourseAutomation_Private::MakeRoadsideSettings(
+			400.f,
+			250.f,
+			350.f,
+			29);
+	Config->PoleRoadside.RandomYawRangeDeg = 5.f;
+
+	FString Error;
+	TestTrue(
+		TEXT("native roadside segment contract validates"),
+		Config->ValidateRoadsideConfiguration(Error));
+
+	TArray<FNightStoneSpec> Stones;
+	TArray<FNightBridgeSpec> Bridges;
+	NightCourseAutomation_Private::MakeStraightRoadsideTestCourse(
+		Stones,
+		Bridges);
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	TArray<FNightRoadsidePropSpec> FirstSpecs;
+	TArray<FNightRoadsidePropSpec> SameSeedSpecs;
+	TestTrue(
+		TEXT("roadside specs build from stone and bridge path"),
+		Director->BuildRoadsideSpecs(Stones, Bridges, FirstSpecs));
+	TestTrue(
+		TEXT("roadside generation produces both categories"),
+		FirstSpecs.ContainsByPredicate(
+			[](const FNightRoadsidePropSpec& Spec)
+			{
+				return Spec.Kind == ENightRoadsideKind::House;
+			})
+		&& FirstSpecs.ContainsByPredicate(
+			[](const FNightRoadsidePropSpec& Spec)
+			{
+				return Spec.Kind == ENightRoadsideKind::Pole;
+			}));
+	TestTrue(
+		TEXT("roadside specs reproduce with the same seed"),
+		Director->BuildRoadsideSpecs(Stones, Bridges, SameSeedSpecs));
+	TestEqual(
+		TEXT("same seed produces the same roadside count"),
+		SameSeedSpecs.Num(),
+		FirstSpecs.Num());
+	for (int32 Index = 0; Index < FirstSpecs.Num(); ++Index)
+	{
+		TestTrue(
+			TEXT("same seed preserves roadside placement"),
+			FirstSpecs[Index].Kind == SameSeedSpecs[Index].Kind
+			&& FirstSpecs[Index].Side == SameSeedSpecs[Index].Side
+			&& FirstSpecs[Index].PropClass == SameSeedSpecs[Index].PropClass
+			&& FirstSpecs[Index].WorldTransform.Equals(
+				SameSeedSpecs[Index].WorldTransform,
+				0.01f));
+	}
+
+	const ANightRoadsideSegmentActor* Defaults =
+		ANightRoadsideSegmentActor::StaticClass()
+			->GetDefaultObject<ANightRoadsideSegmentActor>();
+	FVector MarkerStart;
+	FVector MarkerEnd;
+	Defaults->GetRoadsideMarkerLocations(MarkerStart, MarkerEnd);
+
+	auto TestContinuousHouseSide =
+		[this, &FirstSpecs, MarkerStart, MarkerEnd](
+			const int32 Side,
+			const float ExpectedY,
+			const TCHAR* Label)
+	{
+		FVector PreviousEnd = FVector::ZeroVector;
+		bool bHasPrevious = false;
+		int32 Count = 0;
+		for (const FNightRoadsidePropSpec& Spec : FirstSpecs)
+		{
+			if (Spec.Kind != ENightRoadsideKind::House
+				|| Spec.Side != Side)
+			{
+				continue;
+			}
+			const FVector Start =
+				Spec.WorldTransform.TransformPosition(MarkerStart);
+			const FVector End =
+				Spec.WorldTransform.TransformPosition(MarkerEnd);
+			TestTrue(
+				Label,
+				FMath::IsNearlyEqual(Start.Y, ExpectedY, 0.01f)
+				&& FMath::IsNearlyEqual(End.Y, ExpectedY, 0.01f)
+				&& FMath::IsNearlyEqual(Start.Z, 0.f, 0.01f)
+				&& FMath::IsNearlyEqual(End.Z, 0.f, 0.01f)
+				&& End.X > Start.X);
+			if (!bHasPrevious)
+			{
+				bHasPrevious = true;
+			}
+			else
+			{
+				TestTrue(
+					TEXT("house End marker meets the next Start marker"),
+					PreviousEnd.Equals(Start, 0.01f));
+			}
+			PreviousEnd = End;
+			++Count;
+		}
+		TestTrue(Label, Count > 1);
+	};
+	TestContinuousHouseSide(-1, -300.f, TEXT("left house row uses the configured offset"));
+	TestContinuousHouseSide(1, 450.f, TEXT("right house row uses the configured offset"));
+	for (const FNightRoadsidePropSpec& Spec : FirstSpecs)
+	{
+		if (Spec.Side == 1)
+		{
+			TestTrue(
+				TEXT("every right roadside actor is mirrored on Y"),
+				Spec.WorldTransform.GetScale3D().Y < -0.99f);
+		}
+	}
+
+	TestTrue(
+		TEXT("a no-bridge stone interval still receives roadside specs"),
+		FirstSpecs.ContainsByPredicate(
+			[](const FNightRoadsidePropSpec& Spec)
+			{
+				return Spec.PathSegmentIndex == 1;
+			}));
+
+	int32 PoleCount = 0;
+	float PreviousPoleDistance = 0.f;
+	bool bHasPreviousPole = false;
+	for (const FNightRoadsidePropSpec& Spec : FirstSpecs)
+	{
+		if (Spec.Kind != ENightRoadsideKind::Pole || Spec.Side != 1)
+		{
+			continue;
+		}
+		if (bHasPreviousPole)
+		{
+			TestTrue(
+				TEXT("pole spacing is independent from house spacing"),
+				FMath::IsNearlyEqual(
+					Spec.DistanceAlongPath - PreviousPoleDistance,
+					500.f,
+					0.01f));
+		}
+		PreviousPoleDistance = Spec.DistanceAlongPath;
+		bHasPreviousPole = true;
+		++PoleCount;
+	}
+	TestTrue(TEXT("right pole row contains multiple poles"), PoleCount > 1);
+
+	Config->HouseRoadside.BlueprintPool[0].Blueprint =
+		TSoftClassPtr<ANightRoadsideSegmentActor>(AActor::StaticClass());
+	Error.Reset();
+	TestFalse(
+		TEXT("non-roadside Blueprint classes are rejected"),
+		Config->ValidateRoadsideConfiguration(Error));
+	TestTrue(
+		TEXT("invalid roadside class error names the contract"),
+		Error.Contains(TEXT("House roadside"))
+		|| Error.Contains(TEXT("ANightRoadsideSegmentActor")));
 	return true;
 }
 
@@ -687,7 +1074,7 @@ bool FNightCourseFailureTransactionTest::RunTest(const FString& Parameters)
 	AddExpectedError(
 		TEXT("Canonical AtomRoute is missing or disabled."),
 		EAutomationExpectedErrorFlags::Contains,
-		2);
+		3);
 	Director->StartNight(FNightBootstrap());
 
 	TestFalse(TEXT("invalid atom configuration does not start"), Director->IsRunning());

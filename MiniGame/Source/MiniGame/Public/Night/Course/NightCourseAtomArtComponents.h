@@ -23,25 +23,17 @@ public:
 	int32 OrderIndex = 0;
 
 	/**
-	 * Editor-only character preview for this landing point. This is not a
-	 * bridge and is not spawned by the runtime course composer.
+	 * Optional editor-only preview for aligning this landing point. This is
+	 * never used by the runtime course composer.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing|Preview", meta = (DisplayName = "Character Preview Prefab"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing|Preview", meta = (DisplayName = "Temporary Preview Prefab"))
 	TSubclassOf<AActor> LandingVisualPrefab;
-
-	/** Enemy visual used at runtime only when the planner action is Kill/Enemy. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing|Enemy", meta = (DisplayName = "Enemy Visual Prefab"))
-	TSubclassOf<AActor> FoeVisualPrefab;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing")
 	FName SurfaceId = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing")
 	bool bEnabled = true;
-
-	/** Editor-only display choice; planner rules still own the runtime action. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing|Preview", meta = (DisplayName = "Preview As Enemy"))
-	bool bPreviewAsFoe = false;
 };
 
 /**

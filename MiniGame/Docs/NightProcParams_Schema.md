@@ -47,6 +47,29 @@ Night Course 的策划 JSON 只描述 Atom 模板（AtomKey、Actions、Weight�
 相邻 Atom 的衔接固定为长距离 Jump，间距由 `DA_Atoms.TransitionJumpGapCm`
 配置。没有兼容落脚点数量的 Atom 候选时，校验/构建直接失败。
 
+## 道路两侧装饰
+
+房屋和杆子不写入本文件的 Rule JSON，也不写入 `DA_Rules`。它们配置在
+`DA_Course`：
+
+- `HouseRoadside` 与 `PoleRoadside` 是两套独立设置。
+- `BlueprintPool` 支持多个 `ANightRoadsideSegmentActor` 子类，每项的 `Weight`
+  控制确定性随机选择。
+- `SpacingCm` 控制相邻模块标记之间的间距；房屋使用 `0` 表示连续拼接。
+- `LeftBridgeOffsetCm`、`RightBridgeOffsetCm` 和 `ZOffsetCm` 控制偏移；房屋以路线起点
+  的世界 `Y` 为基准，并统一使用路线第一个节点的世界 `Z`；`ZOffsetCm` 再叠加到
+  这个固定高度。杆子以采样到的道路/桥中心线和高度为基准。
+- 房屋/杆子 Blueprint 的 `StartMarker`、`EndMarker` 定义自身占用长度；Actor 的
+  网格和缩放由 Blueprint 自己负责。
+- 房屋沿世界固定 `X` 轴排列，不跟随 Atom 的旋转方向；左右侧分别使用对应的
+  `Y` 偏移，生成到道路右侧时会对 Actor 做 `Y=-1` 镜像。杆子仍按道路/桥方向排列。
+- 房屋和杆子使用由课程 Seed、类别、侧别和 `RandomSeedOffset` 派生的独立随机流，
+  不会改变 Atom、敌人或掉落的随机结果。
+
+运行时由 `UNightCourseDirector` 生成，分支重建时同步清理和重建；Host 预览整条
+道路，Atom 的 `HouseRoadsidePreviewPrefab` / `PoleRoadsidePreviewPrefab` 只用于
+编辑器中的单段对位。
+
 ## 确定性规则
 
 - 相同有效 Seed、相同候选库和相同队列，得到相同 Atom key 与变换。

@@ -9,6 +9,7 @@ class UStaticMeshComponent;
 class USceneComponent;
 class UStaticMesh;
 class UMaterialInterface;
+class UMeshComponent;
 class USkeletalMesh;
 class USkeletalMeshComponent;
 
@@ -67,6 +68,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
 	FVector FoePivotOffsetCm = FVector::ZeroVector;
 
+	/** Additional correction for this Blueprint's model root. Positive values move the visible foe up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	float FoeZCompensationCm = 0.f;
+
+	/**
+	 * Controls only editor previews. Runtime-spawned foes always apply FoeZCompensationCm.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Foe Transform")
+	bool bApplyFoeZCompensationInPreview = true;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetupStone(int32 InIndex, const FNightStoneSpec& InSpec);
 
@@ -85,6 +96,9 @@ public:
 		float Scale,
 		float HeightOffsetCm,
 		const FVector& PivotOffsetCm = FVector::ZeroVector);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|Art")
+	void ApplyFoeZCompensation(bool bPreview);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void SetTrackPose(const FVector& WorldLocation, const FRotator& WorldRotation);
@@ -109,10 +123,14 @@ public:
 
 protected:
 	void ApplyColors();
-	void TintMesh(UStaticMeshComponent* Mesh, const FLinearColor& Color);
+	void TintMesh(UMeshComponent* Mesh, const FLinearColor& Color);
 
 	float FoeClearAlpha = 1.f;
 	bool bClearingFoe = false;
 	FVector FoeRuntimeBaseScale = FVector::OneVector;
+	FVector FoeSkeletalRuntimeBaseScale = FVector::OneVector;
+	FVector FoeRuntimeBaseLocation = FVector::ZeroVector;
+	FVector FoeSkeletalRuntimeBaseLocation = FVector::ZeroVector;
+	bool bFoeVisualBaseTransformCached = false;
 };
 #pragma endregion K2 moonyfli

@@ -101,7 +101,8 @@ G1 现用 `UNightFeelStubComponent`：Attack 对 Enemy、Jump 对 Hazard；错�
 | `TrackOrigin` / `TrackForward` | 轨坐标系 |
 | `BuildCourse(OutStones, OutBeats)` | 生成石链 |
 
-运行时：`UNightCourseDirector` 刷 `ANightCourseStoneActor`，按拍子开窗、前进。
+运行时：`UNightCourseDirector` 从 `DA_Course.FoeActorMap` 直接生成对应的
+`ANightCourseStoneActor` Blueprint，按拍子开窗、前进。
 
 ---
 
@@ -109,14 +110,11 @@ G1 现用 `UNightFeelStubComponent`：Attack 对 Enemy、Jump 对 Hazard；错�
 
 ### 方法 A — 最快（改 DA / CDO，推荐联调）
 
-1. 打开 `/Game/Night/Course/Config/DA_Course`（Host 不再创建运行时默认 Config）
-2. 设例如：
-   - `BeatCount = 3`
-   - `JumpGapCm = 420`
-   - `KillGapCm = 160`
-   - `PatternOverride = [Hazard, Enemy, Hazard]`  
-     → 石：0 无怪 —空— 1 无怪 —近+怪— 2 有怪 —空— 3 无怪  
-3. PIE `L_Night_G1`：站石0 看 HUD `NOW: JUMP` 按 **Q** → 石1 `NOW: ATTACK` 按 **E** → …
+1. 打开 `/Game/Night/Course/Config/DA_Course`（Host 不创建运行时默认 Config）
+2. 在 `DA_Rules` 中配置动作队列，并确认 `DA_Course.FoeActorMap` 的 M01–M05
+   都指向 `ANightCourseStoneActor` 子类 Blueprint。
+3. PIE `/Game/Night/Course/Maps/L_Night_G1_ForkTest`：站石0 看 HUD
+   `NOW: JUMP` 按 **Q** → 石1 `NOW: ATTACK` 按 **E** → …
 
 对应你口头例子「石头1，空，石头2，石头带怪3」最少只要 **2 拍**：
 

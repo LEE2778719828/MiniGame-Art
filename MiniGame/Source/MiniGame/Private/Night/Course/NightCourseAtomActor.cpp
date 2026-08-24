@@ -1,5 +1,6 @@
 #include "Night/Course/NightCourseAtomActor.h"
 #include "Night/Course/NightBridgeSegmentActor.h"
+#include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Components/ArrowComponent.h"
 #include "Components/ActorComponent.h"
@@ -37,6 +38,7 @@ namespace NightCourseAtom_Private
 			if (ANightCourseStoneActor* StoneActor = Cast<ANightCourseStoneActor>(PreviewActor))
 			{
 				StoneActor->SetupStone(StoneIndex, *StoneSpec);
+				StoneActor->ApplyFoeZCompensation(true);
 			}
 		}
 		else if (BridgeSpec)
@@ -97,6 +99,7 @@ namespace NightCourseAtom_Private
 				}
 			}
 		}
+
 	}
 
 	static void GetBridgeVisualComponents(
@@ -142,6 +145,17 @@ namespace NightCourseAtom_Private
 					OutComponents.Add(Cast<UNightAtomBridgeVisualComponent>(Node->ComponentTemplate));
 				}
 			}
+		}
+	}
+
+	static void ClearRuntimeFoeAssignments(TArray<FNightStoneSpec>& Stones)
+	{
+		for (FNightStoneSpec& Stone : Stones)
+		{
+			// Atom art describes positions only. Enemy identity is selected by
+			// the Director from the canonical course DataAsset.
+			Stone.bHasFoe = false;
+			Stone.FoeId = EFoeId::None;
 		}
 	}
 }
@@ -263,33 +277,11 @@ bool ANightCourseAtomActor::ValidateAtom(FString& OutError) const
 		{
 			continue;
 		}
-		if (!LandingPoints[PointIndex]->LandingVisualPrefab)
+		if (LandingPoints[PointIndex]->LandingVisualPrefab
+			&& LandingPoints[PointIndex]->LandingVisualPrefab->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
 		{
 			OutError = FString::Printf(
-				TEXT("LandingPoint %d is missing Character Preview Prefab."),
-				PointIndex);
-			return false;
-		}
-		if (LandingPoints[PointIndex]->LandingVisualPrefab->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
-		{
-			OutError = FString::Printf(
-				TEXT("LandingPoint %d uses a Bridge BP as Character Preview Prefab; configure a character BP instead."),
-				PointIndex);
-			return false;
-		}
-		if (LandingPoints[PointIndex]->bPreviewAsFoe
-			&& !LandingPoints[PointIndex]->FoeVisualPrefab)
-		{
-			OutError = FString::Printf(
-				TEXT("LandingPoint %d is set to Preview As Enemy but has no Enemy Visual Prefab."),
-				PointIndex);
-			return false;
-		}
-		if (LandingPoints[PointIndex]->FoeVisualPrefab
-			&& LandingPoints[PointIndex]->FoeVisualPrefab->IsChildOf(ANightBridgeSegmentActor::StaticClass()))
-		{
-			OutError = FString::Printf(
-				TEXT("LandingPoint %d uses a Bridge BP as Enemy Visual Prefab; configure an enemy BP instead."),
+				TEXT("LandingPoint %d uses a Bridge BP as Temporary Preview Prefab; configure a character BP instead."),
 				PointIndex);
 			return false;
 		}
@@ -393,6 +385,7 @@ void ANightCourseAtomActor::GetLocalCourseSpecs(
 	TArray<FNightBridgeSpec>& OutBridges) const
 {
 	OutStones = LocalStones;
+	NightCourseAtom_Private::ClearRuntimeFoeAssignments(OutStones);
 	OutBeats = LocalBeats;
 	OutBridges = LocalBridges;
 }
@@ -422,6 +415,7 @@ void ANightCourseAtomActor::GetLocalArtSpecs(
 	if (LandingPoints.Num() == 0)
 	{
 		OutStones = LocalStones;
+		NightCourseAtom_Private::ClearRuntimeFoeAssignments(OutStones);
 		OutBridges = LocalBridges;
 		return;
 	}
@@ -446,11 +440,9 @@ void ANightCourseAtomActor::GetLocalArtSpecs(
 		FNightAtomVisualBinding Binding;
 		Binding.StoneIndex = PointIndex;
 		Binding.LocalTransform = Point->GetRelativeTransform();
-		// LandingPoint character previews are editor-only. Runtime landing
-		// geometry is owned by BridgeVisual components; only the alternate
-		// enemy prefab participates in course spawning.
+		// LandingPoint preview prefabs are editor-only. Runtime enemy actors
+		// are resolved centrally from the course DataAsset.
 		Binding.VisualPrefabClass = nullptr;
-		Binding.AlternateVisualPrefabClass = Point->FoeVisualPrefab;
 		OutVisualBindings.Add(Binding);
 	}
 
@@ -546,6 +538,129 @@ void ANightCourseAtomActor::GetLocalArtBounds(FVector& OutMin, FVector& OutMax) 
 			IncludePoint(Bridge->GetRelativeLocation());
 		}
 	}
+	float HousePreviewY = EntryAnchor
+		? EntryAnchor->GetRelativeLocation().Y
+		: 0.f;
+	for (const UNightAtomLandingPointComponent* Point : LandingPoints)
+	{
+		if (Point && Point->bEnabled)
+		{
+			HousePreviewY = Point->GetRelativeLocation().Y;
+			break;
+		}
+	}
+
+	auto IncludeRoadsidePreview = [&IncludePoint](
+		const TSubclassOf<ANightRoadsideSegmentActor> RoadsideClass,
+		const FVector& Anchor,
+		const float YawDeg,
+		const float SideOffset,
+		const float ZOffset,
+		const bool bUseFixedWorldXAxis,
+		const bool bMirror)
+	{
+		if (!RoadsideClass)
+		{
+			return;
+		}
+		const ANightRoadsideSegmentActor* Defaults =
+			RoadsideClass->GetDefaultObject<ANightRoadsideSegmentActor>();
+		FVector Start;
+		FVector End;
+		if (!Defaults
+			|| !Defaults->GetRoadsideMarkerLocations(Start, End))
+		{
+			return;
+		}
+		const float EffectiveYawDeg =
+			bUseFixedWorldXAxis ? 0.f : YawDeg;
+		const FRotator EffectiveRotation(
+			0.f,
+			EffectiveYawDeg,
+			0.f);
+		const FVector MirrorScale = bMirror
+			? FVector(1.f, -1.f, 1.f)
+			: FVector::OneVector;
+		const FVector MirroredStart(
+			Start.X * MirrorScale.X,
+			Start.Y * MirrorScale.Y,
+			Start.Z * MirrorScale.Z);
+		const FVector MirroredEnd(
+			End.X * MirrorScale.X,
+			End.Y * MirrorScale.Y,
+			End.Z * MirrorScale.Z);
+		const FQuat MarkerAlignment =
+			FQuat::FindBetweenNormals(
+				(MirroredEnd - MirroredStart).GetSafeNormal(),
+				FVector::ForwardVector);
+		const FQuat Rotation =
+			EffectiveRotation.Quaternion() * MarkerAlignment;
+		const FVector Forward =
+			EffectiveRotation.Vector().GetSafeNormal2D();
+		const FVector SafeForward = Forward.IsNearlyZero()
+			? FVector::ForwardVector
+			: Forward;
+		const FVector Right = FVector::CrossProduct(
+			FVector::UpVector,
+			SafeForward).GetSafeNormal();
+		const FVector SafeRight = Right.IsNearlyZero()
+			? FVector::RightVector
+			: Right;
+		const FTransform Transform(
+			Rotation,
+			Anchor
+				+ SafeRight * SideOffset
+				+ FVector::UpVector * ZOffset
+				- Rotation.RotateVector(MirroredStart),
+			MirrorScale);
+		IncludePoint(Transform.TransformPosition(Start));
+		IncludePoint(Transform.TransformPosition(End));
+	};
+
+	for (const UNightAtomBridgeVisualComponent* Bridge : BridgeVisuals)
+	{
+		if (!Bridge || !Bridge->bEnabled)
+		{
+			continue;
+		}
+		const float YawDeg = Bridge->GetRelativeRotation().Yaw;
+		const FVector HouseAnchor(
+			Bridge->GetRelativeLocation().X,
+			HousePreviewY,
+			Bridge->GetRelativeLocation().Z);
+		IncludeRoadsidePreview(
+			HouseRoadsidePreviewPrefab,
+			HouseAnchor,
+			YawDeg,
+			-RoadsidePreviewLeftOffsetCm,
+			RoadsidePreviewZOffsetCm,
+			true,
+			false);
+		IncludeRoadsidePreview(
+			HouseRoadsidePreviewPrefab,
+			HouseAnchor,
+			YawDeg,
+			RoadsidePreviewRightOffsetCm,
+			RoadsidePreviewZOffsetCm,
+			true,
+			true);
+		IncludeRoadsidePreview(
+			PoleRoadsidePreviewPrefab,
+			Bridge->GetRelativeLocation(),
+			YawDeg,
+			-RoadsidePreviewLeftOffsetCm,
+			RoadsidePreviewZOffsetCm,
+			false,
+			false);
+		IncludeRoadsidePreview(
+			PoleRoadsidePreviewPrefab,
+			Bridge->GetRelativeLocation(),
+			YawDeg,
+			RoadsidePreviewRightOffsetCm,
+			RoadsidePreviewZOffsetCm,
+			false,
+			true);
+	}
 
 	if (LandingPoints.Num() == 0 && BridgeVisuals.Num() == 0)
 	{
@@ -598,6 +713,9 @@ void ANightCourseAtomActor::RebuildAtomVisualPreview()
 	{
 		return A.OrderIndex < B.OrderIndex;
 	});
+	const float HousePreviewY = LandingPoints.Num() > 0
+		? LandingPoints[0]->GetRelativeLocation().Y
+		: (EntryAnchor ? EntryAnchor->GetRelativeLocation().Y : 0.f);
 
 	auto AddPreview = [this](
 		USceneComponent* AttachParent,
@@ -655,6 +773,99 @@ void ANightCourseAtomActor::RebuildAtomVisualPreview()
 		PreviewVisualComponents.Add(Preview);
 	};
 
+	auto AddRoadsidePair = [this, &AddPreview](
+		const TSubclassOf<ANightRoadsideSegmentActor> RoadsideClass,
+		const ENightRoadsideKind Kind,
+		const FVector& Anchor,
+		const float YawDeg,
+		const int32 PreviewIndex)
+	{
+		if (!RoadsideClass)
+		{
+			return;
+		}
+		const TSubclassOf<AActor> PreviewClass = RoadsideClass;
+		const ANightRoadsideSegmentActor* Defaults =
+			RoadsideClass->GetDefaultObject<ANightRoadsideSegmentActor>();
+		FVector MarkerStart;
+		FVector MarkerEnd;
+		if (!Defaults
+			|| !Defaults->GetRoadsideMarkerLocations(MarkerStart, MarkerEnd))
+		{
+			return;
+		}
+		const float EffectiveYawDeg =
+			Kind == ENightRoadsideKind::House ? 0.f : YawDeg;
+		const FRotator EffectiveRotation(
+			0.f,
+			EffectiveYawDeg,
+			0.f);
+		const FVector Forward =
+			EffectiveRotation.Vector().GetSafeNormal2D();
+		const FVector SafeForward = Forward.IsNearlyZero()
+			? FVector::ForwardVector
+			: Forward;
+		const FVector Right = FVector::CrossProduct(
+			FVector::UpVector,
+			SafeForward).GetSafeNormal();
+		const FVector SafeRight = Right.IsNearlyZero()
+			? FVector::RightVector
+			: Right;
+		const float LeftOffset = FMath::Max(0.f, RoadsidePreviewLeftOffsetCm);
+		const float RightOffset = FMath::Max(0.f, RoadsidePreviewRightOffsetCm);
+		const FVector ZOffset = FVector::UpVector * RoadsidePreviewZOffsetCm;
+		const FVector LeftMirrorScale = FVector::OneVector;
+		const FVector RightMirrorScale = FVector(1.f, -1.f, 1.f);
+		const FString KindName = Kind == ENightRoadsideKind::House
+			? TEXT("House")
+			: TEXT("Pole");
+		auto AddSidePreview = [this, &AddPreview, &Anchor, &ZOffset, &SafeRight,
+			&PreviewClass, &EffectiveRotation, &MarkerStart, &MarkerEnd,
+			&KindName,
+			&LeftMirrorScale, &RightMirrorScale, PreviewIndex](
+			const bool bRightSide,
+			const float SideOffset)
+		{
+			const FVector MirrorScale = bRightSide
+				? RightMirrorScale
+				: LeftMirrorScale;
+			const FVector MirroredMarkerStart(
+				MarkerStart.X * MirrorScale.X,
+				MarkerStart.Y * MirrorScale.Y,
+				MarkerStart.Z * MirrorScale.Z);
+			const FVector MirroredMarkerEnd(
+				MarkerEnd.X * MirrorScale.X,
+				MarkerEnd.Y * MirrorScale.Y,
+				MarkerEnd.Z * MirrorScale.Z);
+			const FQuat Rotation =
+				EffectiveRotation.Quaternion()
+				* FQuat::FindBetweenNormals(
+					(MirroredMarkerEnd - MirroredMarkerStart).GetSafeNormal(),
+					FVector::ForwardVector);
+			AddPreview(
+				AtomRoot,
+				PreviewClass,
+				FTransform(
+					Rotation,
+					Anchor
+						+ SafeRight * SideOffset
+						+ ZOffset
+						- Rotation.RotateVector(MirroredMarkerStart),
+					MirrorScale),
+				nullptr,
+				INDEX_NONE,
+				nullptr,
+				FString::Printf(
+					TEXT("RoadsidePreview_%s_%s_%d"),
+					*KindName,
+					bRightSide ? TEXT("Right") : TEXT("Left"),
+					PreviewIndex));
+		};
+
+		AddSidePreview(false, -LeftOffset);
+		AddSidePreview(true, RightOffset);
+	};
+
 	for (int32 Index = 0; Index < LandingPoints.Num(); ++Index)
 	{
 		if (LandingPoints[Index])
@@ -664,9 +875,11 @@ void ANightCourseAtomActor::RebuildAtomVisualPreview()
 			PreviewStone.bUseWorldPose = true;
 			PreviewStone.WorldLocation = Point->GetRelativeLocation();
 			PreviewStone.YawDeg = Point->GetRelativeRotation().Yaw;
-			PreviewStone.bHasFoe = Point->bPreviewAsFoe && Point->FoeVisualPrefab != nullptr;
 			const TSubclassOf<AActor> PreviewClass =
-				PreviewStone.bHasFoe ? Point->FoeVisualPrefab : Point->LandingVisualPrefab;
+				Point->LandingVisualPrefab;
+			PreviewStone.bHasFoe =
+				PreviewClass
+				&& PreviewClass->IsChildOf(ANightCourseStoneActor::StaticClass());
 			AddPreview(
 				AtomRoot,
 				PreviewClass,
@@ -700,6 +913,60 @@ void ANightCourseAtomActor::RebuildAtomVisualPreview()
 				&PreviewBridge,
 				FString::Printf(TEXT("BridgePreview_%d"), Index));
 		}
+	}
+
+	int32 RoadsidePreviewIndex = 0;
+	for (const UNightAtomBridgeVisualComponent* BridgeVisual : BridgeVisuals)
+	{
+		if (!BridgeVisual || !BridgeVisual->bEnabled)
+		{
+			continue;
+		}
+		const FVector Anchor = BridgeVisual->GetRelativeLocation();
+		FVector HouseAnchor = Anchor;
+		HouseAnchor.Y = HousePreviewY;
+		const float YawDeg = BridgeVisual->GetRelativeRotation().Yaw;
+		AddRoadsidePair(
+			HouseRoadsidePreviewPrefab,
+			ENightRoadsideKind::House,
+			HouseAnchor,
+			YawDeg,
+			RoadsidePreviewIndex);
+		AddRoadsidePair(
+			PoleRoadsidePreviewPrefab,
+			ENightRoadsideKind::Pole,
+			Anchor,
+			YawDeg,
+			RoadsidePreviewIndex);
+		++RoadsidePreviewIndex;
+	}
+	if (RoadsidePreviewIndex == 0)
+	{
+		const FVector Start = LandingPoints.Num() > 0 && LandingPoints[0]
+			? LandingPoints[0]->GetRelativeLocation()
+			: (EntryAnchor ? EntryAnchor->GetRelativeLocation() : FVector::ZeroVector);
+		const FVector End = LandingPoints.Num() > 1 && LandingPoints.Last()
+			? LandingPoints.Last()->GetRelativeLocation()
+			: (ExitAnchor
+				? ExitAnchor->GetRelativeLocation()
+				: FVector(AtomLengthCm, 0.f, 0.f));
+		const FVector Delta = End - Start;
+		const float YawDeg = Delta.IsNearlyZero() ? 0.f : Delta.Rotation().Yaw;
+		const FVector Anchor = (Start + End) * 0.5f;
+		FVector HouseAnchor = Anchor;
+		HouseAnchor.Y = HousePreviewY;
+		AddRoadsidePair(
+			HouseRoadsidePreviewPrefab,
+			ENightRoadsideKind::House,
+			HouseAnchor,
+			YawDeg,
+			0);
+		AddRoadsidePair(
+			PoleRoadsidePreviewPrefab,
+			ENightRoadsideKind::Pole,
+			Anchor,
+			YawDeg,
+			0);
 	}
 }
 
