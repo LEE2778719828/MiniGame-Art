@@ -78,28 +78,31 @@ struct FSGameStageRow : public FTableRowBase
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "关卡ID", ToolTip = "DT_GameStages 的行 ID，例如 T0、L1、L2、L3。"))
 	FName LevelId = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "Night时长", ToolTip = "该 Day 关卡进入 Night 后的最大时长，单位秒。"))
 	float NightDuration = 120.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "默认路线模式", ToolTip = "Night 岔路前主段使用的路线模式：A、B 或 C；默认 A。"))
+	FName DefaultRoute = TEXT("A");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "岔路组合", ToolTip = "Night 使用的两条分支组合：AB、AC 或 BC；默认 AB。"))
 	FName ForkPair = TEXT("AB");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "路线随机种子", ToolTip = "传给 Night 的课程随机种子；相同种子保持相同 Atom 组合。"))
 	int32 ReviewSeed = 1001;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "Day时长", ToolTip = "该 Day 关卡的经营时长，单位秒。"))
 	float DayDuration = 60.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "营收目标", ToolTip = "该关卡的 Day 营收目标。"))
 	int32 RevenueTarget = 90;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "最大同时顾客数", ToolTip = "Day 中同时存在的顾客数量上限。"))
 	int32 CustomerConcurrentMax = 2;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "顾客生成间隔", ToolTip = "Day 顾客生成间隔，单位秒。"))
 	float CustomerSpawnInterval = 7.0f;
 
 #pragma region K2 moonyfli
@@ -107,23 +110,23 @@ struct FSGameStageRow : public FTableRowBase
 	 * Seconds a regular customer waits after sitting down.
 	 * <= 0 means infinite: they stay until served or the shop closes.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "顾客耐心时间", ToolTip = "顾客坐下后的等待时间，单位秒；小于等于 0 表示不因耐心耗尽离场。"))
 	float CustomerPatienceSeconds = 32.0f;
 #pragma endregion K2 moonyfli
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "顾客配置ID", ToolTip = "对应顾客波次/配置的 ID。"))
 	FName CustomerConfigId = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "保底NPC规则", ToolTip = "Day 关卡使用的保底 NPC 规则 ID。"))
 	FName GuaranteedNpcRules = TEXT("ALing_SangPo");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "下一关卡ID", ToolTip = "Day 完成后要进入的下一关卡；最后一关可填 None。"))
 	FName NextLevelId = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "Day后结束", ToolTip = "开启后该关卡 Day 完成后结束流程，不再进入下一关。"))
 	bool bEndingAfterDay = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "关卡显示名", ToolTip = "编辑器和 UI 使用的关卡显示名称。"))
 	FString DisplayName;
 };
 
@@ -520,10 +523,13 @@ struct FSNightBootstrap
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "关卡ID", ToolTip = "由 Day 传给 Night 的关卡 ID。"))
 	FName LevelId = TEXT("T0");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "默认路线模式", ToolTip = "Day 关卡传给 Night 的岔路前主段模式：A、B 或 C；默认 A。"))
+	FName DefaultRoute = TEXT("A");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "岔路组合", ToolTip = "Day 关卡传给 Night 的岔路组合：AB、AC 或 BC；默认 AB。"))
 	FName ForkPair = TEXT("AB");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -538,8 +544,9 @@ struct FSNightBootstrap
 	FString ToDebugString() const
 	{
 		return FString::Printf(
-			TEXT("LevelId=%s Fork=%s Seed=%d FoeW=%.1f Gifts=%s"),
+			TEXT("LevelId=%s DefaultRoute=%s Fork=%s Seed=%d FoeW=%.1f Gifts=%s"),
 			*LevelId.ToString(),
+			*DefaultRoute.ToString(),
 			*ForkPair.ToString(),
 			Seed,
 			FoeWeightOverride,
@@ -590,8 +597,8 @@ class MINIGAME_API USChefSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	// v3: day order queue + cursor for mid-day load / day-start rollback.
-	static constexpr int32 CurrentSaveVersion = 3;
+	// v4: Day-driven Night DefaultRoute/ForkPair bootstrap fields.
+	static constexpr int32 CurrentSaveVersion = 4;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 SaveVersion = CurrentSaveVersion;

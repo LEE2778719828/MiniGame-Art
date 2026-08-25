@@ -2,6 +2,7 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseAtomActor.h"
+#include "Night/Course/NightCourseForkAtomActor.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseRuleData.h"
@@ -65,6 +66,11 @@ namespace NightCourseAutomation_Private
 			EFoeId::M01,
 			TSoftClassPtr<ANightCourseStoneActor>(
 				ANightCourseStoneActor::StaticClass()));
+		Config->FoeDropMap.Add(EFoeId::M01, EIngredientId::F01_LingGu);
+		Config->FoeDropMap.Add(EFoeId::M02, EIngredientId::F02_YinShanJun);
+		Config->FoeDropMap.Add(EFoeId::M03, EIngredientId::F03_ChiYanJiao);
+		Config->FoeDropMap.Add(EFoeId::M04, EIngredientId::F04_YueLinYu);
+		Config->FoeDropMap.Add(EFoeId::M05, EIngredientId::F05_XuanYuQin);
 
 		UNightCourseAtomRouteData* AtomRoute =
 			NewObject<UNightCourseAtomRouteData>(Config);
@@ -88,10 +94,14 @@ namespace NightCourseAutomation_Private
 		Rule->bEnabled = true;
 		Rule->bAutoSelectAtomKeys = true;
 		Rule->Seed = RuleSeed;
-		Rule->BaseRoute = {
+		FNightRuleAtomQueue MainQueue;
+		MainQueue.Atoms = {
 			MakeEntry(ENightNodeKind::Hazard, ENightNodeKind::Enemy, ENightNodeKind::Hazard),
 			MakeEntry(ENightNodeKind::Enemy, ENightNodeKind::Hazard, ENightNodeKind::Enemy)
 		};
+		Rule->RouteModes.Add(ENightRouteId::A, MainQueue);
+		Rule->RouteModes.Add(ENightRouteId::B, MainQueue);
+		Rule->RouteModes.Add(ENightRouteId::C, MainQueue);
 		if (bEnableFork)
 		{
 			Rule->ForkAfterBaseAtomIndex = 2;
@@ -204,10 +214,12 @@ bool FNightCourseRuleQueueJsonTest::RunTest(const FString& Parameters)
 	const FString Json = TEXT(R"JSON(
 		{
 			"seed": 42,
-			"baseAtomCount": 8,
-			"baseRoute": [
-				{"atomKey":"A","actions":["Jump","Kill"],"weight":5}
-			],
+			"routeModes": {
+				"A": {
+					"targetAtomCount": 8,
+					"atoms": [{"atomKey":"A","actions":["Jump","Kill"],"weight":5}]
+				}
+			},
 			"branchRoutes": {
 				"A": {
 					"targetAtomCount": 6,
@@ -233,18 +245,35 @@ bool FNightCourseRuleQueueJsonTest::RunTest(const FString& Parameters)
 	{
 		AddError(Error);
 	}
-	TestTrue(TEXT("base target atom count is imported"), Rule->GetBaseRouteLength() == 8);
+	TestTrue(TEXT("route mode target atom count is imported"), Rule->GetRouteModeLength(ENightRouteId::A) == 8);
 	TestTrue(TEXT("A branch is populated"), Rule->HasBranchRoute(ENightRouteId::A));
 	TestTrue(TEXT("B branch is populated"), Rule->HasBranchRoute(ENightRouteId::B));
 	TestTrue(TEXT("C branch is populated"), Rule->HasBranchRoute(ENightRouteId::C));
 	TestTrue(TEXT("duplicate atom keys remain reusable"), Rule->BranchRoutes[ENightRouteId::A].Atoms[0].AtomKey == TEXT("A"));
-	TestTrue(TEXT("base weight is imported"), Rule->BaseRoute[0].Weight == 5);
+	TestTrue(TEXT("route mode weight is imported"), Rule->RouteModes[ENightRouteId::A].Atoms[0].Weight == 5);
 	TestTrue(TEXT("branch target atom count is imported"), Rule->BranchRoutes[ENightRouteId::A].TargetAtomCount == 6);
 	TestTrue(TEXT("rule validates"), Rule->ValidateRule(Error));
 	FString ExportedJson;
 	TestTrue(TEXT("weighted queue JSON exports"), Rule->ExportJson(ExportedJson, Error));
-	TestTrue(TEXT("export includes base target count"), ExportedJson.Contains(TEXT("\"baseAtomCount\"")));
+	TestTrue(TEXT("export uses routeModes"), ExportedJson.Contains(TEXT("\"routeModes\"")));
+	TestFalse(TEXT("export removes legacy baseRoute"), ExportedJson.Contains(TEXT("\"baseRoute\"")));
+	TestTrue(TEXT("export includes route mode target count"), ExportedJson.Contains(TEXT("\"targetAtomCount\"")));
 	TestTrue(TEXT("export includes branch target count"), ExportedJson.Contains(TEXT("\"targetAtomCount\"")));
+
+	UNightCourseRuleData* LegacyRule =
+		NewObject<UNightCourseRuleData>(GetTransientPackage());
+	const FString LegacyJson = TEXT(R"JSON(
+		{
+			"seed": 7,
+			"baseAtomCount": 3,
+			"baseRoute": [{"atomKey":"A","actions":["Jump","Kill"]}]
+		}
+	)JSON");
+	Error.Reset();
+	TestTrue(TEXT("legacy baseRoute JSON imports for migration"), LegacyRule->ImportJson(LegacyJson, Error));
+	TestTrue(
+		TEXT("legacy baseRoute migrates to RouteModes A"),
+		LegacyRule->GetRouteModeLength(ENightRouteId::A) == 3);
 	return true;
 }
 
@@ -274,6 +303,125 @@ bool FNightCourseForkPairTest::RunTest(const FString& Parameters)
 		bForcedAB);
 	TestEqual(TEXT("BC left route"), Left, ENightRouteId::B);
 	TestEqual(TEXT("BC right route"), Right, ENightRouteId::C);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseForkAtomCompositionTest,
+	"MiniGame.Night.Course.ForkAtomComposition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseForkAtomCompositionTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, true, 441);
+	Config->PreviewForkPair = ENightForkPair::AB;
+	Config->ForkAtomMap.Add(
+		ENightForkPair::AB,
+		TSoftClassPtr<ANightCourseForkAtomActor>(
+			ANightCourseForkAtomActor::StaticClass()));
+
+	FString ValidationError;
+	TestTrue(
+		TEXT("configured fork Atom map validates"),
+		Config->ValidateForkAtomMap(ValidationError));
+	if (!ValidationError.IsEmpty())
+	{
+		AddError(ValidationError);
+	}
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	UBoxComponent* ForkBounds =
+		NewObject<UBoxComponent>(GetTransientPackage());
+	ForkBounds->SetBoxExtent(FVector(100000.f, 600.f, 10000.f));
+	Director->SetLayoutBoundsComponent(ForkBounds, true);
+
+	TArray<FNightStoneSpec> BaseStones;
+	TArray<FNightBeatSpec> BaseBeats;
+	TArray<FNightBridgeSpec> BaseBridges;
+	TArray<FNightAtomVisualBinding> BaseBindings;
+	TArray<FNightForkAtomSpec> BaseForkAtoms;
+	Config->PreviewRoute = ENightRouteId::None;
+	TestTrue(
+		TEXT("base preview includes the configured fork Atom"),
+		Director->BuildCourseForPreview(
+			BaseStones,
+			BaseBeats,
+			BaseBridges,
+			BaseBindings,
+			BaseForkAtoms));
+	TestEqual(TEXT("one special fork Atom is resolved"), BaseForkAtoms.Num(), 1);
+	if (BaseForkAtoms.Num() == 1)
+	{
+		TestTrue(
+			TEXT("fork Atom class is preserved"),
+			BaseForkAtoms[0].ActorClass == ANightCourseForkAtomActor::StaticClass());
+		TestFalse(
+			TEXT("fork exits are distinct"),
+			BaseForkAtoms[0].LeftExitTransform.GetLocation().Equals(
+				BaseForkAtoms[0].RightExitTransform.GetLocation()));
+		TestTrue(
+			TEXT("fork entry is reset to world Y zero"),
+			FMath::IsNearlyZero(
+				BaseForkAtoms[0].WorldTransform.GetLocation().Y,
+				0.01f));
+	}
+
+	auto BuildPreviewRoute =
+		[&Director, &Config](
+			const ENightRouteId RouteId,
+			TArray<FNightStoneSpec>& OutStones,
+			TArray<FNightForkAtomSpec>& OutForkAtoms)
+		{
+			Config->PreviewRoute = RouteId;
+			TArray<FNightBeatSpec> Beats;
+			TArray<FNightBridgeSpec> Bridges;
+			TArray<FNightAtomVisualBinding> Bindings;
+			return Director->BuildCourseForPreview(
+				OutStones,
+				Beats,
+				Bridges,
+				Bindings,
+				OutForkAtoms);
+		};
+
+	TArray<FNightStoneSpec> AStones;
+	TArray<FNightForkAtomSpec> AForkAtoms;
+	TestTrue(
+		TEXT("left route preview builds from the left fork exit"),
+		BuildPreviewRoute(ENightRouteId::A, AStones, AForkAtoms));
+
+	TArray<FNightStoneSpec> BStones;
+	TArray<FNightForkAtomSpec> BForkAtoms;
+	TestTrue(
+		TEXT("right route preview builds from the right fork exit"),
+		BuildPreviewRoute(ENightRouteId::B, BStones, BForkAtoms));
+	if (BaseStones.Num() < AStones.Num()
+		&& BaseStones.Num() < BStones.Num()
+		&& AForkAtoms.Num() == 1
+		&& BForkAtoms.Num() == 1)
+	{
+		const FVector ABranchStart = AStones[BaseStones.Num()].WorldLocation;
+		const FVector BBranchStart = BStones[BaseStones.Num()].WorldLocation;
+		TestTrue(
+			TEXT("A branch begins nearer the configured left exit"),
+			FVector::DistSquared(
+				ABranchStart,
+				AForkAtoms[0].LeftExitTransform.GetLocation())
+			< FVector::DistSquared(
+				ABranchStart,
+				AForkAtoms[0].RightExitTransform.GetLocation()));
+		TestTrue(
+			TEXT("B branch begins nearer the configured right exit"),
+			FVector::DistSquared(
+				BBranchStart,
+				BForkAtoms[0].RightExitTransform.GetLocation())
+			< FVector::DistSquared(
+				BBranchStart,
+				BForkAtoms[0].LeftExitTransform.GetLocation()));
+	}
 	return true;
 }
 
@@ -393,7 +541,7 @@ bool FNightCourseAtomSeedSelectionTest::RunTest(const FString& Parameters)
 		bDifferentSeedChangedSelection);
 
 	FirstConfig->CourseRuleData->Seed = 1001;
-	FirstConfig->CourseRuleData->BaseRoute[0].AtomKey = TEXT("B");
+	FirstConfig->CourseRuleData->RouteModes[ENightRouteId::A].Atoms[0].AtomKey = TEXT("B");
 	TArray<FNightStoneSpec> ExplicitStones;
 	TArray<FNightBeatSpec> ExplicitBeats;
 	TArray<FNightBridgeSpec> ExplicitBridges;
@@ -493,8 +641,10 @@ bool FNightCourseWeightedAtomCountTest::RunTest(const FString& Parameters)
 		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1401);
 	UNightCourseRuleData* Rule = Config->CourseRuleData;
 	Rule->bAutoSelectAtomKeys = false;
-	Rule->BaseAtomCount = 30;
-	Rule->BaseRoute = {
+	Rule->RouteModes.Remove(ENightRouteId::B);
+	Rule->RouteModes.Remove(ENightRouteId::C);
+	Rule->RouteModes[ENightRouteId::A].TargetAtomCount = 30;
+	Rule->RouteModes[ENightRouteId::A].Atoms = {
 		NightCourseAutomation_Private::MakeEntry(
 			ENightNodeKind::Hazard,
 			ENightNodeKind::Enemy,
@@ -506,8 +656,10 @@ bool FNightCourseWeightedAtomCountTest::RunTest(const FString& Parameters)
 			ENightNodeKind::Enemy,
 			3)
 	};
-	Rule->BaseRoute[0].AtomKey = TEXT("A");
-	Rule->BaseRoute[1].AtomKey = TEXT("A");
+	Rule->RouteModes[ENightRouteId::A].Atoms[0].AtomKey = TEXT("A");
+	Rule->RouteModes[ENightRouteId::A].Atoms[1].AtomKey = TEXT("A");
+	Rule->RouteModes[ENightRouteId::A].Atoms[0].Actions.Add(ENightNodeKind::Enemy);
+	Rule->RouteModes[ENightRouteId::A].Atoms[1].Actions.Add(ENightNodeKind::Enemy);
 
 	UNightCourseDirector* Director =
 		NewObject<UNightCourseDirector>(GetTransientPackage());
@@ -520,27 +672,29 @@ bool FNightCourseWeightedAtomCountTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("weighted base queue builds"),
 		Director->BuildCourseForPreview(Stones, Beats, Bridges, Bindings));
-	TestEqual(TEXT("target base atom count is generated"), Stones.Num(), 30 * 4);
-	TestEqual(TEXT("internal and transition beats are generated"), Beats.Num(), 30 * 3 + 29);
+	TestEqual(TEXT("target base atom count is generated"), Stones.Num(), 30 * 5);
+	TestEqual(TEXT("internal and transition beats are generated"), Beats.Num(), 30 * 4 + 29);
 
 	int32 HazardEnemyHazardCount = 0;
 	int32 EnemyEnemyEnemyCount = 0;
 	for (int32 AtomIndex = 0; AtomIndex < 30; ++AtomIndex)
 	{
-		const int32 StoneOffset = AtomIndex * 4;
-		if (!Stones.IsValidIndex(StoneOffset + 3))
+		const int32 StoneOffset = AtomIndex * 5;
+		if (!Stones.IsValidIndex(StoneOffset + 4))
 		{
 			continue;
 		}
 		if (!Stones[StoneOffset + 1].bHasFoe
 			&& Stones[StoneOffset + 2].bHasFoe
-			&& !Stones[StoneOffset + 3].bHasFoe)
+			&& !Stones[StoneOffset + 3].bHasFoe
+			&& Stones[StoneOffset + 4].bHasFoe)
 		{
 			++HazardEnemyHazardCount;
 		}
 		else if (Stones[StoneOffset + 1].bHasFoe
 			&& Stones[StoneOffset + 2].bHasFoe
-			&& Stones[StoneOffset + 3].bHasFoe)
+			&& Stones[StoneOffset + 3].bHasFoe
+			&& Stones[StoneOffset + 4].bHasFoe)
 		{
 			++EnemyEnemyEnemyCount;
 		}
@@ -560,7 +714,7 @@ bool FNightCourseAtomCompatibilityFailureTest::RunTest(const FString& Parameters
 {
 	UNightG1CourseConfig* Config =
 		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1301);
-	Config->CourseRuleData->BaseRoute[0].Actions = {
+	Config->CourseRuleData->RouteModes[ENightRouteId::A].Atoms[0].Actions = {
 		ENightNodeKind::Hazard,
 		ENightNodeKind::Enemy
 	};
@@ -569,7 +723,7 @@ bool FNightCourseAtomCompatibilityFailureTest::RunTest(const FString& Parameters
 	Director->Config = Config;
 	FString Error;
 	AddExpectedError(
-		TEXT("Base route has no compatible Atom BP candidate"),
+		TEXT("Route mode A has no compatible Atom BP candidate"),
 		EAutomationExpectedErrorFlags::Contains,
 		1);
 	TestFalse(
@@ -631,6 +785,22 @@ bool FNightCourseCanonicalAssetReferenceTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("canonical Course maps M04"), Course->FoeActorMap.Contains(EFoeId::M04));
 	TestTrue(TEXT("canonical Course maps M05"), Course->FoeActorMap.Contains(EFoeId::M05));
 	TestEqual(TEXT("canonical Course maps exactly five foe IDs"), Course->FoeActorMap.Num(), 5);
+	FString FoeDropMapError;
+	TestTrue(
+		TEXT("canonical Course foe drop map is valid"),
+		Course->ValidateFoeDropMap(FoeDropMapError));
+	TestTrue(TEXT("canonical Course drop maps M01"), Course->FoeDropMap.Contains(EFoeId::M01));
+	TestTrue(TEXT("canonical Course drop maps M02"), Course->FoeDropMap.Contains(EFoeId::M02));
+	TestTrue(TEXT("canonical Course drop maps M03"), Course->FoeDropMap.Contains(EFoeId::M03));
+	TestTrue(TEXT("canonical Course drop maps M04"), Course->FoeDropMap.Contains(EFoeId::M04));
+	TestTrue(TEXT("canonical Course drop maps M05"), Course->FoeDropMap.Contains(EFoeId::M05));
+	TestEqual(TEXT("canonical Course maps exactly five foe drops"), Course->FoeDropMap.Num(), 5);
+	if (Course->CourseRuleData)
+	{
+		TestTrue(
+			TEXT("canonical Rules has route mode A"),
+			Course->CourseRuleData->RouteModes.Contains(ENightRouteId::A));
+	}
 	return true;
 }
 
@@ -693,6 +863,108 @@ bool FNightCourseFoeActorMapValidationTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("None default error is explicit"),
 		Error.Contains(TEXT("DefaultFoeId")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseFoeDropMapTest,
+	"MiniGame.Night.Course.FoeDropMap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseFoeDropMapTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1502);
+	Config->DefaultDropCount = 3;
+	Config->bRandomizeEnemyDrops = true;
+	Config->IngredientDropPool = { EIngredientId::F05_XuanYuQin };
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+
+	TArray<FNightStoneSpec> Stones;
+	TArray<FNightBeatSpec> Beats;
+	TArray<FNightBridgeSpec> Bridges;
+	TArray<FNightAtomVisualBinding> Bindings;
+	TestTrue(
+		TEXT("mapped foe drops build successfully"),
+		Director->BuildCourseForPreview(Stones, Beats, Bridges, Bindings));
+	for (const FNightStoneSpec& Stone : Stones)
+	{
+		if (!Stone.bHasFoe)
+		{
+			continue;
+		}
+		TestEqual(
+			TEXT("FoeDropMap overrides the random ingredient pool"),
+			Stone.DropId,
+			EIngredientId::F01_LingGu);
+		TestEqual(
+			TEXT("mapped foe uses DefaultDropCount"),
+			Stone.DropCount,
+			3);
+	}
+
+	FString Error;
+	Config->FoeDropMap.Remove(EFoeId::M05);
+	TestFalse(
+		TEXT("missing one of M01-M05 drop mappings is rejected"),
+		Config->ValidateFoeDropMap(Error));
+	TestTrue(TEXT("missing drop mapping reports FoeDropMap"), Error.Contains(TEXT("FoeDropMap")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseDefaultRouteModeTest,
+	"MiniGame.Night.Course.DefaultRouteMode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseDefaultRouteModeTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1503);
+	Config->PreviewDefaultRoute = ENightRouteId::B;
+	Config->CourseRuleData->bAutoSelectAtomKeys = false;
+	for (TPair<ENightRouteId, FNightRuleAtomQueue>& RoutePair :
+		Config->CourseRuleData->RouteModes)
+	{
+		for (FNightRuleAtomEntry& Entry : RoutePair.Value.Atoms)
+		{
+			if (Entry.AtomKey.IsEmpty())
+			{
+				Entry.AtomKey = TEXT("B");
+			}
+		}
+	}
+	Config->CourseRuleData->RouteModes[ENightRouteId::A].Atoms[0].AtomKey = TEXT("A");
+	Config->CourseRuleData->RouteModes[ENightRouteId::A].Atoms[0].Actions.Add(
+		ENightNodeKind::Enemy);
+	Config->CourseRuleData->RouteModes[ENightRouteId::B].Atoms[0].AtomKey = TEXT("B");
+	Config->CourseRuleData->RouteModes[ENightRouteId::C].Atoms[0].AtomKey = TEXT("C");
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	TArray<FNightStoneSpec> Stones;
+	TArray<FNightBeatSpec> Beats;
+	TArray<FNightBridgeSpec> Bridges;
+	TArray<FNightAtomVisualBinding> Bindings;
+	TestTrue(
+		TEXT("preview uses the selected RouteMode"),
+		Director->BuildCourseForPreview(Stones, Beats, Bridges, Bindings));
+	TestTrue(
+		TEXT("RouteModes B produces a B Atom binding"),
+		Bindings.Num() > 0 && Bindings[0].AtomKey == TEXT("B"));
+
+	FNightBootstrap Bootstrap;
+	Bootstrap.DefaultRoute = ENightRouteId::C;
+	Director->StartNight(Bootstrap);
+	TestTrue(TEXT("runtime accepts a Day-selected route mode"), Director->IsRunning());
+	TestEqual(
+		TEXT("runtime stores the Day-selected default route"),
+		Director->GetActiveDefaultRoute(),
+		ENightRouteId::C);
+	Director->ResetCourse();
 	return true;
 }
 

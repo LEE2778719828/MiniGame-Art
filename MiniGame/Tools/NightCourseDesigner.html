@@ -222,15 +222,27 @@
       <button id="btnImport">导入 JSON 文件</button>
       <input id="fileImport" type="file" accept="application/json,.json" hidden />
     </div>
-    <label>Atom Rule（模板池：总数 + Weight 加权；AtomKey 留空=按 Seed 自动选择，填值=美术/回归锁定）</label>
+    <label>Atom Rule（RouteModes/BranchRoutes 模板池：总数 + Weight 加权；AtomKey 留空=按 Seed 自动选择）</label>
     <textarea id="atomRuleJson" rows="8" spellcheck="false">{
   "seed": 1001,
   "autoSelectAtomKeys": true,
-  "baseAtomCount": 30,
-  "baseRoute": [
-    { "atomKey": "", "actions": ["Jump", "Kill", "Kill"], "weight": 5 },
-    { "atomKey": "", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
-  ],
+  "routeModes": {
+    "A": {
+      "targetAtomCount": 30,
+      "atoms": [
+        { "atomKey": "", "actions": ["Jump", "Kill", "Kill"], "weight": 5 },
+        { "atomKey": "", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
+      ]
+    },
+    "B": {
+      "targetAtomCount": 30,
+      "atoms": [{ "atomKey": "", "actions": ["Jump", "Kill", "Jump"], "weight": 1 }]
+    },
+    "C": {
+      "targetAtomCount": 30,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Kill", "Jump"], "weight": 1 }]
+    }
+  },
   "branchRoutes": {
     "A": {
       "targetAtomCount": 20,
@@ -558,12 +570,6 @@ function normalizeAtomRule(value) {
   if (!value || typeof value !== "object") throw new Error("Atom Rule 必须是 JSON 对象");
   const seed = Number(value.seed);
   if (!Number.isFinite(seed)) throw new Error("Atom Rule.seed 必须是数字");
-  const baseAtomCount = value.baseAtomCount === undefined
-    ? 0
-    : Math.trunc(Number(value.baseAtomCount));
-  if (!Number.isFinite(baseAtomCount) || baseAtomCount < 0) {
-    throw new Error("Atom Rule.baseAtomCount 必须是非负整数");
-  }
   const autoSelectAtomKeys = value.autoSelectAtomKeys === undefined
     ? true
     : Boolean(value.autoSelectAtomKeys);
@@ -595,10 +601,49 @@ function normalizeAtomRule(value) {
       return { atomKey, actions, weight };
     });
   };
-  if (!Array.isArray(value.baseRoute)) {
-    throw new Error("Atom Rule.baseRoute 必须是非空数组；旧 route 字段已移除");
+  const normalizeQueue = (queueValue, label, legacyTarget = 0) => {
+    const isLegacyArray = Array.isArray(queueValue);
+    const queueObject = queueValue && typeof queueValue === "object" && !isLegacyArray
+      ? queueValue
+      : null;
+    const targetAtomCount = queueObject && queueObject.targetAtomCount !== undefined
+      ? Math.trunc(Number(queueObject.targetAtomCount))
+      : legacyTarget;
+    if (!Number.isFinite(targetAtomCount) || targetAtomCount < 0) {
+      throw new Error(`${label}.targetAtomCount 必须是非负整数`);
+    }
+    const entries = isLegacyArray ? queueValue : queueObject && queueObject.atoms;
+    return {
+      targetAtomCount,
+      atoms: normalizeEntries(entries, `${label}${isLegacyArray ? "" : ".atoms"}`)
+    };
+  };
+  const routeModes = {};
+  if (value.routeModes !== undefined) {
+    if (!value.routeModes || typeof value.routeModes !== "object" || Array.isArray(value.routeModes)) {
+      throw new Error("Atom Rule.routeModes 必须是 A/B/C 到队列对象的映射");
+    }
+    for (const [routeId, queueValue] of Object.entries(value.routeModes)) {
+      if (!["A", "B", "C"].includes(routeId)) {
+        throw new Error(`routeModes.${routeId} 不是合法路线`);
+      }
+      routeModes[routeId] = normalizeQueue(queueValue, `routeModes.${routeId}`);
+    }
+  } else if (Array.isArray(value.baseRoute)) {
+    // One-time browser-side migration for the removed baseRoute schema.
+    const baseAtomCount = value.baseAtomCount === undefined
+      ? 0
+      : Math.trunc(Number(value.baseAtomCount));
+    if (!Number.isFinite(baseAtomCount) || baseAtomCount < 0) {
+      throw new Error("Atom Rule.baseAtomCount 必须是非负整数");
+    }
+    routeModes.A = normalizeQueue(value.baseRoute, "routeModes.A", baseAtomCount);
+  } else {
+    throw new Error("Atom Rule.routeModes 必须包含至少一个 A/B/C 路线模式");
   }
-  const baseRoute = normalizeEntries(value.baseRoute, "baseRoute");
+  if (Object.keys(routeModes).length === 0) {
+    throw new Error("Atom Rule.routeModes 必须包含至少一个路线模式");
+  }
   const branchRoutes = {};
   if (value.branchRoutes !== undefined) {
     if (!value.branchRoutes || typeof value.branchRoutes !== "object" || Array.isArray(value.branchRoutes)) {
@@ -608,24 +653,7 @@ function normalizeAtomRule(value) {
       if (!["A", "B", "C"].includes(routeId)) {
         throw new Error(`branchRoutes.${routeId} 不是合法路线`);
       }
-      const isLegacyArray = Array.isArray(queueValue);
-      const queueObject = queueValue && typeof queueValue === "object" && !isLegacyArray
-        ? queueValue
-        : null;
-      const targetAtomCount = queueObject && queueObject.targetAtomCount !== undefined
-        ? Math.trunc(Number(queueObject.targetAtomCount))
-        : 0;
-      if (!Number.isFinite(targetAtomCount) || targetAtomCount < 0) {
-        throw new Error(`branchRoutes.${routeId}.targetAtomCount 必须是非负整数`);
-      }
-      const entries = isLegacyArray ? queueValue : queueObject && queueObject.atoms;
-      branchRoutes[routeId] = {
-        targetAtomCount,
-        atoms: normalizeEntries(
-          entries,
-          `branchRoutes.${routeId}${isLegacyArray ? "" : ".atoms"}`
-        )
-      };
+      branchRoutes[routeId] = normalizeQueue(queueValue, `branchRoutes.${routeId}`);
     }
   }
   const forkAfterBaseAtomIndex = value.forkAfterBaseAtomIndex === undefined
@@ -638,8 +666,7 @@ function normalizeAtomRule(value) {
   const normalized = {
     seed: Math.trunc(seed),
     autoSelectAtomKeys,
-    baseAtomCount,
-    baseRoute
+    routeModes
   };
   if (Object.keys(branchRoutes).length > 0) normalized.branchRoutes = branchRoutes;
   if (forkAfterBaseAtomIndex !== undefined) {
@@ -685,7 +712,7 @@ document.getElementById("fileImport").onchange = async (e) => {
   if (!file) return;
   const text = await file.text();
   const obj = JSON.parse(text);
-  if (Array.isArray(obj.baseRoute) || obj.branchRoutes) {
+  if (obj.routeModes || Array.isArray(obj.baseRoute) || obj.branchRoutes) {
     importAtomRuleObject(obj, text);
   } else {
     applyParams(obj);

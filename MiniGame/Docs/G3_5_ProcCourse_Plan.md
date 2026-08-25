@@ -6,8 +6,9 @@
 
 本阶段的可玩课程已经迁移到 canonical Atom 链：
 `DA_Course` → `DA_Rules` + `DA_Atoms` + `DA_RouteRules`。
-`BaseRoute/BranchRoutes` 描述 `AtomKey + Actions + Weight` 模板池；
-`BaseAtomCount/TargetAtomCount` 决定基础段和分支段的生成总数。模板按权重
+`RouteModes[A/B/C]` 与 `BranchRoutes[A/B/C]` 描述 `AtomKey + Actions + Weight` 模板池；
+各队列的 `TargetAtomCount` 决定主段和分支段的生成总数。Day 的 `DefaultRoute`
+选择主段模式，模板按权重
 使用有效 Seed 稳定抽样；空 `AtomKey` 再从 `DA_Atoms` 稳定选择，非空
 `AtomKey` 保留为美术/回归锁定。
 相邻 Atom 由 Entry/Exit 对齐，并使用 `DA_Atoms.TransitionJumpGapCm` 的固定
@@ -21,7 +22,8 @@ Standalone `FNightProcCourseParams` / `UNightTrackGenerator` 仅保留给独立�
 2. **美术桥/角/怪**：桥继续由 Atom BP 的 `BridgeVisualComponent` 配置；敌人 BP 统一登记到
    `DA_Course.FoeActorMap`，Atom 落脚点只保留可选的 `Temporary Preview Prefab`。
 3. **Seed Atom 组合**：同 Seed 得到相同 Atom key/变换，不同 Seed 在有候选时得到不同合法组合。
-4. **HTML 俯视设计器**：导出 `BaseRoute/BranchRoutes` UE 可读 JSON。
+4. **HTML 俯视设计器**：导出 `RouteModes/BranchRoutes` UE 可读 JSON，并将旧
+   `baseRoute/baseAtomCount` 导入迁移到 `routeModes.A`。
 
 ## 关键文件
 
@@ -47,11 +49,12 @@ Standalone `FNightProcCourseParams` / `UNightTrackGenerator` 仅保留给独立�
 |---|---|---|
 | `ArtSubmit/Stones/Bridge/mini_qiao/muban1.fbx` `muban2.fbx` | `/Game/Night/Course/Art/Bridge/` | Atom BP 的 BridgeVisualComponent |
 | `ArtSubmit/Character/mini_zhujue/zhujue.fbx` | `/Game/Night/Course/Art/Hero/` | `BP_NightHero` |
-| `ArtSubmit/Foes/mini_fish` / `mini_cantingguai` / `mini_box` | `/Game/Night/Course/Art/Foe/` | `BP_NightFoeM01`–`M05`，再登记到 `DA_Course.FoeActorMap` |
+| `ArtSubmit/Foes/mini_fish` / `mini_cantingguai` / `mini_box` | `/Game/Night/Course/Art/Foe/` | `BP_NightFoeM01`–`M05`，再登记到 `DA_Course.FoeActorMap` 与 `FoeDropMap` |
 | `ArtSubmit/Environment/mini_canguan/` | `/Game/Night/Course/Art/Environment/` | Environment mesh |
 
 导入后由美术在敌人 BP 中绑定 Mesh/碰撞/动画，并在 `DA_Course.FoeActorMap` 绑定
-`EFoeId`。Atom BP 只在需要对准位置时填写临时预览 Prefab；策划不填写运行时 Mesh/Transform。
+`EFoeId`，再在 `FoeDropMap` 绑定对应 `EIngredientId`。Atom BP 只在需要对准位置时填写
+临时预览 Prefab；策划不填写运行时 Mesh/Transform。
 资产绑定和 Save All 由用户手动完成。
 
 ## 完成标准

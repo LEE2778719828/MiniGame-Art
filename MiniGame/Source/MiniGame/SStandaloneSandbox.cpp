@@ -1928,6 +1928,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("教程日");
 		Row.NightDuration = 90.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 1001;
 		Row.DayDuration = 60.0f;
@@ -1942,6 +1943,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第一夜");
 		Row.NightDuration = 110.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 2101;
 		Row.DayDuration = 90.0f;
@@ -1956,6 +1958,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第二夜");
 		Row.NightDuration = 130.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AC");
 		Row.ReviewSeed = 3201;
 		Row.DayDuration = 120.0f;
@@ -1970,6 +1973,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第三夜");
 		Row.NightDuration = 150.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("BC");
 		Row.ReviewSeed = 4301;
 		Row.DayDuration = 120.0f;
@@ -2053,6 +2057,10 @@ FSNightBootstrap USChefGameInstance::BuildNightBootstrap()
 {
 	PendingNightBootstrap = FSNightBootstrap();
 	PendingNightBootstrap.LevelId = StageId;
+	PendingNightBootstrap.DefaultRoute =
+		ActiveStageRow.DefaultRoute.IsNone()
+			? FName(TEXT("A"))
+			: ActiveStageRow.DefaultRoute;
 	PendingNightBootstrap.ForkPair = ForkPair;
 	PendingNightBootstrap.GiftBuffState = GiftBuffState;
 	PendingNightBootstrap.Seed = ReviewSeed;
@@ -2249,7 +2257,9 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 
 bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 {
-	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion)
+	const bool bLegacyBootstrapSave = SaveObject.SaveVersion == 3;
+	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion
+		&& !bLegacyBootstrapSave)
 	{
 		UE_LOG(
 			LogSSandbox,
@@ -2258,6 +2268,13 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 			SaveObject.SaveVersion,
 			USChefSaveGame::CurrentSaveVersion);
 		return false;
+	}
+	if (bLegacyBootstrapSave)
+	{
+		UE_LOG(
+			LogSSandbox,
+			Display,
+			TEXT("迁移 v3 存档：Night DefaultRoute 使用当前 DT_GameStages 默认值。"));
 	}
 
 	InitializeIngredientMaps();
