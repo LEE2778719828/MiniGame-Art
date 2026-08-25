@@ -1947,12 +1947,14 @@ void ASDayBoardPresenter::BuildBins()
 	for (int32 Index = 0; Index < DayIngredientBinCount; ++Index)
 	{
 		FName IngredientId = NAME_None;
+		const FSDayIngredientBinOutput* BinOutput = nullptr;
 		if (Config)
 		{
 			for (const FSDayIngredientBinOutput& Output : Config->IngredientBinOutputs)
 			{
 				if (Output.BinIndex == Index)
 				{
+					BinOutput = &Output;
 					IngredientId = Output.IngredientId;
 					break;
 				}
@@ -2010,8 +2012,13 @@ void ASDayBoardPresenter::BuildBins()
 		if (ArtBin.IsValid())
 		{
 			// The imported box supplies the visible geometry. This hidden cube is sized to
-			// the art bounds and remains the stable Visibility trace target.
-			Bin->BinMesh->SetRelativeScale3D(ArtBinExtent / 50.0f);
+			// the art bounds and remains the stable Visibility trace target. Designers can
+			// expand that target without changing the authored art or level placement.
+			const float GlobalHitScale = Config ? Config->IngredientBinHitScale : 1.0f;
+			const FVector PerBinHitScale = BinOutput ? BinOutput->HitScale : FVector::OneVector;
+			const FVector HitOffset = BinOutput ? BinOutput->HitOffset : FVector::ZeroVector;
+			Bin->BinMesh->SetRelativeScale3D((ArtBinExtent / 50.0f) * GlobalHitScale * PerBinHitScale);
+			Bin->BinMesh->SetRelativeLocation(HitOffset);
 			Bin->BinMesh->SetVisibility(false);
 			Bin->Label->SetRelativeLocation(FVector(0.0f, 0.0f, ArtBinExtent.Z + 30.0f));
 		}

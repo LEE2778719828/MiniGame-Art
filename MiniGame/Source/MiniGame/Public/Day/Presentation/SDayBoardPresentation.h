@@ -62,6 +62,15 @@ struct MINIGAME_API FSDayIngredientBinOutput
 	/** IngredientId consumed from inventory and placed into the board. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins")
 	FName IngredientId = NAME_None;
+
+	/** Per-axis scale applied to this bin's hidden click proxy after the global hit scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins",
+		meta = (ClampMin = "0.1", UIMin = "0.5", UIMax = "3.0"))
+	FVector HitScale = FVector::OneVector;
+
+	/** Local-space offset in centimetres from the authored bin centre to its hidden click proxy. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins")
+	FVector HitOffset = FVector::ZeroVector;
 };
 
 /** DT_SDayDishIconTune single row: plated-food size and clearance. */
@@ -149,6 +158,11 @@ public:
 	/** Maps the existing authored bin index to the ingredient it produces. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ingredient Bins", meta = (TitleProperty = "IngredientId"))
 	TArray<FSDayIngredientBinOutput> IngredientBinOutputs;
+
+	/** Uniform scale applied to the hidden Visibility-trace proxy around each authored ingredient bin. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ingredient Bins",
+		meta = (ClampMin = "0.1", UIMin = "0.5", UIMax = "3.0"))
+	float IngredientBinHitScale = 1.0f;
 
 	/**
 	 * Offline font used by every world-space label. TextRenderComponent cannot use runtime
