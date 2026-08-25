@@ -17,6 +17,7 @@ class USkeletalMesh;
 class UMaterialInterface;
 class USkeletalMeshComponent;
 class UAnimSequence;
+class UCameraShakeBase;
 class UNightCourseDirector;
 
 #pragma region K2 moonyfli
@@ -159,6 +160,19 @@ public:
 	/** 上面三种冲击回到零的速度，越低余韵越长。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "0.5", ClampMax = "60.0"))
 	float CameraKickRecoverySpeed = 9.f;
+
+	/**
+	 * Fail / miss shake from TA (CS_CameraShake_Return wraps CA_CameraShake_Return).
+	 * Played from PlayFailFeedback; does not replace Takeoff / Land / Contact kicks.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel")
+	TSubclassOf<UCameraShakeBase> FailCameraShake;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "0.0", ClampMax = "4.0"))
+	float FailCameraShakeScale = 1.f;
+
+	/** add by K2 (R1) */
+	void PlayFailCameraShake();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Feel")
 	TObjectPtr<UNightFeelStubComponent> FeelStub;

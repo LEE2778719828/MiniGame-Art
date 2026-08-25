@@ -1,5 +1,6 @@
 #include "Night/Course/NightCoursePawn.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CameraShakeBase.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -98,6 +99,14 @@ ANightCoursePawn::ANightCoursePawn()
 	if (AttackClip.Succeeded())
 	{
 		AttackAnim = AttackClip.Object;
+	}
+
+	// add by K2 (R1): fail shake wraps CA_CameraShake_Return; land/takeoff kicks stay notify-driven.
+	static ConstructorHelpers::FClassFinder<UCameraShakeBase> FailShakeClass(
+		TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return"));
+	if (FailShakeClass.Succeeded())
+	{
+		FailCameraShake = FailShakeClass.Class;
 	}
 
 	// 刃心-style: behind + above the runner, looking forward down the lane.
@@ -551,6 +560,21 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 	// 不循环：跳/斩都是一次性动作，播完停在末帧等下一次输入（idle 动画到位前的权宜）
 	HeroSkelMesh->PlayAnimation(Clip, false);
 	HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+}
+
+// add by K2 (R1)
+void ANightCoursePawn::PlayFailCameraShake()
+{
+	if (!FailCameraShake)
+	{
+		return;
+	}
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+	PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
 }
 
 // add by K2 (R1)
