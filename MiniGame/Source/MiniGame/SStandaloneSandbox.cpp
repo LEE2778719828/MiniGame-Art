@@ -1103,6 +1103,7 @@ void USChefGameInstance::AddRevenue(const int32 Amount)
 		return;
 	}
 	Revenue += Amount;
+	TotalCoinsEarned += Amount;
 #pragma region K2 moonyfli
 	// 达标只是解锁日结，营业照旧继续，直到时间结束或食材耗尽。
 	if (Phase == ESGamePhase::DayRunning && Revenue >= RevenueTarget)
@@ -1128,8 +1129,7 @@ int32 USChefGameInstance::GetRevenueGap() const
 #pragma region K2 moonyfli
 int32 USChefGameInstance::GetCoinBalance() const
 {
-	// No system banks money across days yet; keep the readout at zero rather than aliasing revenue.
-	return 0;
+	return TotalCoinsEarned;
 }
 #pragma endregion K2 moonyfli
 
@@ -2227,6 +2227,7 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 
 #pragma region K2 moonyfli
 	SaveObject.RevenueProgress = Revenue;
+	SaveObject.TotalCoinsEarned = TotalCoinsEarned;
 	SaveObject.ActiveGiftIds = ActiveGiftIds;
 	SaveObject.DayTimeRemaining = DayTimeRemaining;
 	SaveObject.CarryOverTargetBonus = CarryOverTargetBonus;
@@ -2277,6 +2278,7 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 	}
 
 	Revenue = FMath::Max(0, SaveObject.RevenueProgress);
+	TotalCoinsEarned = FMath::Max(0, SaveObject.TotalCoinsEarned);
 #pragma region K2 moonyfli
 	ActiveGiftIds = SaveObject.ActiveGiftIds;
 	RebuildGiftBuffState();
@@ -2467,6 +2469,7 @@ void USChefGameInstance::ResetSandbox()
 	ActiveGiftIds.Empty();
 	GiftBuffState = FSGiftBuffState();
 	Revenue = 0;
+	TotalCoinsEarned = 0;
 	DayTimeRemaining = 0.0f;
 	DayStuckCheckAccum = 0.0f;
 	CarryOverTargetBonus = 0;

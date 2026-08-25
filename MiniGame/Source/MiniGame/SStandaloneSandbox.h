@@ -605,6 +605,10 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 RevenueProgress = 0;
 
+	/** All revenue earned during this run, including revenue from failed days. */
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 TotalCoinsEarned = 0;
+
 #pragma region K2 moonyfli
 	/** 本日已获得且已生效的谢礼；无背包、无勾选。 */
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
@@ -885,10 +889,7 @@ public:
 	int32 GetRevenueGap() const;
 
 #pragma region K2 moonyfli
-	/**
-	 * Purse shown on the coin string. A persistent currency is not authored yet, so this is the
-	 * single place to redirect once one exists; the foreground readout already reads it.
-	 */
+	/** Total revenue earned since the run began, including revenue from failed days. */
 	UFUNCTION(BlueprintPure, Category = "S Revenue")
 	int32 GetCoinBalance() const;
 #pragma endregion K2 moonyfli
@@ -970,6 +971,10 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 Revenue = 0;
+
+	/** Never included in rollback snapshots: failed-day revenue still counts toward the total. */
+	UPROPERTY(BlueprintReadOnly, Category = "S Revenue")
+	int32 TotalCoinsEarned = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 RevenueTarget = 90;
