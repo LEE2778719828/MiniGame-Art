@@ -29,7 +29,9 @@ namespace NightCourseAtom_Private
 			return;
 		}
 
+#if WITH_EDITOR
 		PreviewActor->SetIsTemporarilyHiddenInEditor(false);
+#endif
 		PreviewActor->SetActorHiddenInGame(false);
 		PreviewActor->SetActorEnableCollision(false);
 

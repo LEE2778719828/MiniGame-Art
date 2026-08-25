@@ -65,8 +65,10 @@ namespace NightCourseStage_Private
 			return nullptr;
 		}
 
+#if WITH_EDITOR
 		Actor->SetActorLabel(Label);
 		Actor->SetIsTemporarilyHiddenInEditor(false);
+#endif
 		if (UStaticMeshComponent* MeshComponent = Actor->GetStaticMeshComponent())
 		{
 			MeshComponent->SetStaticMesh(Mesh);
@@ -113,7 +115,9 @@ namespace NightCourseStage_Private
 
 		Actor->SetFlags(RF_Transient);
 		Actor->FinishSpawning(FTransform::Identity);
+#if WITH_EDITOR
 		Actor->SetActorLabel(Label);
+#endif
 		Actor->SetupBridge(
 			Spec,
 			Mesh,
@@ -225,7 +229,9 @@ namespace NightCourseStage_Private
 				Index));
 #endif
 		Actor->SetActorTransform(Spec.WorldTransform);
+#if WITH_EDITOR
 		Actor->SetIsTemporarilyHiddenInEditor(false);
+#endif
 		Actor->SetActorHiddenInGame(false);
 		Actor->SetActorEnableCollision(false);
 		return Actor;
