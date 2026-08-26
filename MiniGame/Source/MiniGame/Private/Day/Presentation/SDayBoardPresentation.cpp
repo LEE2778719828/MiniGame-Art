@@ -3051,6 +3051,12 @@ void USDayHUD::NativeDestruct()
 	{
 		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
 	}
+	if (SettlementWidget)
+	{
+		SettlementWidget->RemoveFromParent();
+		SettlementWidget = nullptr;
+		RestoreDayInputMode();
+	}
 	Super::NativeDestruct();
 }
 
@@ -3224,6 +3230,7 @@ void USDayHUD::Refresh()
 	{
 		return;
 	}
+	RefreshSettlement(*GameInstance);
 
 	if (PhaseText)
 	{
@@ -3326,6 +3333,11 @@ void USDayHUD::Refresh()
 	case ESGamePhase::NightRunning: FlowLabel = TEXT("模拟夜间到达终点"); break;
 	case ESGamePhase::DayRunning: FlowLabel = TEXT("闭店（未达标将回档）"); break;
 	case ESGamePhase::DayQualified: FlowLabel = TEXT("闭店日结"); break;
+	case ESGamePhase::DaySettlement:
+		FlowLabel = GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
+			? TEXT("确认成功结算")
+			: TEXT("确认回档重开");
+		break;
 	case ESGamePhase::Ending: FlowLabel = TEXT("尾声"); break;
 	default: break;
 	}
@@ -3336,6 +3348,74 @@ void USDayHUD::Refresh()
 	}
 
 	RefreshForegroundReadouts(*GameInstance); //add by K2
+}
+
+void USDayHUD::RefreshSettlement(const USChefGameInstance& GameInstance)
+{
+	const bool bShouldShow = GameInstance.HasPendingDaySettlement();
+	if (!bShouldShow)
+	{
+		if (SettlementWidget)
+		{
+			SettlementWidget->RemoveFromParent();
+			SettlementWidget = nullptr;
+			RestoreDayInputMode();
+		}
+		return;
+	}
+
+	if (SettlementWidget)
+	{
+		return;
+	}
+
+	if (!SettlementWidgetClass)
+	{
+		SettlementWidgetClass = LoadClass<USDaySettlementWidget>(
+			nullptr,
+			TEXT("/Game/Day/UI/Settlement/WBP_DaySettlement.WBP_DaySettlement_C"));
+	}
+	if (!SettlementWidgetClass)
+	{
+		if (!bSettlementClassWarningLogged)
+		{
+			bSettlementClassWarningLogged = true;
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("[DaySettlement] Assign SettlementWidgetClass on WBP_SDayHUD or create /Game/Day/UI/Settlement/WBP_DaySettlement."));
+		}
+		return;
+	}
+
+	SettlementWidget = CreateWidget<USDaySettlementWidget>(GetOwningPlayer(), SettlementWidgetClass);
+	if (!SettlementWidget)
+	{
+		return;
+	}
+
+	SettlementWidget->AddToViewport(200);
+	SettlementWidget->PresentSettlement(GameInstance.GetPendingDaySettlement());
+	if (APlayerController* PlayerController = GetOwningPlayer())
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(SettlementWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PlayerController->SetInputMode(InputMode);
+		PlayerController->bShowMouseCursor = true;
+	}
+}
+
+void USDayHUD::RestoreDayInputMode()
+{
+	if (APlayerController* PlayerController = GetOwningPlayer())
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PlayerController->SetInputMode(InputMode);
+		PlayerController->bShowMouseCursor = true;
+	}
 }
 
 #pragma region K2 moonyfli

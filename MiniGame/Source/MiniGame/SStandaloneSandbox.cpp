@@ -1683,6 +1683,8 @@ bool USChefGameInstance::PrepareNightForCourse()
 
 void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 {
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	Phase = ESGamePhase::PrepareDay;
 	Revenue = 0;
 	// 谢礼按天结算：上一日的谢礼已被刚结束的夜晚用掉。
@@ -1710,8 +1712,75 @@ void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 	AutoSaveChefProfile(TEXT("开店并建立日初快照"));
 }
 
+void USChefGameInstance::BeginDaySettlement(
+	const ESDayEndReason Reason,
+	const ESDaySettlementOutcome Outcome)
+{
+	PendingDaySettlement = FSDaySettlementData();
+	PendingDaySettlement.bValid = true;
+	PendingDaySettlement.Outcome = Outcome;
+	PendingDaySettlement.EndReason = Reason;
+	PendingDaySettlement.StageId = StageId;
+	PendingDaySettlement.Revenue = Revenue;
+	PendingDaySettlement.RevenueTarget = RevenueTarget;
+	PendingDaySettlement.RevenueGap = FMath::Max(0, RevenueTarget - Revenue);
+	PendingDaySettlement.GiftIds = ActiveGiftIds;
+	bDaySettlementActionCommitted = false;
+
+	Phase = ESGamePhase::DaySettlement;
+	LastDayEndReason = Reason;
+	DayTimeRemaining = 0.0f;
+	DayStuckCheckAccum = 0.0f;
+	ResetDayDirectors(false);
+
+	LastBoardFeedback = Outcome == ESDaySettlementOutcome::Success
+		? FString::Printf(
+			TEXT("白天结算待确认：营业额 %d/%d 达标，点击继续进入下一夜。"),
+			Revenue,
+			RevenueTarget)
+		: FString::Printf(
+			TEXT("白天结算待确认：营业额 %d/%d，差 %d，点击重新经营回档日初。"),
+			Revenue,
+			RevenueTarget,
+			PendingDaySettlement.RevenueGap);
+	NotifyStateChanged();
+}
+
+bool USChefGameInstance::ConfirmDaySettlementSuccess()
+{
+	if (!HasPendingDaySettlement()
+		|| PendingDaySettlement.Outcome != ESDaySettlementOutcome::Success
+		|| bDaySettlementActionCommitted)
+	{
+		return false;
+	}
+
+	bDaySettlementActionCommitted = true;
+	const ESDayEndReason Reason = PendingDaySettlement.EndReason;
+	EnterDaySettlement(Reason);
+	return true;
+}
+
+bool USChefGameInstance::ConfirmDaySettlementRetry()
+{
+	if (!HasPendingDaySettlement()
+		|| PendingDaySettlement.Outcome != ESDaySettlementOutcome::Failure
+		|| bDaySettlementActionCommitted)
+	{
+		return false;
+	}
+
+	bDaySettlementActionCommitted = true;
+	const ESDayEndReason Reason = PendingDaySettlement.EndReason;
+	PendingDaySettlement = FSDaySettlementData();
+	FailDay(Reason);
+	return true;
+}
+
 void USChefGameInstance::FailDay(const ESDayEndReason Reason)
 {
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	const int32 RevenueAtFail = Revenue;
 	LastDayEndReason = Reason;
 	RestoreSnapshot(DayStartSnapshot);
@@ -1749,7 +1818,8 @@ void USChefGameInstance::EnterDaySettlement(const ESDayEndReason Reason)
 		*FormatReclaimSuffix(ReclaimedUnits),
 		LeftoverUnits,
 		CarryOverTargetBonus);
-	NotifyStateChanged();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	AdvanceToNextStage();
 }
 
@@ -1939,11 +2009,11 @@ bool USChefGameInstance::CloseShopNow(const ESDayEndReason Reason)
 
 	if (Phase == ESGamePhase::DayQualified)
 	{
-		EnterDaySettlement(Reason);
+		BeginDaySettlement(Reason, ESDaySettlementOutcome::Success);
 	}
 	else
 	{
-		FailDay(Reason);
+		BeginDaySettlement(Reason, ESDaySettlementOutcome::Failure);
 	}
 	return true;
 }
@@ -2145,6 +2215,8 @@ bool USChefGameInstance::JumpToStageForDebug(const FName InStageId)
 	DayTimeRemaining = 0.0f;
 	NightStartSnapshot = FSRunSnapshot();
 	DayStartSnapshot = FSRunSnapshot();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	Phase = ESGamePhase::PrepareNight;
 #pragma endregion K2 moonyfli
 	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose(); //add by K2
@@ -2334,6 +2406,8 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 	}
 
 	InitializeIngredientMaps();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	for (const TPair<FName, int32>& Pair : SaveObject.Inventory)
 	{
 		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
@@ -2549,6 +2623,8 @@ void USChefGameInstance::ResetSandbox()
 	LastDayEndReason = ESDayEndReason::None;
 	NightStartSnapshot = FSRunSnapshot();
 	DayStartSnapshot = FSRunSnapshot();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	PlannedDayOrders.Reset();
 	NextPlannedOrderIndex = 0;
 #pragma endregion K2 moonyfli
@@ -2567,6 +2643,70 @@ void USChefGameInstance::ResetSandbox()
 	ResetDayDirectors(false); //add by K2
 	NotifyStateChanged();
 	UE_LOG(LogSSandbox, Display, TEXT("S 独立沙盒已重置。"));
+}
+
+void USDaySettlementWidget::PresentSettlement(const FSDaySettlementData& InData)
+{
+	PresentedSettlement = InData;
+	bActionRequested = false;
+	BP_OnSettlementPresented(PresentedSettlement);
+}
+
+bool USDaySettlementWidget::ConfirmSuccess()
+{
+	if (bActionRequested
+		|| !PresentedSettlement.bValid
+		|| PresentedSettlement.Outcome != ESDaySettlementOutcome::Success)
+	{
+		return false;
+	}
+
+	bActionRequested = true;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	const bool bConfirmed = GameInstance && GameInstance->ConfirmDaySettlementSuccess();
+	if (!bConfirmed)
+	{
+		bActionRequested = false;
+	}
+	return bConfirmed;
+}
+
+bool USDaySettlementWidget::ConfirmRetry()
+{
+	if (bActionRequested
+		|| !PresentedSettlement.bValid
+		|| PresentedSettlement.Outcome != ESDaySettlementOutcome::Failure)
+	{
+		return false;
+	}
+
+	bActionRequested = true;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	const bool bConfirmed = GameInstance && GameInstance->ConfirmDaySettlementRetry();
+	if (!bConfirmed)
+	{
+		bActionRequested = false;
+	}
+	return bConfirmed;
+}
+
+bool USDaySettlementWidget::RequestGiftDetails(const FName GiftId)
+{
+	if (!PresentedSettlement.bValid || !PresentedSettlement.GiftIds.Contains(GiftId))
+	{
+		return false;
+	}
+
+	FSGiftDefRow Gift;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	if (!GameInstance || !GameInstance->TryGetGiftDef(GiftId, Gift))
+	{
+		Gift.GiftId = GiftId;
+		Gift.DisplayName = USChefGameInstance::GetGiftDisplayName(GiftId);
+		Gift.EffectText = USChefGameInstance::GetGiftEffectText(GiftId);
+	}
+	BP_OnGiftDetailsRequested(Gift);
+	return true;
 }
 
 ASMergeBoard::ASMergeBoard()
@@ -4686,7 +4826,7 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			GameInstance->GetGiftTabSummary().Contains(TEXT("引路纸鸢")),
 			TEXT("gift tab lists the earned card"));
 
-		// 时间到自动闭店：未达标回档日初，达标才日结进下一关。
+		// 时间到自动闭店：先停在模态结算，玩家确认后才回档或推进。
 		GameInstance->ResetSandbox();
 		Check(SubmitDay(TEXT("SDAY-SMOKE-DAY-TIMER")), TEXT("open day for timer"));
 		Check(
@@ -4697,22 +4837,35 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 		Board->TrySpawnFromMotherPiece(LingGuId);
 		GameInstance->TickDayClock(GameInstance->GetDayTimeRemaining() + 1.0f);
 		Check(
-			GameInstance->Phase == ESGamePhase::DayRunning
+			GameInstance->Phase == ESGamePhase::DaySettlement
+			&& GameInstance->HasPendingDaySettlement()
+			&& GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Failure,
+			TEXT("time up under target waits on failure settlement"));
+		Check(
+			GameInstance->ConfirmDaySettlementRetry()
+			&& GameInstance->Phase == ESGamePhase::DayRunning
 			&& GameInstance->Revenue == 0
 			&& GameInstance->GetQuantity(LingGuId) == GapStock
 			&& Board->GetOccupiedCellCount() == 0,
-			TEXT("time up under target rolls back to day start"));
+			TEXT("failure confirmation rolls back to day start"));
 
 		GameInstance->AddRevenue(GameInstance->RevenueTarget);
 		Check(GameInstance->Phase == ESGamePhase::DayQualified, TEXT("reaching target qualifies the day"));
 		const FName StageBeforeSettle = GameInstance->StageId;
 		GameInstance->TickDayClock(GameInstance->GetDayTimeRemaining() + 1.0f);
 		Check(
-			GameInstance->Phase == ESGamePhase::PrepareNight
+			GameInstance->Phase == ESGamePhase::DaySettlement
+			&& GameInstance->HasPendingDaySettlement()
+			&& GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
+			&& GameInstance->StageId == StageBeforeSettle,
+			TEXT("qualified time up waits on success settlement"));
+		Check(
+			GameInstance->ConfirmDaySettlementSuccess()
+			&& GameInstance->Phase == ESGamePhase::PrepareNight
 			&& GameInstance->StageId != StageBeforeSettle
 			&& GameInstance->CarryOverTargetBonus > 0
 			&& GameInstance->RevenueTarget > GameInstance->GetActiveStageRow().RevenueTarget,
-			TEXT("qualified time up settles and raises next target"));
+			TEXT("success confirmation settles and raises next target"));
 
 		// 夜败回档夜初：本次收获全部清除。
 		GameInstance->ResetSandbox();
@@ -5042,6 +5195,16 @@ void ASFakeNightGateway::AdvanceFlow()
 	case ESGamePhase::DayRunning:
 	case ESGamePhase::DayQualified:
 		GameInstance->CloseShopNow(ESDayEndReason::TimeUp);
+		break;
+	case ESGamePhase::DaySettlement:
+		if (GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success)
+		{
+			GameInstance->ConfirmDaySettlementSuccess();
+		}
+		else
+		{
+			GameInstance->ConfirmDaySettlementRetry();
+		}
 		break;
 	default:
 		GameInstance->LastBoardFeedback = FString::Printf(
@@ -5709,6 +5872,11 @@ void USDebugPanel::RefreshGiftVisual()
 		case ESGamePhase::NightRunning: FlowLabel = TEXT("模拟夜成功"); break;
 		case ESGamePhase::DayRunning: FlowLabel = TEXT("闭店(未达标回档)"); break;
 		case ESGamePhase::DayQualified: FlowLabel = TEXT("闭店日结"); break;
+		case ESGamePhase::DaySettlement:
+			FlowLabel = GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
+				? TEXT("确认成功结算")
+				: TEXT("确认回档重开");
+			break;
 		case ESGamePhase::Ending: FlowLabel = TEXT("尾声"); break;
 		default: break;
 		}
