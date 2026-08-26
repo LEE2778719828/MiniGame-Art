@@ -20,8 +20,8 @@ class USDebugPanel;
 
 #pragma region K2 moonyfli
 /**
- * Night → Day → NextStage loop. PrepareDay / DaySettlement / PrepareNextStage are
- * transient: they run their edge work and hand off inside the same call.
+ * Night → Day → NextStage loop. PrepareDay / PrepareNextStage are transient.
+ * DaySettlement is interactive and waits for the result UI to confirm success or retry.
  */
 UENUM(BlueprintType)
 enum class ESGamePhase : uint8
@@ -45,6 +45,15 @@ enum class ESDayEndReason : uint8
 	None,
 	TimeUp,
 	OutOfIngredients
+};
+
+/** Result shown by the interactive daytime settlement screen. */
+UENUM(BlueprintType)
+enum class ESDaySettlementOutcome : uint8
+{
+	None,
+	Success,
+	Failure
 };
 
 /** Slot in the pre-generated day order queue. */
@@ -599,6 +608,38 @@ struct FSRunSnapshot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	int32 NextPlannedOrderIndex = 0;
 };
+
+/** Immutable values captured when the shop closes and consumed by the settlement UI. */
+USTRUCT(BlueprintType)
+struct FSDaySettlementData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	bool bValid = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	ESDaySettlementOutcome Outcome = ESDaySettlementOutcome::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	ESDayEndReason EndReason = ESDayEndReason::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	FName StageId = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	int32 Revenue = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	int32 RevenueTarget = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	int32 RevenueGap = 0;
+
+	/** Gifts earned during this daytime run; clicking a card only inspects it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Settlement")
+	TArray<FName> GiftIds;
+};
 #pragma endregion K2 moonyfli
 
 /** 最小存档 SG_ChefProfile：强退后可恢复库存/缺口/谢礼/关卡与 Result 去重。 */
@@ -834,9 +875,27 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Flow")
 	bool IsShopOpen() const { return Phase == ESGamePhase::DayRunning || Phase == ESGamePhase::DayQualified; }
 
-	/** 立即闭店：达标走日结，未达标回档日初。 */
+	/** 立即闭店并打开模态结算；确认后才推进或回档。 */
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool CloseShopNow(ESDayEndReason Reason);
+
+	/** Settlement is modal: no stage advance or rollback occurs before confirmation. */
+	UFUNCTION(BlueprintPure, Category = "S Settlement")
+	bool HasPendingDaySettlement() const
+	{
+		return Phase == ESGamePhase::DaySettlement && PendingDaySettlement.bValid;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "S Settlement")
+	FSDaySettlementData GetPendingDaySettlement() const { return PendingDaySettlement; }
+
+	/** Commit a successful day and then advance/travel to the next Night. */
+	UFUNCTION(BlueprintCallable, Category = "S Settlement")
+	bool ConfirmDaySettlementSuccess();
+
+	/** Restore DayStartSnapshot and reopen the same daytime stage. */
+	UFUNCTION(BlueprintCallable, Category = "S Settlement")
+	bool ConfirmDaySettlementRetry();
 
 	UFUNCTION(BlueprintCallable, Category = "S Flow")
 	bool ForceCloseShopForDebug();
@@ -1005,6 +1064,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 RevenueTarget = 90;
 
+	/** Runtime-only result. Save/load retains the existing day-start rollback rule. */
+	UPROPERTY(BlueprintReadOnly, Category = "S Settlement")
+	FSDaySettlementData PendingDaySettlement;
+
 #pragma region K2 moonyfli
 	/** 本日完成订单拿到的谢礼：即时生效，直接带进下一夜。 */
 	UPROPERTY(BlueprintReadOnly, Category = "S Gifts")
@@ -1110,6 +1173,7 @@ private:
 	void RestoreSnapshot(const FSRunSnapshot& Snapshot);
 	/** PrepareDay 边：清空谢礼、营业额归零、建立日初快照，然后直接开店。 */
 	void EnterPrepareDay(const FString& Reason);
+	void BeginDaySettlement(ESDayEndReason Reason, ESDaySettlementOutcome Outcome);
 	void FailDay(ESDayEndReason Reason);
 	void EnterDaySettlement(ESDayEndReason Reason);
 	void AdvanceToNextStage();
@@ -1122,12 +1186,49 @@ private:
 	float DayStuckCheckAccum = 0.0f;
 	/** 只有本日曾经有过食材，才允许用「食材耗尽」结束当天，避免空档 0.5s 循环回档。 */
 	bool bDayHadResources = false;
+	bool bDaySettlementActionCommitted = false;
 #pragma endregion K2 moonyfli
 
 	static FString FormatReclaimSuffix(int32 ReclaimedUnits);
 	void CaptureProfileToSave(USChefSaveGame& SaveObject) const;
 	bool ApplyProfileFromSave(const USChefSaveGame& SaveObject);
 	bool AutoSaveChefProfile(const FString& Reason);
+};
+
+/** Blueprint-facing settlement base: Blueprint owns art; C++ owns safe actions. */
+UCLASS(Abstract, Blueprintable)
+class MINIGAME_API USDaySettlementWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void PresentSettlement(const FSDaySettlementData& InData);
+
+	UFUNCTION(BlueprintPure, Category = "S Settlement")
+	FSDaySettlementData GetPresentedSettlement() const { return PresentedSettlement; }
+
+	UFUNCTION(BlueprintCallable, Category = "S Settlement")
+	bool ConfirmSuccess();
+
+	UFUNCTION(BlueprintCallable, Category = "S Settlement")
+	bool ConfirmRetry();
+
+	/** Resolve display name/effect/icon and forward them to the Blueprint dialog. */
+	UFUNCTION(BlueprintCallable, Category = "S Settlement")
+	bool RequestGiftDetails(FName GiftId);
+
+protected:
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Settlement", meta = (DisplayName = "Settlement Presented"))
+	void BP_OnSettlementPresented(const FSDaySettlementData& Data);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Settlement", meta = (DisplayName = "Gift Details Requested"))
+	void BP_OnGiftDetailsRequested(const FSGiftDefRow& Gift);
+
+private:
+	UPROPERTY(Transient)
+	FSDaySettlementData PresentedSettlement;
+
+	bool bActionRequested = false;
 };
 
 UCLASS()
