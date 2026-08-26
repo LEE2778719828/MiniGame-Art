@@ -148,13 +148,17 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 		FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi + MainHUDLeftMargin,
 		FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi + MainHUDTopMargin);
 
+	// MainHUDScale is authored against the 1920x1080 design space.
+	// The global UMG DPI scale is already applied by Slate; compensate it here so portrait
+	// devices do not shrink the HUD a second time under UIScaleRule=ShortestSide.
+	const float EffectiveHUDScale = MainHUDScale / Dpi;
 	if (Placement.Equals(MainHUDPlacement)
-		&& FMath::IsNearlyEqual(MainHUDWidget->GetRenderTransform().Scale.X, MainHUDScale))
+		&& FMath::IsNearlyEqual(MainHUDWidget->GetRenderTransform().Scale.X, EffectiveHUDScale))
 	{
 		return;
 	}
 
-	MainHUDWidget->SetRenderScale(FVector2D(MainHUDScale, MainHUDScale));
+	MainHUDWidget->SetRenderScale(FVector2D(EffectiveHUDScale, EffectiveHUDScale));
 	// Placement has already been converted to Slate/design units, so keep the
 	// precomputed DPI conversion instead of applying it a second time.
 	MainHUDWidget->SetPositionInViewport(Placement, false);

@@ -32,7 +32,7 @@ public:
 		float ViewY,
 		ENightFeelInput& OutInput);
 
-	/** Uniform scale of the composite Night HUD, 1 = authored size. */
+	/** Reference scale of the composite Night HUD in the authored design space. Runtime compensates the global UMG DPI scale. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD", meta = (ClampMin = "0.1", ClampMax = "2.0"))
 	float MainHUDScale = 0.5f;
 
