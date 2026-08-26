@@ -30,13 +30,6 @@
 			]
 		},
 		{
-			"Name": "MovieRenderPipeline",
-			"Enabled": true,
-			"TargetAllowList": [
-				"Editor"
-			]
-		},
-		{
 			"Name": "ECABridge",
 			"Enabled": true,
 			"TargetAllowList": [

@@ -313,7 +313,8 @@ public:
 		const FString& OccupantKey,
 		bool bSpecialNpc,
 		FName IngredientId,
-		int32 Level);
+		int32 Level,
+		FName GiftId);
 	void NotifySeatVacated();
 	void NotifyServeSucceeded(bool bSpecialNpc);
 
@@ -322,7 +323,8 @@ public:
 		const FString& OccupantKey,
 		bool bSpecialNpc,
 		FName IngredientId,
-		int32 Level);
+		int32 Level,
+		FName GiftId);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
 	void OnSeatVacated();

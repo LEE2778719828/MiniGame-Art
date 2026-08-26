@@ -1,5 +1,6 @@
 #include "Night/Course/NightCoursePawn.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CameraShakeBase.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -99,6 +100,14 @@ ANightCoursePawn::ANightCoursePawn()
 	if (AttackClip.Succeeded())
 	{
 		AttackAnim = AttackClip.Object;
+	}
+
+	// add by K2 (R1): fail shake wraps CA_CameraShake_Return; land/takeoff kicks stay notify-driven.
+	static ConstructorHelpers::FClassFinder<UCameraShakeBase> FailShakeClass(
+		TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return"));
+	if (FailShakeClass.Succeeded())
+	{
+		FailCameraShake = FailShakeClass.Class;
 	}
 
 	// 刃心-style: behind + above the runner, looking forward down the lane.
@@ -539,19 +548,43 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 
 	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
 	{
-		// Zero blend on both ends. The clips are only 370-490ms, so the montage defaults (250ms in,
-		// 250ms out) would still be fading the slash in at its 179ms contact frame and would
-		// already have started fading it out before reaching it. Playing the sequence as a
-		// dynamic montage keeps the sequence's own notifies, so Contact / Land stay where they
-		// were measured, and it avoids having to maintain montage assets for two one-shot clips.
+		// The montage defaults (250ms both ends) are far too long for clips of 370-490ms: they
+		// would still be fading the slash in at its 179ms contact frame and would already be
+		// fading it out before reaching it. Hence the tunables, clamped to stay clear of the
+		// anchor notifies. Playing the sequence as a dynamic montage keeps the sequence's own
+		// notifies, so Contact / Land stay where they were measured, and it avoids having to
+		// maintain montage assets for two one-shot clips.
+		const float ClipLength = Clip->GetPlayLength();
+		const float AnchorSeconds =
+			FMath::Max(10.f, bAttack ? AttackAnchorMs : JumpAnchorMs) * 0.001f;
+		// Never let the fade start before the anchor, whatever the clip is swapped to.
+		const float BlendOut = FMath::Clamp(
+			ActionBlendOutSeconds, 0.f, FMath::Max(0.f, ClipLength - AnchorSeconds));
+		const float BlendIn = FMath::Clamp(ActionBlendInSeconds, 0.f, AnchorSeconds);
+
 		Instance->PlaySlotAnimationAsDynamicMontage(
-			Clip, TEXT("DefaultSlot"), 0.f, 0.f, HeroAnimPlayRate, 1, -1.f, 0.f);
+			Clip, TEXT("DefaultSlot"), BlendIn, BlendOut, HeroAnimPlayRate, 1, -1.f, 0.f);
 		return;
 	}
 
 	// 不循环：跳/斩都是一次性动作，播完停在末帧等下一次输入（idle 动画到位前的权宜）
 	HeroSkelMesh->PlayAnimation(Clip, false);
 	HeroSkelMesh->SetPlayRate(HeroAnimPlayRate);
+}
+
+// add by K2 (R1)
+void ANightCoursePawn::PlayFailCameraShake()
+{
+	if (!FailCameraShake)
+	{
+		return;
+	}
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+	PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
 }
 
 // add by K2 (R1)

@@ -528,7 +528,9 @@ namespace
 		return 1 << FMath::Clamp(Level, 0, MaxDishLevel);
 	}
 
-	TArray<FName> ParseGuaranteedNpcIds(const FName Rules)
+	TArray<FName> ParseGuaranteedNpcIds(
+		const FName Rules,
+		const TArray<FName>& ConfiguredNpcIds)
 	{
 		TArray<FName> Out;
 		const FString Text = Rules.ToString();
@@ -536,17 +538,32 @@ namespace
 		{
 			return Out;
 		}
+		// The original stage table used ALing_SangPo as a fixed NPC marker.
+		// Interpret it as the data-driven "all configured NPCs" rule so existing
+		// stage assets migrate without retaining legacy NPC or gift ids.
+		if (Text.Equals(TEXT("All"), ESearchCase::IgnoreCase)
+			|| Text.Equals(TEXT("ALing_SangPo"), ESearchCase::IgnoreCase))
+		{
+			return ConfiguredNpcIds;
+		}
+
 		TArray<FString> Parts;
 		Text.ParseIntoArray(Parts, TEXT("_"), true);
 		for (const FString& Part : Parts)
 		{
-			if (Part.Equals(TEXT("ALing"), ESearchCase::IgnoreCase))
+			const FName NpcId(*Part);
+			if (ConfiguredNpcIds.Contains(NpcId))
 			{
-				Out.AddUnique(NpcALingId);
+				Out.AddUnique(NpcId);
 			}
-			else if (Part.Equals(TEXT("SangPo"), ESearchCase::IgnoreCase))
+			else
 			{
-				Out.AddUnique(NpcSangPoId);
+				UE_LOG(
+					LogSSandbox,
+					Warning,
+					TEXT("Ignoring unknown special NPC '%s' in GuaranteedNpcRules '%s'."),
+					*Part,
+					*Text);
 			}
 		}
 		return Out;
@@ -571,8 +588,11 @@ namespace
 		{
 			return Def.GiftId;
 		}
-		if (NpcId == NpcALingId) return GiftGuideKiteId;
-		if (NpcId == NpcSangPoId) return GiftLifeLampId;
+		UE_LOG(
+			LogSSandbox,
+			Warning,
+			TEXT("Special NPC '%s' has no configured GiftId in DT_SpecialNpcs."),
+			*NpcId.ToString());
 		return NAME_None;
 	}
 
@@ -719,7 +739,9 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 	const FSDayBalanceRow Balance = GetDayBalance();
 	const int32 DishCap = FMath::Clamp(Balance.MaxDishLevel, 0, MaxDishLevel);
 	const int32 MinimumAppearanceSlots = FMath::Max(1, Balance.MinPlannedOrderSlots);
-	const TArray<FName> NpcIds = ParseGuaranteedNpcIds(ActiveStageRow.GuaranteedNpcRules);
+	const TArray<FName> NpcIds = ParseGuaranteedNpcIds(
+		ActiveStageRow.GuaranteedNpcRules,
+		GetConfiguredSpecialNpcIds());
 	const uint32 StageHash = GetTypeHash(StageId) ^ GetTypeHash(ActiveStageRow.CustomerConfigId);
 	bool bAccepted = false;
 	FString FailReason;
@@ -1251,6 +1273,25 @@ bool USChefGameInstance::TryGetSpecialNpcDef(const FName NpcId, FSSpecialNpcDefR
 	return false;
 }
 
+TArray<FName> USChefGameInstance::GetConfiguredSpecialNpcIds() const
+{
+	TArray<FName> NpcIds;
+	if (UDataTable* Table = SpecialNpcTable.LoadSynchronous())
+	{
+		for (const FName RowName : Table->GetRowNames())
+		{
+			if (const FSSpecialNpcDefRow* Row = Table->FindRow<FSSpecialNpcDefRow>(
+				RowName,
+				TEXT("GetConfiguredSpecialNpcIds"),
+				false))
+			{
+				NpcIds.AddUnique(Row->NpcId.IsNone() ? RowName : Row->NpcId);
+			}
+		}
+	}
+	return NpcIds;
+}
+
 bool USChefGameInstance::TryGetGiftDef(const FName GiftId, FSGiftDefRow& OutRow) const
 {
 	if (GiftId.IsNone())
@@ -1276,6 +1317,14 @@ bool USChefGameInstance::TryGetGiftDef(const FName GiftId, FSGiftDefRow& OutRow)
 		}
 	}
 	return false;
+}
+
+UTexture2D* USChefGameInstance::ResolveGiftSeatPreviewIcon(const FName GiftId) const
+{
+	FSGiftDefRow GiftDef;
+	return TryGetGiftDef(GiftId, GiftDef)
+		? GiftDef.SeatPreviewIcon.LoadSynchronous()
+		: nullptr;
 }
 
 TArray<FString> USChefGameInstance::GetCustomerNamePool() const
@@ -1922,7 +1971,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 {
 	FSGameStageRow Row;
 	Row.LevelId = InStageId;
-	Row.GuaranteedNpcRules = TEXT("ALing_SangPo");
+	Row.GuaranteedNpcRules = TEXT("All");
 
 	if (InStageId == TEXT("T0"))
 	{

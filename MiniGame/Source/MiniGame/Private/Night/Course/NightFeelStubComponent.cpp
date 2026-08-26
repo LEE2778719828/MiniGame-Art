@@ -440,6 +440,12 @@ void UNightFeelStubComponent::PlayFailFeedback_Implementation(ENightJudgeOutcome
 		? TEXT("WRONG BUTTON")
 		: TEXT("MISS");
 	PushHudLine(9912, 1.2f, FColor::Orange, Msg);
+
+	// add by K2 (R1): TA fail shake sits on miss / wrong-button, not on takeoff/land kicks.
+	if (ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwner()))
+	{
+		CoursePawn->PlayFailCameraShake();
+	}
 }
 
 void UNightFeelStubComponent::SetControlScheme_Implementation(ENightControlScheme Scheme)

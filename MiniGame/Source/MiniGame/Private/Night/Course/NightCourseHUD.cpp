@@ -3,8 +3,13 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
+#include "UObject/ConstructorHelpers.h"
+#include "UObject/UnrealType.h"
 
 #pragma region K2 moonyfli
 namespace NightHudPads
@@ -48,6 +53,160 @@ bool ANightCourseHUD::HitTestActionButtons(
 		return true;
 	}
 	return false;
+}
+
+ANightCourseHUD::ANightCourseHUD()
+{
+	static ConstructorHelpers::FClassFinder<UUserWidget> HealthBarClass(
+		TEXT("/Game/Night/Course/Blueprints/WBP_HealthBar"));
+	if (HealthBarClass.Succeeded())
+	{
+		HealthBarWidgetClass = HealthBarClass.Class;
+	}
+}
+
+void ANightCourseHUD::BeginPlay()
+{
+	Super::BeginPlay();
+	EnsureHealthBar();
+}
+
+void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (HealthBarWidget)
+	{
+		HealthBarWidget->RemoveFromParent();
+		HealthBarWidget = nullptr;
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void ANightCourseHUD::EnsureHealthBar()
+{
+	if (HealthBarWidget || !HealthBarWidgetClass)
+	{
+		return;
+	}
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+	HealthBarWidget = CreateWidget<UUserWidget>(PC, HealthBarWidgetClass);
+	if (!HealthBarWidget)
+	{
+		return;
+	}
+	HealthBarWidget->AddToViewport(20);
+	HealthBarPlacement = FVector2D(-1.f, -1.f);
+	HealthBarWidget->SetRenderTransformPivot(FVector2D(0.f, 0.f));
+	HealthBarWidget->SetRenderScale(FVector2D(HealthBarScale, HealthBarScale));
+
+	SetHealthBarNumeric(TEXT("FullBarWidth"), HealthBarDesignSize.X);
+}
+
+void ANightCourseHUD::UpdateHealthBarPlacement()
+{
+	if (!HealthBarWidget)
+	{
+		return;
+	}
+
+	// UMG AddToViewport is the full window, including the black letterbox. Canvas is the
+	// constrained game view that DrawHUD / Q-E pads already use. Offset by that gap so
+	// Left / Top Margin are measured from the game view, not the window.
+	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
+	if (Dpi <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	int32 FullX = 0;
+	int32 FullY = 0;
+	if (APlayerController* PC = GetOwningPlayerController())
+	{
+		PC->GetViewportSize(FullX, FullY);
+	}
+
+	float GameW = static_cast<float>(FullX);
+	float GameH = static_cast<float>(FullY);
+	if (Canvas)
+	{
+		GameW = Canvas->SizeX;
+		GameH = Canvas->SizeY;
+	}
+
+	const FVector2D Placement(
+		FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi + HealthBarLeftMargin,
+		FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi + HealthBarTopMargin);
+
+	if (Placement.Equals(HealthBarPlacement)
+		&& FMath::IsNearlyEqual(HealthBarWidget->GetRenderTransform().Scale.X, HealthBarScale))
+	{
+		return;
+	}
+
+	HealthBarWidget->SetRenderScale(FVector2D(HealthBarScale, HealthBarScale));
+	HealthBarWidget->SetRenderTranslation(Placement);
+	HealthBarPlacement = Placement;
+}
+
+void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
+{
+	if (!HealthBarWidget)
+	{
+		return;
+	}
+	FNumericProperty* Num =
+		CastField<FNumericProperty>(HealthBarWidget->GetClass()->FindPropertyByName(PropertyName));
+	if (Num && Num->IsFloatingPoint())
+	{
+		Num->SetFloatingPointPropertyValue(
+			Num->ContainerPtrToValuePtr<void>(HealthBarWidget), Value);
+	}
+}
+
+void ANightCourseHUD::PushSoulToHealthBar(float Soul)
+{
+	EnsureHealthBar();
+	if (!HealthBarWidget)
+	{
+		return;
+	}
+
+	UFunction* SetHealth = HealthBarWidget->FindFunction(FName(TEXT("SetHealth")));
+	if (!SetHealth)
+	{
+		return;
+	}
+
+	// WBP_HealthBar.SetHealth uses Blueprint real pins (FDoubleProperty in UE5), not C++ float.
+	TArray<FNumericProperty*> NumericParms;
+	for (TFieldIterator<FProperty> It(SetHealth); It && It->HasAnyPropertyFlags(CPF_Parm)
+		 && !It->HasAnyPropertyFlags(CPF_ReturnParm); ++It)
+	{
+		if (FNumericProperty* Num = CastField<FNumericProperty>(*It))
+		{
+			if (Num->IsFloatingPoint())
+			{
+				NumericParms.Add(Num);
+			}
+		}
+	}
+	if (NumericParms.Num() == 0)
+	{
+		return;
+	}
+
+	const int32 Bytes = SetHealth->ParmsSize;
+	uint8* Buffer = static_cast<uint8*>(FMemory_Alloca(Bytes));
+	FMemory::Memzero(Buffer, Bytes);
+	NumericParms[0]->SetFloatingPointPropertyValue(NumericParms[0]->ContainerPtrToValuePtr<void>(Buffer), Soul);
+	if (NumericParms.Num() >= 2)
+	{
+		NumericParms[1]->SetFloatingPointPropertyValue(NumericParms[1]->ContainerPtrToValuePtr<void>(Buffer), 100.0);
+	}
+	HealthBarWidget->ProcessEvent(SetHealth, Buffer);
 }
 
 void ANightCourseHUD::DrawHUD()
@@ -107,9 +266,14 @@ void ANightCourseHUD::DrawHUD()
 		}
 	}
 
-	FCanvasTextItem SoulText(FVector2D(W * 0.06f, H * 0.05f), FText::FromString(FString::Printf(TEXT("SOUL  %.0f"), Soul)), GEngine->GetLargeFont(), FLinearColor(1.f, 0.95f, 0.7f));
-	SoulText.Scale = FVector2D(1.6f, 1.6f);
-	Canvas->DrawItem(SoulText);
+	PushSoulToHealthBar(Soul);
+	UpdateHealthBarPlacement();
+	if (!HealthBarWidget)
+	{
+		FCanvasTextItem SoulText(FVector2D(W * 0.06f, H * 0.05f), FText::FromString(FString::Printf(TEXT("SOUL  %.0f"), Soul)), GEngine->GetLargeFont(), FLinearColor(1.f, 0.95f, 0.7f));
+		SoulText.Scale = FVector2D(1.6f, 1.6f);
+		Canvas->DrawItem(SoulText);
+	}
 
 	if (Director)
 	{
