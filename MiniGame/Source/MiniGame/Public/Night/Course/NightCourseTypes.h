@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Night/Shared/NightSharedTypes.h"
+#include "Night/Course/NightCourseForkAtomActor.h"
 #include "NightCourseTypes.generated.h"
 
 class AActor;
@@ -71,6 +72,14 @@ struct FNightStoneSpec
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	int32 DropCount = 1;
+
+	/**
+	 * Runtime fork preview connector only. These stones are rendered on both
+	 * fork exits before route selection, but are not part of the active beat
+	 * chain and are replaced by the selected branch during hand-off.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Fork")
+	bool bForkConnectorVisualOnly = false;
 };
 
 /**
@@ -114,6 +123,32 @@ struct FNightBridgeSpec
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge")
 	float LengthScale = 1.f;
+
+	/** Bridge belonging to a pre-choice fork connector Atom. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Bridge|Fork")
+	bool bForkConnectorVisualOnly = false;
+};
+
+/** One resolved special fork Atom placed at the end of the base route. */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FNightForkAtomSpec
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Fork")
+	ENightForkPair ForkPair = ENightForkPair::AB;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Fork")
+	TSubclassOf<ANightCourseForkAtomActor> ActorClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Fork")
+	FTransform WorldTransform = FTransform::Identity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Fork")
+	FTransform LeftExitTransform = FTransform::Identity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Fork")
+	FTransform RightExitTransform = FTransform::Identity;
 };
 
 UENUM(BlueprintType)
@@ -129,10 +164,10 @@ struct FNightRoadsideBlueprintEntry
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (DisplayName = "装饰Blueprint", ToolTip = "道路装饰 Blueprint；必须继承 ANightRoadsideSegmentActor。"))
 	TSoftClassPtr<ANightRoadsideSegmentActor> Blueprint;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (DisplayName = "选择权重", ToolTip = "多个装饰 Blueprint 的相对选择概率；重复配置效果等同于提高权重。", ClampMin = "0.0"))
 	float Weight = 1.f;
 };
 
@@ -149,38 +184,38 @@ struct FNightRoadsideGenerationSettings
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (DisplayName = "启用生成", ToolTip = "是否生成此类道路装饰。"))
 	bool bEnabled = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (DisplayName = "Blueprint候选池", ToolTip = "可配置多个道路装饰 Blueprint；运行时按权重和 Seed 选择。"))
 	TArray<FNightRoadsideBlueprintEntry> BlueprintPool;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside", meta = (DisplayName = "装饰间距", ToolTip = "一个模块 End 到下一个模块 Start 的间距，单位 cm；房屋填 0 可连续拼接。", ClampMin = "0.0"))
 	float SpacingCm = 0.f;
 
 	/**
 	 * Positive lateral magnitudes. Houses use the first path node's world Y as
 	 * their fixed row baseline; poles use the sampled bridge/track centerline.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (DisplayName = "左侧道路偏移", ToolTip = "左侧装饰相对道路/桥基准线的距离，单位 cm。", ClampMin = "0.0"))
 	float LeftBridgeOffsetCm = 350.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (DisplayName = "右侧道路偏移", ToolTip = "右侧装饰相对道路/桥基准线的距离，单位 cm。", ClampMin = "0.0"))
 	float RightBridgeOffsetCm = 350.f;
 
 	/** Applied on top of the category's fixed/sampled world Z. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (DisplayName = "Z偏移", ToolTip = "叠加到房屋固定高度或杆子采样高度上的偏移，单位 cm。"))
 	float ZOffsetCm = 0.f;
 
 	/**
 	 * Used for poles and other non-continuous decorations. House rows keep
 	 * their marker chain aligned so this does not create seams.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Random", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Random", meta = (DisplayName = "随机Yaw范围", ToolTip = "装饰随机旋转范围，单位度；房屋连续排布不改变首尾对齐。", ClampMin = "0.0"))
 	float RandomYawRangeDeg = 0.f;
 
 	/** Keeps roadside random streams independent from course/foe/drop random. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Random")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Random", meta = (DisplayName = "装饰随机种子偏移", ToolTip = "只影响道路装饰随机选择，不影响 Atom、敌人和掉落。"))
 	int32 RandomSeedOffset = 0;
 };
 

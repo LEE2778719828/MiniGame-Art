@@ -1,5 +1,5 @@
----,LevelId,NightDuration,ForkPair,ReviewSeed,DayDuration,RevenueTarget,CustomerConcurrentMax,CustomerSpawnInterval,CustomerConfigId,GuaranteedNpcRules,NextLevelId,bEndingAfterDay,DisplayName
-T0,T0,90.0,AB,1001,60.0,90,2,7.0,Wave_T0,ALing_SangPo,L1,False,教程日
-L1,L1,110.0,AB,2101,90.0,220,3,5.8,Wave_L1,ALing_SangPo,L2,False,第一夜
-L2,L2,130.0,AC,3201,120.0,360,4,5.0,Wave_L2,ALing_SangPo,L3,False,第二夜
-L3,L3,150.0,BC,4301,120.0,520,5,4.5,Wave_L3,ALing_SangPo,None,True,第三夜
+---,LevelId,NightDuration,DefaultRoute,ForkPair,ReviewSeed,DayDuration,RevenueTarget,CustomerConcurrentMax,CustomerSpawnInterval,CustomerConfigId,GuaranteedNpcRules,NextLevelId,bEndingAfterDay,DisplayName
+T0,T0,90.0,A,AB,1001,60.0,90,2,7.0,Wave_T0,ALing_SangPo,L1,False,教程日
+L1,L1,110.0,A,AB,2101,90.0,220,3,5.8,Wave_L1,ALing_SangPo,L2,False,第一夜
+L2,L2,130.0,A,AC,3201,120.0,360,4,5.0,Wave_L2,ALing_SangPo,L3,False,第二夜
+L3,L3,150.0,A,BC,4301,120.0,520,5,4.5,Wave_L3,ALing_SangPo,None,True,第三夜

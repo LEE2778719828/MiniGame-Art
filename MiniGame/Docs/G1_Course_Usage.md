@@ -25,9 +25,10 @@
 | `/Game/Night/Course/Blueprints/BP_NightCoursePawn` | 后上方相机 + Feel stub；Q/E |
 | `/Game/Night/Course/Blueprints/BP_NightCourseHost` | Director 宿主 |
 | `/Game/Night/Course/Blueprints/BP_NightFoeM01`–`M05` | `DA_Course.FoeActorMap` 指定的敌人 Actor |
-| `/Game/Night/Course/Config/DA_Course` | G1 课程调优、规则、Atom 引用和敌人 Map |
+| `/Game/Night/Course/Config/DA_Course` | G1 课程调优、规则、敌人 Actor/掉落 Map 和 AB/AC/BC 特殊岔路 Map |
 | `/Game/Night/Course/Config/DA_Atoms` | A/B/C Atom BP 库与跳跃衔接间距 |
-| `/Game/Night/Course/Config/DA_Rules` | `BaseAtomCount` + 加权 `BaseRoute/BranchRoutes`；空 AtomKey 由 Seed 选择 |
+| `/Game/Night/Course/Config/DA_Rules` | `RouteModes[A/B/C]` + 加权 `BranchRoutes[A/B/C]`；空 AtomKey 由 Seed 选择 |
+| `/Game/Shared/Data/DT_GameStages` | Day 驱动 Night 的 `DefaultRoute=A/B/C` 与 `ForkPair=AB/AC/BC`，默认 A + AB |
 | `/Game/Night/Course/Input/IA_NightJump` / `IA_NightAttack` + `IMC_NightCourse` | Q=跳，E/LMB=劈 |
 
 默认图：`L_Night_G1_ForkTest`（`DefaultEngine.ini`）。
@@ -44,8 +45,12 @@
 - `FNightBeatSpec`：站在 From 石、按 Jump/Attack、前进到 To 石  
 - `DA_Course.FoeActorMap`：`EFoeId` 到 `ANightCourseStoneActor` Blueprint 的唯一运行时映射；
   Director 直接生成映射 Actor，不再生成原生载体再挂视觉 Actor
+- `DA_Course.FoeDropMap`：M01-M05 到 `EIngredientId` 的正式掉落映射；命中后使用
+  `DA_Course.DefaultDropCount`，分支规则只调整节奏、倍率和结算加成
 - `DA_Course.HouseRoadside` / `PoleRoadside`：道路两侧房屋和杆子的独立 Blueprint 池、
   权重、间距、桥侧左右偏移、Z 偏移和随机种子偏移
+- `DA_Course.ForkAtomMap`：`AB/AC/BC` 到 `ANightCourseForkAtomActor` 组合 Blueprint 的映射；
+  Blueprint 内配置入口、左右出口、岔路桥面和路牌
 - `ANightRoadsideSegmentActor`：房屋/杆子 Blueprint 的父类；`StartMarker` 和
   `EndMarker` 定义模块沿道路方向的占用范围，房屋按标记首尾连续拼接
 - Atom Composer：按 `Actions` 绑定 Atom 内按序落脚点；相邻 Atom 固定用长距离 Jump 衔接
@@ -58,7 +63,9 @@
 | `BP_NightCoursePawn` | `ArtRoot` 下挂角色 |
 | `DA_Course` | 运行速度、惩罚、岔口和玩法调优 |
 | `DA_Atoms` | Atom BP 的落脚点、桥、Entry/Exit、`TransitionJumpGapCm`；落脚点可选临时预览 BP |
-| `DA_Rules` | `Seed`、目标 Atom 数、`AtomKey + Actions + Weight` 模板池 |
+| `DA_Course.ForkAtomMap` | AB/AC/BC 特殊岔路 Blueprint；运行时和编辑器预览直接生成，分支从对应出口连接 |
+| `DA_Rules` | `Seed`、`RouteModes[A/B/C]`、`BranchRoutes[A/B/C]`、目标 Atom 数和 `AtomKey + Actions + Weight` 模板池 |
+| `DT_GameStages` | 每个 Day 行的 `DefaultRoute` 与 `ForkPair`；运行时优先于 Night 预览设置 |
 
 ## 道路两侧房屋 / 杆子
 
@@ -85,7 +92,10 @@ Host 的 `bEnforceLayoutBounds` 必须开启，`LayoutBoundsExtent` 是以
 `LayoutBounds` 中心为原点的半尺寸。运行时会优先尝试 Atom 的候选角度；如果所有角度
 都越界，会只沿世界 `Y` 轴把当前完整 Atom 平移到 Bounds 内再继续生成，`X/Z` 保持原值。
 这个应急平移可能让当前 Atom 与前一个 Atom 的过渡跳跃变长，但不会让整局直接卡死；
-如果仅靠 Y 平移仍无法放入 Bounds，仍会报告生成失败。
+如果仅靠 Y 平移仍无法放入 Bounds，普通 Atom 仍会报告生成失败。当前岔路联调期间，
+岔路组合 Actor 和选中分支的 Atom 会临时跳过这项 Bounds 限制，避免分支出口因左右
+偏移导致整段事务回滚；基础段仍按 Bounds 检查。选中分支的首个 Atom 会接在对应
+出口后随机/按权重生成，玩家跳到该首个分支落点后再一次性显示该分支剩余 Atom。
 
 ## R1 替换
 

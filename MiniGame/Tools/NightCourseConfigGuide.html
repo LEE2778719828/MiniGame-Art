@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NightCourse 配置数据流与 UE 资产索引</title>
+  <title>NightCourse 快速配置指南</title>
   <style>
     :root {
       --bg: #111827;
@@ -283,10 +283,10 @@
 </head>
 <body>
   <header>
-    <h1>NightCourse 配置数据流与 UE 资产索引</h1>
+    <h1>NightCourse 快速配置指南</h1>
     <p>
-      这页描述当前 canonical Night 管线：策划配置规则，艺术配置 Atom BP 和道路装饰 BP，
-      <code>DA_Course</code> 负责把它们和运行入口接起来。页面不会自动保存 UE 资产。
+      按 DA_Course → DA_Rules → DA_Atoms → DA_RouteRules → DT_GameStages 的顺序完成最少配置。
+      运行时路线由 Day 传入，M01-M05 掉落由 DA_Course 固定映射。页面不会自动保存 UE 资产。
     </p>
     <div class="toolbar">
       <label>
@@ -322,7 +322,7 @@
         <div class="flow-card">
           <span class="tag">策划</span>
           <strong>DA_Rules</strong>
-          <span>Seed + 总数 + 加权 BaseRoute/BranchRoutes</span>
+          <span>Seed + RouteModes + BranchRoutes</span>
         </div>
         <div class="flow-card">
           <span class="tag">美术</span>
@@ -363,9 +363,10 @@
         </li>
         <li>
           <h3>写策划规则</h3>
-          在 <code>DA_Rules</code> 中设置 <code>BaseAtomCount</code>，并写
-          <code>BaseRoute</code> 模板池；A/B/C 分支设置各自的
-          <code>TargetAtomCount</code>。每个模板填写 <code>AtomKey + Actions + Weight</code>。
+          在 <code>DA_Rules.RouteModes[A/B/C]</code> 中设置主段模板池；每个模式填写
+          <code>TargetAtomCount</code> 和 <code>Atoms</code>。A/B/C 分支设置各自
+          <code>BranchRoutes[].TargetAtomCount</code>。每个模板填写
+          <code>AtomKey + Actions + Weight</code>。
           <code>AtomKey</code> 留空并开启 <code>bAutoSelectAtomKeys</code>，运行时按有效 Seed 确定性选择。
         </li>
         <li>
@@ -373,7 +374,17 @@
           将 <code>AtomRoute=DA_Atoms</code>、<code>CourseRuleData=DA_Rules</code>、
           <code>RouteRules=DA_RouteRules</code>、<code>HeroClass=BP_NightHero</code> 绑定到同一个课程配置，
           并在 <code>FoeActorMap</code> 中为每个 <code>EFoeId</code> 指定一个敌人 BP；
+          在 <code>FoeDropMap</code> 中为 M01-M05 各绑定一个食材 ID，数量使用
+          <code>DefaultDropCount</code>；
           按需启用 <code>HouseRoadside</code> / <code>PoleRoadside</code> 并填入道路装饰 BP 池。
+          开启岔路时，在 <code>ForkAtomMap</code> 中分别填写 <code>AB</code>、<code>AC</code>、<code>BC</code>
+          对应的 <code>ANightCourseForkAtomActor</code> 组合 Blueprint。
+        </li>
+        <li>
+          <h3>配置 Day 驱动模式</h3>
+          在 <code>DT_GameStages</code> 每一行设置 <code>DefaultRoute=A/B/C</code> 与
+          <code>ForkPair=AB/AC/BC</code>。默认使用 <code>A + AB</code>；这里的值会覆盖
+          Night 运行时预览设置。
         </li>
         <li>
           <h3>绑定运行入口</h3>
@@ -426,6 +437,13 @@
         </div>
       </div>
       <div class="note">
+        <b>特殊岔路 Blueprint：</b>父类为 <code>ANightCourseForkAtomActor</code>，
+        必须保留 <code>EntryAnchor</code>、<code>LeftExitAnchor</code> 和
+        <code>RightExitAnchor</code>。桥面、路牌和其他装饰直接放在这个组合 Blueprint 内；
+        <code>PreviewForkPair</code> 控制编辑器预览的 AB/AC/BC 类型，分支首 Atom
+        从所选出口加 <code>BranchEntryGapCm</code> 开始。
+      </div>
+      <div class="note">
         <b>随机规则：</b>房屋随机替换 Blueprint 但保持固定世界 <code>X</code> 轴上的标记首尾连续；杆子可以使用
         <code>RandomYawRangeDeg</code>。随机流由课程 Seed、类别、左右侧和
         <code>RandomSeedOffset</code> 派生，不影响 Atom、敌人或掉落随机。
@@ -463,17 +481,29 @@
         <h2>5. 最小 canonical Rule JSON</h2>
         <p class="muted">
           将下面 JSON 复制到 <code>DA_Rules.EditorJson</code>，再在 UE 中点击
-          <code>Import Editor Json</code>。Route 是模板池，按 Weight 生成目标数量；
+          <code>Import Editor Json</code>。RouteModes/BranchRoutes 是模板池，按 Weight 生成目标数量；
           每个 Atom 的 Actions 只描述判定，不描述网格和位置。
         </p>
         <textarea id="ruleJson" spellcheck="false">{
   "seed": 2233,
   "autoSelectAtomKeys": true,
-  "baseAtomCount": 30,
-  "baseRoute": [
-    { "atomKey": "A", "actions": ["Jump", "Jump", "Kill"], "weight": 5 },
-    { "atomKey": "A", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
-  ],
+  "routeModes": {
+    "A": {
+      "targetAtomCount": 30,
+      "atoms": [
+        { "atomKey": "A", "actions": ["Jump", "Jump", "Kill"], "weight": 5 },
+        { "atomKey": "A", "actions": ["Kill", "Kill", "Kill"], "weight": 3 }
+      ]
+    },
+    "B": {
+      "targetAtomCount": 30,
+      "atoms": [{ "atomKey": "", "actions": ["Jump", "Kill", "Jump"], "weight": 1 }]
+    },
+    "C": {
+      "targetAtomCount": 30,
+      "atoms": [{ "atomKey": "", "actions": ["Kill", "Kill", "Jump"], "weight": 1 }]
+    }
+  },
   "branchRoutes": {
     "A": {
       "targetAtomCount": 20,
@@ -491,8 +521,10 @@
   "forkAfterBaseAtomIndex": 30
 }</textarea>
         <p class="muted">
-          若不填写 <code>baseAtomCount</code> 或 <code>targetAtomCount</code>，C++ 会兼容旧格式，
-          使用对应模板数组长度；启用岔路时 <code>forkAfterBaseAtomIndex</code> 是岔口前实际生成的基础 Atom 数。
+          每个 <code>RouteModes[A/B/C]</code> 都有自己的目标数量和模板池；
+          <code>targetAtomCount=0</code> 使用该池长度。旧 JSON 的
+          <code>baseRoute/baseAtomCount</code> 只在导入时一次性迁移到 <code>routeModes.A</code>，
+          导出不会再生成旧字段；<code>forkAfterBaseAtomIndex</code> 是岔口前实际生成的 Atom 数。
         </p>
         <div class="json-actions">
           <button class="primary" id="copyRule">复制 Rule JSON</button>
@@ -511,9 +543,13 @@
           <li><input type="checkbox" data-check="gameMode"><span>GameMode 的 <code>CourseConfig</code> 指向 <code>DA_Course</code>。</span></li>
           <li><input type="checkbox" data-check="host"><span>关卡 Host 的 <code>Config</code> 指向同一个 <code>DA_Course</code>。</span></li>
           <li><input type="checkbox" data-check="foes"><span><code>DA_Course.FoeActorMap</code> 的 M01–M05 都指向 <code>NightCourseStoneActor</code> 子类。</span></li>
+          <li><input type="checkbox" data-check="drops"><span><code>DA_Course.FoeDropMap</code> 的 M01–M05 都绑定了非 None 食材 ID。</span></li>
+          <li><input type="checkbox" data-check="fork"><span>岔路启用时，<code>DA_Course.ForkAtomMap</code> 的 AB/AC/BC 指向
+            <code>ANightCourseForkAtomActor</code> 子类，并已配置三组锚点。</span></li>
           <li><input type="checkbox" data-check="roadside"><span>启用道路装饰时，<code>HouseRoadside</code> / <code>PoleRoadside</code> 的 BP 均为
             <code>ANightRoadsideSegmentActor</code> 子类且 Start/End 标记有效。</span></li>
-          <li><input type="checkbox" data-check="rules"><span><code>DA_Rules</code> 已启用，Seed 与队列有效。</span></li>
+          <li><input type="checkbox" data-check="rules"><span><code>DA_Rules</code> 已启用，RouteModes[A/B/C] 与分支队列有效，Seed 已设置。</span></li>
+          <li><input type="checkbox" data-check="dayRoute"><span><code>DT_GameStages</code> 的 DefaultRoute=A/B/C 与 ForkPair=AB/AC/BC 已填写；默认 A + AB。</span></li>
           <li><input type="checkbox" data-check="atoms"><span><code>DA_Atoms</code> 已启用，AtomMap 中的 BP 均能加载。</span></li>
           <li><input type="checkbox" data-check="landing"><span>每个 Atom 的落脚点数量 = 对应 Actions 数量 + 1。</span></li>
           <li><input type="checkbox" data-check="route"><span><code>DA_RouteRules</code> 有实际启用分支的 A/B/C 行。</span></li>
@@ -536,16 +572,19 @@
         </div>
         <div class="command">
           <code>3. Director.BuildAtomRouteCourse</code>
-          <span>读总数和加权模板池；按 Seed 生成 BaseRoute，达到 Fork 后从 BranchRoutes 取目标数量并继续加权生成。</span>
+          <span>读取 Day 的 DefaultRoute，从 DA_Rules.RouteModes 生成岔路前主段；达到 Fork 后从 BranchRoutes 取目标数量并继续加权生成。</span>
         </div>
         <div class="command">
           <code>4. Atom 拼接</code>
-          <span>前一 Atom 的 Exit 对齐后一 Atom 的 Entry；Atom 之间使用 TransitionJumpGapCm 的 Jump。</span>
+          <span>前一 Atom 的 Exit 对齐后一 Atom 的 Entry；普通 Atom 使用 TransitionJumpGapCm，
+            分支首 Atom 从特殊岔路的左右出口和 BranchEntryGapCm 连接。</span>
         </div>
         <div class="command">
           <code>5. 视觉与判定</code>
-          <span>Atom BP 提供桥与落点布局；Director 从 <code>FoeActorMap</code> 生成敌人，并从
-            <code>HouseRoadside</code> / <code>PoleRoadside</code> 生成道路装饰。</span>
+          <span>Atom BP 提供桥与落点布局；Director 从 <code>FoeActorMap</code> 生成敌人、
+            从 <code>ForkAtomMap</code> 生成特殊岔路，并从 <code>HouseRoadside</code> /
+            <code>PoleRoadside</code> 生成道路装饰；击杀奖励先按 <code>FoeDropMap</code> 取 ID，
+            数量按 <code>DefaultDropCount</code>，分支规则只调整节奏和倍率。</span>
         </div>
         <div class="command">
           <code>6. 结果接口</code>
@@ -620,7 +659,7 @@
         group: "中心配置",
         name: "DA_Course",
         path: "/Game/Night/Course/Config/DA_Course",
-        role: "运行时唯一汇总入口：玩法参数 + HeroClass + FoeActorMap + HouseRoadside + PoleRoadside + DA_Rules + DA_Atoms + DA_RouteRules。",
+        role: "运行时唯一汇总入口：玩法参数 + HeroClass + FoeActorMap + FoeDropMap + ForkAtomMap + 道路装饰 + DA_Rules + DA_Atoms + DA_RouteRules。",
         state: "核心",
         stateClass: ""
       },
@@ -628,7 +667,7 @@
         group: "策划规则",
         name: "DA_Rules",
         path: "/Game/Night/Course/Config/DA_Rules",
-        role: "Seed、BaseAtomCount、加权 BaseRoute/BranchRoutes、ForkAfterBaseAtomIndex；只写 AtomKey + Actions + Weight。",
+        role: "Seed、RouteModes[A/B/C]、BranchRoutes[A/B/C]、ForkAfterBaseAtomIndex；只写 AtomKey + Actions + Weight。",
         state: "策划编辑",
         stateClass: "manual"
       },
@@ -646,6 +685,14 @@
         path: "/Game/Night/Course/Config/DA_RouteRules",
         role: "A/B/C 的可见块、魂惩罚、DoT、掉落和 CarryOut 调优。",
         state: "分支编辑",
+        stateClass: "manual"
+      },
+      {
+        group: "Day 驱动",
+        name: "DT_GameStages",
+        path: "/Game/Shared/Data/DT_GameStages",
+        role: "按 Day 关卡传入 DefaultRoute=A/B/C 与 ForkPair=AB/AC/BC；默认 A + AB。",
+        state: "Day 编辑",
         stateClass: "manual"
       },
       {
@@ -667,10 +714,13 @@
       "DA_Course.AtomRoute = DA_Atoms",
       "DA_Course.RouteRules = DA_RouteRules",
       "DA_Course.FoeActorMap = M01–M05 敌人 BP",
+      "DA_Course.FoeDropMap = M01–M05 食材 ID，数量用 DefaultDropCount",
+      "DA_Course.ForkAtomMap = AB/AC/BC 特殊岔路 BP",
       "DA_Course.HouseRoadside / PoleRoadside = 道路装饰 BP 池 + 间距 + 偏移",
       "道路装饰 BP 设置 StartMarker / EndMarker，房屋 SpacingCm=0 保持连续",
-      "DA_Rules 写 Seed + 总数 + Actions + Weight",
+      "DA_Rules 写 Seed + RouteModes/BranchRoutes 总数 + Actions + Weight",
       "DA_Atoms 写 AtomKey → Atom BP",
+      "DT_GameStages 写 DefaultRoute=A/B/C + ForkPair=AB/AC/BC（默认 A + AB）",
       "Compile / Save / Night.Course.Validate / PIE"
     ];
 

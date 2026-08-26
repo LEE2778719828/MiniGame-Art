@@ -3,6 +3,7 @@
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseHUD.h"
 #include "Night/Course/NightG1CourseConfig.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/WorldSettings.h"
 #include "Engine/SkyLight.h"
 #include "Components/SkyLightComponent.h"
@@ -27,6 +28,16 @@ void ANightCourseGameMode::BeginPlay()
 			Error,
 			TEXT("[NightCourse][Stage=GameMode] BeginPlay aborted: World is null."));
 		return;
+	}
+
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (ANightCourseHUD* HUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+		{
+			HUD->MainHUDScale = MainHUDScale;
+			HUD->MainHUDLeftMargin = MainHUDLeftMargin;
+			HUD->MainHUDTopMargin = MainHUDTopMargin;
+		}
 	}
 
 	UE_LOG(

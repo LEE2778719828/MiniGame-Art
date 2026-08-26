@@ -38,6 +38,10 @@ struct MINIGAME_API FNightAtomVisualBinding
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual")
 	FTransform LocalTransform = FTransform::Identity;
+
+	/** Keep a pre-choice fork connector visual visible before route selection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Visual|Fork")
+	bool bForkConnectorVisualOnly = false;
 };
 
 /**

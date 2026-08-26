@@ -1389,60 +1389,67 @@ void USChefGameInstance::RebuildGiftBuffState()
 		FSGiftDefRow Def;
 		if (TryGetGiftDef(GiftId, Def))
 		{
-			GiftBuffState.bGuideKite |= Def.bGuideKite;
-			GiftBuffState.bLifeLamp |= Def.bLifeLamp;
-			GiftBuffState.bBeatCoin |= Def.bBeatCoin;
-			GiftBuffState.bGluttonBox |= Def.bGluttonBox;
+			// Legacy cards keep their original boolean effects. New cards are
+			// driven only by their numeric trigger data and must not inherit the
+			// temporary compatibility flags stored in older DT_Gifts assets.
+			if (IsKnownGiftId(GiftId))
+			{
+				GiftBuffState.bGuideKite |= Def.bGuideKite;
+				GiftBuffState.bLifeLamp |= Def.bLifeLamp;
+				GiftBuffState.bBeatCoin |= Def.bBeatCoin;
+				GiftBuffState.bGluttonBox |= Def.bGluttonBox;
+			}
 
 			const FString Trigger = Def.EffectTrigger.ToString();
 			if (Trigger.Equals(TEXT("BeforeFork"), ESearchCase::IgnoreCase))
 			{
-				GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
-					GiftBuffState.PreForkGatherRhythmBonus, Def.EffectValue);
+				GiftBuffState.PreForkGatherAmountBonus = FMath::Max(
+					GiftBuffState.PreForkGatherAmountBonus,
+					FMath::Max(0.0f, Def.EffectValue));
+			}
+			else if (Trigger.Equals(TEXT("EnterMatch"), ESearchCase::IgnoreCase))
+			{
+				GiftBuffState.MatchShieldCharges = FMath::Max(
+					GiftBuffState.MatchShieldCharges,
+					FMath::Max(0, FMath::RoundToInt(Def.EffectValue)));
 			}
 			else if (Trigger.Equals(TEXT("AfterFork"), ESearchCase::IgnoreCase))
 			{
 				GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
-					GiftBuffState.PostForkInvulnDashSeconds, Def.EffectValue);
+					GiftBuffState.PostForkInvulnDashSeconds,
+					FMath::Max(0.0f, Def.EffectValue));
 			}
 			else if (Trigger.Equals(TEXT("NearDeath"), ESearchCase::IgnoreCase))
 			{
 				GiftBuffState.NearDeathHeal = FMath::Max(
-					GiftBuffState.NearDeathHeal, Def.EffectValue);
+					GiftBuffState.NearDeathHeal,
+					FMath::Max(0.0f, Def.EffectValue));
+				const float Threshold = Def.EffectThreshold > 0.0f
+					? Def.EffectThreshold
+					: 15.0f;
 				GiftBuffState.NearDeathThreshold = FMath::Max(
-					GiftBuffState.NearDeathThreshold, Def.EffectThreshold);
-			}
-			else
-			{
-				// Live Coding may not yet expose EffectTrigger on the DataTable row;
-				// fall back to stable GiftId mapping from the design sheet.
-				if (GiftId == TEXT("WindfallWealth"))
-				{
-					GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
-						GiftBuffState.PreForkGatherRhythmBonus, 0.3f);
-				}
-				else if (GiftId == TEXT("BossPie"))
-				{
-					GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
-						GiftBuffState.PostForkInvulnDashSeconds, 2.5f);
-				}
-				else if (GiftId == TEXT("WildMilk"))
-				{
-					GiftBuffState.NearDeathHeal = FMath::Max(
-						GiftBuffState.NearDeathHeal, 40.0f);
-					GiftBuffState.NearDeathThreshold = FMath::Max(
-						GiftBuffState.NearDeathThreshold, 15.0f);
-				}
+					GiftBuffState.NearDeathThreshold,
+					Threshold);
 			}
 			continue;
 		}
+
+		// Stable fallbacks keep old saves/debug grants functional even if a data
+		// table is temporarily unavailable during editor hot reload.
 		if (GiftId == GiftGuideKiteId) GiftBuffState.bGuideKite = true;
 		else if (GiftId == GiftLifeLampId) GiftBuffState.bLifeLamp = true;
 		else if (GiftId == GiftBeatCoinId) GiftBuffState.bBeatCoin = true;
 		else if (GiftId == GiftGluttonBoxId) GiftBuffState.bGluttonBox = true;
+		else if (GiftId == TEXT("WindfallWealth")) GiftBuffState.PreForkGatherAmountBonus = FMath::Max(GiftBuffState.PreForkGatherAmountBonus, 0.3f);
+		else if (GiftId == TEXT("BlessedAmulet")) GiftBuffState.MatchShieldCharges = FMath::Max(GiftBuffState.MatchShieldCharges, 1);
+		else if (GiftId == TEXT("BossPie")) GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(GiftBuffState.PostForkInvulnDashSeconds, 2.5f);
+		else if (GiftId == TEXT("WildMilk"))
+		{
+			GiftBuffState.NearDeathHeal = FMath::Max(GiftBuffState.NearDeathHeal, 40.0f);
+			GiftBuffState.NearDeathThreshold = FMath::Max(GiftBuffState.NearDeathThreshold, 15.0f);
+		}
 	}
 }
-
 #pragma region K2 moonyfli
 FString USChefGameInstance::GetGiftEffectText(const FName GiftId)
 {
@@ -1676,6 +1683,8 @@ bool USChefGameInstance::PrepareNightForCourse()
 
 void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 {
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	Phase = ESGamePhase::PrepareDay;
 	Revenue = 0;
 	// 谢礼按天结算：上一日的谢礼已被刚结束的夜晚用掉。
@@ -1703,8 +1712,75 @@ void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 	AutoSaveChefProfile(TEXT("开店并建立日初快照"));
 }
 
+void USChefGameInstance::BeginDaySettlement(
+	const ESDayEndReason Reason,
+	const ESDaySettlementOutcome Outcome)
+{
+	PendingDaySettlement = FSDaySettlementData();
+	PendingDaySettlement.bValid = true;
+	PendingDaySettlement.Outcome = Outcome;
+	PendingDaySettlement.EndReason = Reason;
+	PendingDaySettlement.StageId = StageId;
+	PendingDaySettlement.Revenue = Revenue;
+	PendingDaySettlement.RevenueTarget = RevenueTarget;
+	PendingDaySettlement.RevenueGap = FMath::Max(0, RevenueTarget - Revenue);
+	PendingDaySettlement.GiftIds = ActiveGiftIds;
+	bDaySettlementActionCommitted = false;
+
+	Phase = ESGamePhase::DaySettlement;
+	LastDayEndReason = Reason;
+	DayTimeRemaining = 0.0f;
+	DayStuckCheckAccum = 0.0f;
+	ResetDayDirectors(false);
+
+	LastBoardFeedback = Outcome == ESDaySettlementOutcome::Success
+		? FString::Printf(
+			TEXT("白天结算待确认：营业额 %d/%d 达标，点击继续进入下一夜。"),
+			Revenue,
+			RevenueTarget)
+		: FString::Printf(
+			TEXT("白天结算待确认：营业额 %d/%d，差 %d，点击重新经营回档日初。"),
+			Revenue,
+			RevenueTarget,
+			PendingDaySettlement.RevenueGap);
+	NotifyStateChanged();
+}
+
+bool USChefGameInstance::ConfirmDaySettlementSuccess()
+{
+	if (!HasPendingDaySettlement()
+		|| PendingDaySettlement.Outcome != ESDaySettlementOutcome::Success
+		|| bDaySettlementActionCommitted)
+	{
+		return false;
+	}
+
+	bDaySettlementActionCommitted = true;
+	const ESDayEndReason Reason = PendingDaySettlement.EndReason;
+	EnterDaySettlement(Reason);
+	return true;
+}
+
+bool USChefGameInstance::ConfirmDaySettlementRetry()
+{
+	if (!HasPendingDaySettlement()
+		|| PendingDaySettlement.Outcome != ESDaySettlementOutcome::Failure
+		|| bDaySettlementActionCommitted)
+	{
+		return false;
+	}
+
+	bDaySettlementActionCommitted = true;
+	const ESDayEndReason Reason = PendingDaySettlement.EndReason;
+	PendingDaySettlement = FSDaySettlementData();
+	FailDay(Reason);
+	return true;
+}
+
 void USChefGameInstance::FailDay(const ESDayEndReason Reason)
 {
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	const int32 RevenueAtFail = Revenue;
 	LastDayEndReason = Reason;
 	RestoreSnapshot(DayStartSnapshot);
@@ -1742,7 +1818,8 @@ void USChefGameInstance::EnterDaySettlement(const ESDayEndReason Reason)
 		*FormatReclaimSuffix(ReclaimedUnits),
 		LeftoverUnits,
 		CarryOverTargetBonus);
-	NotifyStateChanged();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	AdvanceToNextStage();
 }
 
@@ -1932,11 +2009,11 @@ bool USChefGameInstance::CloseShopNow(const ESDayEndReason Reason)
 
 	if (Phase == ESGamePhase::DayQualified)
 	{
-		EnterDaySettlement(Reason);
+		BeginDaySettlement(Reason, ESDaySettlementOutcome::Success);
 	}
 	else
 	{
-		FailDay(Reason);
+		BeginDaySettlement(Reason, ESDaySettlementOutcome::Failure);
 	}
 	return true;
 }
@@ -1977,6 +2054,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("教程日");
 		Row.NightDuration = 90.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 1001;
 		Row.DayDuration = 60.0f;
@@ -1991,6 +2069,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第一夜");
 		Row.NightDuration = 110.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AB");
 		Row.ReviewSeed = 2101;
 		Row.DayDuration = 90.0f;
@@ -2005,6 +2084,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第二夜");
 		Row.NightDuration = 130.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("AC");
 		Row.ReviewSeed = 3201;
 		Row.DayDuration = 120.0f;
@@ -2019,6 +2099,7 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 	{
 		Row.DisplayName = TEXT("第三夜");
 		Row.NightDuration = 150.0f;
+		Row.DefaultRoute = TEXT("A");
 		Row.ForkPair = TEXT("BC");
 		Row.ReviewSeed = 4301;
 		Row.DayDuration = 120.0f;
@@ -2102,6 +2183,10 @@ FSNightBootstrap USChefGameInstance::BuildNightBootstrap()
 {
 	PendingNightBootstrap = FSNightBootstrap();
 	PendingNightBootstrap.LevelId = StageId;
+	PendingNightBootstrap.DefaultRoute =
+		ActiveStageRow.DefaultRoute.IsNone()
+			? FName(TEXT("A"))
+			: ActiveStageRow.DefaultRoute;
 	PendingNightBootstrap.ForkPair = ForkPair;
 	PendingNightBootstrap.GiftBuffState = GiftBuffState;
 	PendingNightBootstrap.Seed = ReviewSeed;
@@ -2130,6 +2215,8 @@ bool USChefGameInstance::JumpToStageForDebug(const FName InStageId)
 	DayTimeRemaining = 0.0f;
 	NightStartSnapshot = FSRunSnapshot();
 	DayStartSnapshot = FSRunSnapshot();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	Phase = ESGamePhase::PrepareNight;
 #pragma endregion K2 moonyfli
 	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose(); //add by K2
@@ -2298,7 +2385,9 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 
 bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 {
-	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion)
+	const bool bLegacyBootstrapSave = SaveObject.SaveVersion == 3;
+	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion
+		&& !bLegacyBootstrapSave)
 	{
 		UE_LOG(
 			LogSSandbox,
@@ -2308,8 +2397,17 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 			USChefSaveGame::CurrentSaveVersion);
 		return false;
 	}
+	if (bLegacyBootstrapSave)
+	{
+		UE_LOG(
+			LogSSandbox,
+			Display,
+			TEXT("迁移 v3 存档：Night DefaultRoute 使用当前 DT_GameStages 默认值。"));
+	}
 
 	InitializeIngredientMaps();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	for (const TPair<FName, int32>& Pair : SaveObject.Inventory)
 	{
 		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
@@ -2525,6 +2623,8 @@ void USChefGameInstance::ResetSandbox()
 	LastDayEndReason = ESDayEndReason::None;
 	NightStartSnapshot = FSRunSnapshot();
 	DayStartSnapshot = FSRunSnapshot();
+	PendingDaySettlement = FSDaySettlementData();
+	bDaySettlementActionCommitted = false;
 	PlannedDayOrders.Reset();
 	NextPlannedOrderIndex = 0;
 #pragma endregion K2 moonyfli
@@ -2543,6 +2643,70 @@ void USChefGameInstance::ResetSandbox()
 	ResetDayDirectors(false); //add by K2
 	NotifyStateChanged();
 	UE_LOG(LogSSandbox, Display, TEXT("S 独立沙盒已重置。"));
+}
+
+void USDaySettlementWidget::PresentSettlement(const FSDaySettlementData& InData)
+{
+	PresentedSettlement = InData;
+	bActionRequested = false;
+	BP_OnSettlementPresented(PresentedSettlement);
+}
+
+bool USDaySettlementWidget::ConfirmSuccess()
+{
+	if (bActionRequested
+		|| !PresentedSettlement.bValid
+		|| PresentedSettlement.Outcome != ESDaySettlementOutcome::Success)
+	{
+		return false;
+	}
+
+	bActionRequested = true;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	const bool bConfirmed = GameInstance && GameInstance->ConfirmDaySettlementSuccess();
+	if (!bConfirmed)
+	{
+		bActionRequested = false;
+	}
+	return bConfirmed;
+}
+
+bool USDaySettlementWidget::ConfirmRetry()
+{
+	if (bActionRequested
+		|| !PresentedSettlement.bValid
+		|| PresentedSettlement.Outcome != ESDaySettlementOutcome::Failure)
+	{
+		return false;
+	}
+
+	bActionRequested = true;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	const bool bConfirmed = GameInstance && GameInstance->ConfirmDaySettlementRetry();
+	if (!bConfirmed)
+	{
+		bActionRequested = false;
+	}
+	return bConfirmed;
+}
+
+bool USDaySettlementWidget::RequestGiftDetails(const FName GiftId)
+{
+	if (!PresentedSettlement.bValid || !PresentedSettlement.GiftIds.Contains(GiftId))
+	{
+		return false;
+	}
+
+	FSGiftDefRow Gift;
+	USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+	if (!GameInstance || !GameInstance->TryGetGiftDef(GiftId, Gift))
+	{
+		Gift.GiftId = GiftId;
+		Gift.DisplayName = USChefGameInstance::GetGiftDisplayName(GiftId);
+		Gift.EffectText = USChefGameInstance::GetGiftEffectText(GiftId);
+	}
+	BP_OnGiftDetailsRequested(Gift);
+	return true;
 }
 
 ASMergeBoard::ASMergeBoard()
@@ -4662,7 +4826,7 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			GameInstance->GetGiftTabSummary().Contains(TEXT("引路纸鸢")),
 			TEXT("gift tab lists the earned card"));
 
-		// 时间到自动闭店：未达标回档日初，达标才日结进下一关。
+		// 时间到自动闭店：先停在模态结算，玩家确认后才回档或推进。
 		GameInstance->ResetSandbox();
 		Check(SubmitDay(TEXT("SDAY-SMOKE-DAY-TIMER")), TEXT("open day for timer"));
 		Check(
@@ -4673,22 +4837,35 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 		Board->TrySpawnFromMotherPiece(LingGuId);
 		GameInstance->TickDayClock(GameInstance->GetDayTimeRemaining() + 1.0f);
 		Check(
-			GameInstance->Phase == ESGamePhase::DayRunning
+			GameInstance->Phase == ESGamePhase::DaySettlement
+			&& GameInstance->HasPendingDaySettlement()
+			&& GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Failure,
+			TEXT("time up under target waits on failure settlement"));
+		Check(
+			GameInstance->ConfirmDaySettlementRetry()
+			&& GameInstance->Phase == ESGamePhase::DayRunning
 			&& GameInstance->Revenue == 0
 			&& GameInstance->GetQuantity(LingGuId) == GapStock
 			&& Board->GetOccupiedCellCount() == 0,
-			TEXT("time up under target rolls back to day start"));
+			TEXT("failure confirmation rolls back to day start"));
 
 		GameInstance->AddRevenue(GameInstance->RevenueTarget);
 		Check(GameInstance->Phase == ESGamePhase::DayQualified, TEXT("reaching target qualifies the day"));
 		const FName StageBeforeSettle = GameInstance->StageId;
 		GameInstance->TickDayClock(GameInstance->GetDayTimeRemaining() + 1.0f);
 		Check(
-			GameInstance->Phase == ESGamePhase::PrepareNight
+			GameInstance->Phase == ESGamePhase::DaySettlement
+			&& GameInstance->HasPendingDaySettlement()
+			&& GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
+			&& GameInstance->StageId == StageBeforeSettle,
+			TEXT("qualified time up waits on success settlement"));
+		Check(
+			GameInstance->ConfirmDaySettlementSuccess()
+			&& GameInstance->Phase == ESGamePhase::PrepareNight
 			&& GameInstance->StageId != StageBeforeSettle
 			&& GameInstance->CarryOverTargetBonus > 0
 			&& GameInstance->RevenueTarget > GameInstance->GetActiveStageRow().RevenueTarget,
-			TEXT("qualified time up settles and raises next target"));
+			TEXT("success confirmation settles and raises next target"));
 
 		// 夜败回档夜初：本次收获全部清除。
 		GameInstance->ResetSandbox();
@@ -5018,6 +5195,16 @@ void ASFakeNightGateway::AdvanceFlow()
 	case ESGamePhase::DayRunning:
 	case ESGamePhase::DayQualified:
 		GameInstance->CloseShopNow(ESDayEndReason::TimeUp);
+		break;
+	case ESGamePhase::DaySettlement:
+		if (GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success)
+		{
+			GameInstance->ConfirmDaySettlementSuccess();
+		}
+		else
+		{
+			GameInstance->ConfirmDaySettlementRetry();
+		}
 		break;
 	default:
 		GameInstance->LastBoardFeedback = FString::Printf(
@@ -5685,6 +5872,11 @@ void USDebugPanel::RefreshGiftVisual()
 		case ESGamePhase::NightRunning: FlowLabel = TEXT("模拟夜成功"); break;
 		case ESGamePhase::DayRunning: FlowLabel = TEXT("闭店(未达标回档)"); break;
 		case ESGamePhase::DayQualified: FlowLabel = TEXT("闭店日结"); break;
+		case ESGamePhase::DaySettlement:
+			FlowLabel = GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
+				? TEXT("确认成功结算")
+				: TEXT("确认回档重开");
+			break;
 		case ESGamePhase::Ending: FlowLabel = TEXT("尾声"); break;
 		default: break;
 		}

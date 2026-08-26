@@ -25,6 +25,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
 	TSubclassOf<ANightCourseHost> HostClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+	float MainHUDScale = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD", meta = (ClampMin = "0.0"))
+	float MainHUDLeftMargin = 80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD", meta = (ClampMin = "0.0"))
+	float MainHUDTopMargin = 24.f;
+
 	/** Fallback transition switch used when the Host has no destination override. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
 	bool bTravelToDayOnSuccess = true;

@@ -47,6 +47,9 @@ public:
 	void ApplySoulPenalty(float Amount, ENightJudgeOutcome Reason);
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
+	void RestoreSoul(float Amount, float MaxSoul);
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")
 	void PlaySuccessFeedback(ENightNodeKind Kind);
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Night|Feel")

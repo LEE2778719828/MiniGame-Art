@@ -1,4 +1,5 @@
 #include "Night/Course/NightG1CourseConfig.h"
+#include "Night/Course/NightCourseForkAtomActor.h"
 #include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "UObject/Package.h"
@@ -191,9 +192,163 @@ bool UNightG1CourseConfig::ValidateFoeActorMap(FString& OutError) const
 	return true;
 }
 
+bool UNightG1CourseConfig::TryGetFoeDropId(
+	EFoeId FoeId,
+	EIngredientId& OutDropId) const
+{
+	OutDropId = EIngredientId::None;
+	if (FoeId == EFoeId::None)
+	{
+		return false;
+	}
+	const EIngredientId* DropId = FoeDropMap.Find(FoeId);
+	if (!DropId || *DropId == EIngredientId::None)
+	{
+		return false;
+	}
+	OutDropId = *DropId;
+	return true;
+}
+
+bool UNightG1CourseConfig::ValidateFoeDropMap(FString& OutError) const
+{
+	OutError.Reset();
+	for (const TPair<EFoeId, EIngredientId>& Pair : FoeDropMap)
+	{
+		if (Pair.Key == EFoeId::None)
+		{
+			OutError = TEXT("FoeDropMap cannot contain an entry for FoeId=None.");
+			return false;
+		}
+		if (Pair.Value == EIngredientId::None)
+		{
+			OutError = FString::Printf(
+				TEXT("FoeDropMap entry for FoeId=%d cannot use IngredientId=None."),
+				static_cast<int32>(Pair.Key));
+			return false;
+		}
+	}
+
+	static const EFoeId RequiredFoes[] = {
+		EFoeId::M01,
+		EFoeId::M02,
+		EFoeId::M03,
+		EFoeId::M04,
+		EFoeId::M05
+	};
+	for (const EFoeId FoeId : RequiredFoes)
+	{
+		EIngredientId DropId = EIngredientId::None;
+		if (!TryGetFoeDropId(FoeId, DropId))
+		{
+			OutError = FString::Printf(
+				TEXT("FoeDropMap must bind a non-None ingredient for FoeId=%d."),
+				static_cast<int32>(FoeId));
+			return false;
+		}
+	}
+	return true;
+}
+
+UClass* UNightG1CourseConfig::ResolveForkAtomClass(
+	ENightForkPair ForkPair,
+	FString& OutError) const
+{
+	OutError.Reset();
+	const TSoftClassPtr<ANightCourseForkAtomActor>* ForkClassRef =
+		ForkAtomMap.Find(ForkPair);
+	if (!ForkClassRef || ForkClassRef->IsNull())
+	{
+		OutError = FString::Printf(
+			TEXT("ForkAtomMap has no Blueprint for pair %d."),
+			static_cast<int32>(ForkPair));
+		return nullptr;
+	}
+
+	UClass* ForkClass = ForkClassRef->LoadSynchronous();
+	if (!ForkClass)
+	{
+		OutError = FString::Printf(
+			TEXT("ForkAtomMap entry for pair %d failed to load class '%s'."),
+			static_cast<int32>(ForkPair),
+			*ForkClassRef->ToSoftObjectPath().ToString());
+		return nullptr;
+	}
+	if (!ForkClass->IsChildOf(ANightCourseForkAtomActor::StaticClass()))
+	{
+		OutError = FString::Printf(
+			TEXT("ForkAtomMap entry for pair %d resolves to '%s', which is not an ANightCourseForkAtomActor subclass."),
+			static_cast<int32>(ForkPair),
+			*GetNameSafe(ForkClass));
+		return nullptr;
+	}
+	return ForkClass;
+}
+
+bool UNightG1CourseConfig::ValidateForkAtomMap(FString& OutError) const
+{
+	OutError.Reset();
+	for (const TPair<ENightForkPair, TSoftClassPtr<ANightCourseForkAtomActor>>& Pair : ForkAtomMap)
+	{
+		switch (Pair.Key)
+		{
+		case ENightForkPair::AB:
+		case ENightForkPair::AC:
+		case ENightForkPair::BC:
+			break;
+		default:
+			OutError = FString::Printf(
+				TEXT("ForkAtomMap contains unsupported ForkPair=%d."),
+				static_cast<int32>(Pair.Key));
+			return false;
+		}
+
+		// Missing pair entries are allowed for migration: the Director keeps
+		// the existing logic-only fork until the visual asset is configured.
+		if (Pair.Value.IsNull())
+		{
+			continue;
+		}
+
+		FString ResolveError;
+		UClass* ForkClass = ResolveForkAtomClass(Pair.Key, ResolveError);
+		if (!ForkClass)
+		{
+			OutError = ResolveError;
+			return false;
+		}
+
+		const ANightCourseForkAtomActor* Defaults =
+			ForkClass->GetDefaultObject<ANightCourseForkAtomActor>();
+		if (!Defaults)
+		{
+			OutError = FString::Printf(
+				TEXT("ForkAtomMap entry for pair %d has no valid CDO."),
+				static_cast<int32>(Pair.Key));
+			return false;
+		}
+
+		FString AtomError;
+		if (!Defaults->ValidateForkAtom(AtomError))
+		{
+			OutError = FString::Printf(
+				TEXT("ForkAtomMap entry for pair %d is invalid: %s"),
+				static_cast<int32>(Pair.Key),
+				*AtomError);
+			return false;
+		}
+	}
+	return true;
+}
+
 bool UNightG1CourseConfig::ValidateRoadsideConfiguration(FString& OutError) const
 {
 	OutError.Reset();
+	if (!FMath::IsFinite(HouseInitialZOffsetCm))
+	{
+		OutError = TEXT("HouseInitialZOffsetCm must be a finite value.");
+		return false;
+	}
 	if (!ValidateRoadsideSet(HouseRoadside, TEXT("House"), OutError))
 	{
 		return false;
