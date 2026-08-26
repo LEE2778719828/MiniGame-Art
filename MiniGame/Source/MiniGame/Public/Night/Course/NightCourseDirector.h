@@ -219,7 +219,7 @@ public:
 	bool IsCourseFailed() const { return Phase == ENightCoursePhase::Failed; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
+	const TArray<FIngredientFloatStack>& GetCollectedIngredients() const { return CollectedIngredients; }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -291,10 +291,10 @@ protected:
 	TArray<TObjectPtr<ANightRoadsideSegmentActor>> SpawnedRoadsideActors;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	TArray<FIngredientStack> CollectedIngredients;
+	TArray<FIngredientFloatStack> CollectedIngredients;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Drops")
-	TArray<FIngredientStack> BranchCollectedIngredients;
+	TArray<FIngredientFloatStack> BranchCollectedIngredients;
 
 	/** Runtime-only translation used to rebase the selected branch near X=0. */
 	FVector CourseWorldOffset = FVector::ZeroVector;
@@ -337,6 +337,9 @@ protected:
 	bool bForkPending = false;
 	bool bBranchSelected = false;
 	bool bSpareLampConsumed = false;
+	int32 RemainingGiftShieldCharges = 0;
+	float GiftDashInvulnerableEndTime = 0.f;
+	bool bNearDeathGiftConsumed = false;
 	bool bBranchTransitionConsumed = false;
 	bool bBranchRemainderLoaded = false;
 	bool bBranchHasExplicitTransitionBeat = true;
@@ -368,6 +371,13 @@ protected:
 	void ApplyKeySwapCue(const FNightKeySwapCue& Cue);
 	bool HasPendingKeySwap() const;
 	void UpdateRouteEffects(float DeltaTime);
+	float ApplyGiftAwareSoulPenalty(
+		float Amount,
+		ENightJudgeOutcome Reason,
+		bool bCanConsumeShield,
+		bool bAffectedByDashInvulnerability,
+		const TCHAR* Source);
+	void TryTriggerNearDeathGift();
 	void UpdateRouteVisibility();
 	void RevealRemainingBranchCourse();
 	void UpdateRoadsideVisibility(float RunnerDistance, float VisibleDistanceCm);
@@ -375,7 +385,7 @@ protected:
 	int32 GetRuntimeSpawnThroughStone() const;
 	int32 GetRuntimeKeepFromStone() const;
 	void StreamRuntimeCourseActors();
-	void DestroyRuntimeActorsBeforeStone(int32 FirstKeepStone);
+	void DestroyRuntimeActorsBehindPlayer();
 	void HandleFailedInput(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginFailure(const FString& Reason);
 	bool HasBranchQueueForRoute(ENightRouteId RouteId) const;
@@ -423,8 +433,17 @@ protected:
 	void OnAdvanceArrived();
 	void OpenNextBeatOrExit();
 	void SyncPawnToProgress(bool bInstant);
-	void AddDrop(EIngredientId Id, int32 Count);
-	void AddDropToArray(TArray<FIngredientStack>& Target, EIngredientId Id, int32 Count) const;
+	void AddDrop(EIngredientId Id, float Amount);
+	void AddDropToArray(
+		TArray<FIngredientFloatStack>& Target,
+		EIngredientId Id,
+		float Amount) const;
+	void AddFloatDropBonus(
+		TArray<FIngredientFloatStack>& Target,
+		EIngredientId Id,
+		float Amount) const;
+	TArray<FIngredientStack> QuantizeCollectedIngredients(
+		const TArray<FIngredientFloatStack>& Source) const;
 	FVector GetTrackLocation(float Distance) const;
 	FVector GetStoneWorldLocation(int32 StoneIndex) const;
 	INightFeelBridge* GetFeel() const;

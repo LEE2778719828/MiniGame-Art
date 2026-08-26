@@ -330,6 +330,11 @@ namespace NightCourseStage_Private
 		Bootstrap.GiftBuffs.bSpareLamp = Source.GiftBuffState.bLifeLamp;
 		Bootstrap.GiftBuffs.bKeyCoin = Source.GiftBuffState.bBeatCoin;
 		Bootstrap.GiftBuffs.bTaotieBox = Source.GiftBuffState.bGluttonBox;
+		Bootstrap.GiftBuffs.PreForkGatherAmountBonus = Source.GiftBuffState.PreForkGatherAmountBonus;
+		Bootstrap.GiftBuffs.MatchShieldCharges = Source.GiftBuffState.MatchShieldCharges;
+		Bootstrap.GiftBuffs.PostForkInvulnerableSeconds = Source.GiftBuffState.PostForkInvulnDashSeconds;
+		Bootstrap.GiftBuffs.NearDeathHealAmount = Source.GiftBuffState.NearDeathHeal;
+		Bootstrap.GiftBuffs.NearDeathThreshold = Source.GiftBuffState.NearDeathThreshold;
 		Bootstrap.Seed = Source.Seed;
 		return Bootstrap;
 	}

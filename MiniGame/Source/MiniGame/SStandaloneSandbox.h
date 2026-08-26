@@ -88,6 +88,9 @@ struct FSGameStageRow : public FTableRowBase
 	FName ForkPair = TEXT("AB");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName DefaultRoute = TEXT("A");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 ReviewSeed = 1001;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -474,9 +477,13 @@ struct FSGiftBuffState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bGluttonBox = false;
 
-	/** Pre-fork gather rhythm bonus (e.g. 0.3 = +30%). */
+	/** Pre-fork ingredient amount bonus (e.g. 0.3 = +30%). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float PreForkGatherRhythmBonus = 0.0f;
+	float PreForkGatherAmountBonus = 0.0f;
+
+	/** Number of judgement-damage hits blocked after entering Night. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 MatchShieldCharges = 0;
 
 	/** Invulnerable dash seconds after entering a fork. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -499,9 +506,13 @@ struct FSGiftBuffState
 		if (bLifeLamp) Parts.Add(TEXT("LifeLamp"));
 		if (bBeatCoin) Parts.Add(TEXT("BeatCoin"));
 		if (bGluttonBox) Parts.Add(TEXT("GluttonBox"));
-		if (PreForkGatherRhythmBonus > 0.0f)
+		if (PreForkGatherAmountBonus > 0.0f)
 		{
-			Parts.Add(FString::Printf(TEXT("PreForkRhythm+%.0f%%"), PreForkGatherRhythmBonus * 100.0f));
+			Parts.Add(FString::Printf(TEXT("PreForkGatherAmount+%.0f%%"), PreForkGatherAmountBonus * 100.0f));
+		}
+		if (MatchShieldCharges > 0)
+		{
+			Parts.Add(FString::Printf(TEXT("Shieldx%d"), MatchShieldCharges));
 		}
 		if (PostForkInvulnDashSeconds > 0.0f)
 		{
@@ -529,6 +540,9 @@ struct FSNightBootstrap
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName ForkPair = TEXT("AB");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName DefaultRoute = TEXT("A");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FSGiftBuffState GiftBuffState;
@@ -595,7 +609,7 @@ class MINIGAME_API USChefSaveGame : public USaveGame
 
 public:
 	// v3: day order queue + cursor for mid-day load / day-start rollback.
-	static constexpr int32 CurrentSaveVersion = 3;
+	static constexpr int32 CurrentSaveVersion = 4;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 SaveVersion = CurrentSaveVersion;

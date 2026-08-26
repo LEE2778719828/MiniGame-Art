@@ -1389,60 +1389,67 @@ void USChefGameInstance::RebuildGiftBuffState()
 		FSGiftDefRow Def;
 		if (TryGetGiftDef(GiftId, Def))
 		{
-			GiftBuffState.bGuideKite |= Def.bGuideKite;
-			GiftBuffState.bLifeLamp |= Def.bLifeLamp;
-			GiftBuffState.bBeatCoin |= Def.bBeatCoin;
-			GiftBuffState.bGluttonBox |= Def.bGluttonBox;
+			// Legacy cards keep their original boolean effects. New cards are
+			// driven only by their numeric trigger data and must not inherit the
+			// temporary compatibility flags stored in older DT_Gifts assets.
+			if (IsKnownGiftId(GiftId))
+			{
+				GiftBuffState.bGuideKite |= Def.bGuideKite;
+				GiftBuffState.bLifeLamp |= Def.bLifeLamp;
+				GiftBuffState.bBeatCoin |= Def.bBeatCoin;
+				GiftBuffState.bGluttonBox |= Def.bGluttonBox;
+			}
 
 			const FString Trigger = Def.EffectTrigger.ToString();
 			if (Trigger.Equals(TEXT("BeforeFork"), ESearchCase::IgnoreCase))
 			{
-				GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
-					GiftBuffState.PreForkGatherRhythmBonus, Def.EffectValue);
+				GiftBuffState.PreForkGatherAmountBonus = FMath::Max(
+					GiftBuffState.PreForkGatherAmountBonus,
+					FMath::Max(0.0f, Def.EffectValue));
+			}
+			else if (Trigger.Equals(TEXT("EnterMatch"), ESearchCase::IgnoreCase))
+			{
+				GiftBuffState.MatchShieldCharges = FMath::Max(
+					GiftBuffState.MatchShieldCharges,
+					FMath::Max(0, FMath::RoundToInt(Def.EffectValue)));
 			}
 			else if (Trigger.Equals(TEXT("AfterFork"), ESearchCase::IgnoreCase))
 			{
 				GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
-					GiftBuffState.PostForkInvulnDashSeconds, Def.EffectValue);
+					GiftBuffState.PostForkInvulnDashSeconds,
+					FMath::Max(0.0f, Def.EffectValue));
 			}
 			else if (Trigger.Equals(TEXT("NearDeath"), ESearchCase::IgnoreCase))
 			{
 				GiftBuffState.NearDeathHeal = FMath::Max(
-					GiftBuffState.NearDeathHeal, Def.EffectValue);
+					GiftBuffState.NearDeathHeal,
+					FMath::Max(0.0f, Def.EffectValue));
+				const float Threshold = Def.EffectThreshold > 0.0f
+					? Def.EffectThreshold
+					: 15.0f;
 				GiftBuffState.NearDeathThreshold = FMath::Max(
-					GiftBuffState.NearDeathThreshold, Def.EffectThreshold);
-			}
-			else
-			{
-				// Live Coding may not yet expose EffectTrigger on the DataTable row;
-				// fall back to stable GiftId mapping from the design sheet.
-				if (GiftId == TEXT("WindfallWealth"))
-				{
-					GiftBuffState.PreForkGatherRhythmBonus = FMath::Max(
-						GiftBuffState.PreForkGatherRhythmBonus, 0.3f);
-				}
-				else if (GiftId == TEXT("BossPie"))
-				{
-					GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(
-						GiftBuffState.PostForkInvulnDashSeconds, 2.5f);
-				}
-				else if (GiftId == TEXT("WildMilk"))
-				{
-					GiftBuffState.NearDeathHeal = FMath::Max(
-						GiftBuffState.NearDeathHeal, 40.0f);
-					GiftBuffState.NearDeathThreshold = FMath::Max(
-						GiftBuffState.NearDeathThreshold, 15.0f);
-				}
+					GiftBuffState.NearDeathThreshold,
+					Threshold);
 			}
 			continue;
 		}
+
+		// Stable fallbacks keep old saves/debug grants functional even if a data
+		// table is temporarily unavailable during editor hot reload.
 		if (GiftId == GiftGuideKiteId) GiftBuffState.bGuideKite = true;
 		else if (GiftId == GiftLifeLampId) GiftBuffState.bLifeLamp = true;
 		else if (GiftId == GiftBeatCoinId) GiftBuffState.bBeatCoin = true;
 		else if (GiftId == GiftGluttonBoxId) GiftBuffState.bGluttonBox = true;
+		else if (GiftId == TEXT("WindfallWealth")) GiftBuffState.PreForkGatherAmountBonus = FMath::Max(GiftBuffState.PreForkGatherAmountBonus, 0.3f);
+		else if (GiftId == TEXT("BlessedAmulet")) GiftBuffState.MatchShieldCharges = FMath::Max(GiftBuffState.MatchShieldCharges, 1);
+		else if (GiftId == TEXT("BossPie")) GiftBuffState.PostForkInvulnDashSeconds = FMath::Max(GiftBuffState.PostForkInvulnDashSeconds, 2.5f);
+		else if (GiftId == TEXT("WildMilk"))
+		{
+			GiftBuffState.NearDeathHeal = FMath::Max(GiftBuffState.NearDeathHeal, 40.0f);
+			GiftBuffState.NearDeathThreshold = FMath::Max(GiftBuffState.NearDeathThreshold, 15.0f);
+		}
 	}
 }
-
 #pragma region K2 moonyfli
 FString USChefGameInstance::GetGiftEffectText(const FName GiftId)
 {

@@ -80,6 +80,19 @@ struct FIngredientStack
 	int32 Count = 0;
 };
 
+/** Runtime Night collection amount. Fractional amounts are quantized only at the Night -> Day boundary. */
+USTRUCT(BlueprintType)
+struct FIngredientFloatStack
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
+	EIngredientId Id = EIngredientId::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
+	float Amount = 0.f;
+};
+
 USTRUCT(BlueprintType)
 struct FGiftBuffState
 {
@@ -99,6 +112,21 @@ struct FGiftBuffState
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
 	EIngredientId TaotieLockIngredient = EIngredientId::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
+	float PreForkGatherAmountBonus = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
+	int32 MatchShieldCharges = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
+	float PostForkInvulnerableSeconds = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
+	float NearDeathHealAmount = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Gift")
+	float NearDeathThreshold = 0.f;
 };
 
 /** S -> R2 : start night once. */

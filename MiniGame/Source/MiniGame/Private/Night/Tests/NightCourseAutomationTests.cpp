@@ -1518,4 +1518,169 @@ bool FNightCourseResultApiTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseGiftProtectionTest,
+	"MiniGame.Night.Course.GiftProtectionNumbers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseGiftProtectionTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1701);
+	Config->WrongPenalty = 7.f;
+	Config->StartingSoul = 100.f;
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	UNightFeelStubComponent* Feel =
+		NewObject<UNightFeelStubComponent>(GetTransientPackage());
+	Feel->Soul = 20.f;
+	Director->BindFeelBridge(Feel);
+
+	FNightBootstrap Bootstrap;
+	Bootstrap.GiftBuffs.MatchShieldCharges = 1;
+	Bootstrap.GiftBuffs.NearDeathHealAmount = 40.f;
+	Bootstrap.GiftBuffs.NearDeathThreshold = 15.f;
+	Director->StartNight(Bootstrap);
+	TestTrue(TEXT("gift protection course starts"), Director->IsRunning());
+	const int32 ActiveNode = Director->GetActiveNodeIndex();
+
+	Director->NotifyFeelResolved(ActiveNode, ENightJudgeOutcome::WrongButton);
+	TestTrue(
+		TEXT("first judgement damage is blocked by the one-charge shield"),
+		FMath::IsNearlyEqual(Feel->Soul, 20.f));
+
+	Director->NotifyFeelResolved(ActiveNode, ENightJudgeOutcome::WrongButton);
+	TestTrue(
+		TEXT("second damage crosses threshold and consumes the one-time heal"),
+		FMath::IsNearlyEqual(Feel->Soul, 53.f));
+
+	Director->NotifyFeelResolved(ActiveNode, ENightJudgeOutcome::WrongButton);
+	TestTrue(
+		TEXT("near-death heal cannot trigger twice in one night"),
+		FMath::IsNearlyEqual(Feel->Soul, 46.f));
+	Director->ResetCourse();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseFloatGatherTest,
+	"MiniGame.Night.Course.FloatGatherQuantization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseFloatGatherTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, false, 1702);
+	Config->DefaultDropCount = 2;
+	Config->ExitBufferSeconds = 0.f;
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	FNightBootstrap Bootstrap;
+	Bootstrap.GiftBuffs.PreForkGatherAmountBonus = 0.3f;
+	Director->StartNight(Bootstrap);
+
+	for (int32 Guard = 0; Guard < 128 && Director->IsRunning(); ++Guard)
+	{
+		if (Director->IsAwaitingInput())
+		{
+			Director->NotifyFeelResolved(
+				Director->GetActiveNodeIndex(),
+				ENightJudgeOutcome::Success);
+		}
+		else
+		{
+			Director->TickComponent(0.02f, LEVELTICK_All, nullptr);
+		}
+	}
+
+	TestEqual(
+		TEXT("float gather course finishes successfully"),
+		Director->GetPhase(),
+		ENightCoursePhase::Finished);
+	float RuntimeAmount = 0.f;
+	for (const FIngredientFloatStack& Stack : Director->GetCollectedIngredients())
+	{
+		if (Stack.Id == EIngredientId::F01_LingGu)
+		{
+			RuntimeAmount = Stack.Amount;
+			break;
+		}
+	}
+	TestTrue(
+		TEXT("three two-unit drops retain their 30 percent fractions at Night"),
+		FMath::IsNearlyEqual(RuntimeAmount, 7.8f, 0.001f));
+
+	int32 DayCount = 0;
+	for (const FIngredientStack& Stack : Director->GetNightResult().Ingredients)
+	{
+		if (Stack.Id == EIngredientId::F01_LingGu)
+		{
+			DayCount = Stack.Count;
+			break;
+		}
+	}
+	TestEqual(TEXT("Night to Day quantization floors 7.8 to 7"), DayCount, 7);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCoursePostForkGiftTest,
+	"MiniGame.Night.Course.PostForkInvulnerabilityNumber",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCoursePostForkGiftTest::RunTest(const FString& Parameters)
+{
+	UNightG1CourseConfig* Config =
+		NightCourseAutomation_Private::MakeAtomConfig(nullptr, true, 1703);
+	Config->WrongPenalty = 7.f;
+	Config->BranchEnterBufferSeconds = 0.f;
+
+	UNightCourseDirector* Director =
+		NewObject<UNightCourseDirector>(GetTransientPackage());
+	Director->Config = Config;
+	UNightFeelStubComponent* Feel =
+		NewObject<UNightFeelStubComponent>(GetTransientPackage());
+	Feel->Soul = 100.f;
+	Director->BindFeelBridge(Feel);
+
+	FNightBootstrap Bootstrap;
+	Bootstrap.ForkPair = ENightForkPair::AB;
+	Bootstrap.GiftBuffs.PostForkInvulnerableSeconds = 2.5f;
+	Director->StartNight(Bootstrap);
+	for (int32 Guard = 0; Guard < 128 && Director->IsRunning(); ++Guard)
+	{
+		if (Director->IsForkChoiceActive())
+		{
+			Director->ChooseForkRight();
+			break;
+		}
+		if (Director->IsAwaitingInput())
+		{
+			Director->NotifyFeelResolved(
+				Director->GetActiveNodeIndex(),
+				ENightJudgeOutcome::Success);
+		}
+	}
+	for (int32 Guard = 0;
+		Guard < 16 && Director->IsRunning() && !Director->IsAwaitingInput();
+		++Guard)
+	{
+		Director->TickComponent(0.02f, LEVELTICK_All, nullptr);
+	}
+
+	TestTrue(TEXT("post-fork branch opens a judgement window"), Director->IsAwaitingInput());
+	const float SoulBeforeWrong = Feel->Soul;
+	Director->NotifyFeelResolved(
+		Director->GetActiveNodeIndex(),
+		ENightJudgeOutcome::WrongButton);
+	TestTrue(
+		TEXT("post-fork invulnerability blocks judgement damage during its numeric window"),
+		FMath::IsNearlyEqual(Feel->Soul, SoulBeforeWrong, 0.001f));
+	Director->ResetCourse();
+	return true;
+}
 #endif

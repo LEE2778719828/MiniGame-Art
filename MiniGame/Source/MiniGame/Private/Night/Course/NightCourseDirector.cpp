@@ -2950,6 +2950,19 @@ bool UNightCourseDirector::SpawnRoadsideActors()
 		return false;
 	}
 
+	const bool bStreaming = IsRuntimeActorStreamingEnabled();
+	const float RoadsideVisibleDistance = Config
+		? FMath::Max(1.f, Config->RuntimeRoadsideVisibleDistanceCm)
+		: TNumericLimits<float>::Max();
+	const float UnloadBehindDistance = Config
+		? FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm)
+		: 0.f;
+	const FVector TrackForward = Config
+		&& !Config->TrackForward.GetSafeNormal().IsNearlyZero()
+		? Config->TrackForward.GetSafeNormal()
+		: FVector::ForwardVector;
+	const FVector TrackOrigin = Config ? Config->TrackOrigin : FVector::ZeroVector;
+
 	for (int32 Index = 0; Index < RoadsideSpecs.Num(); ++Index)
 	{
 		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[Index];
@@ -2957,12 +2970,15 @@ bool UNightCourseDirector::SpawnRoadsideActors()
 		{
 			continue;
 		}
-		if (IsRuntimeActorStreamingEnabled()
-			&& Spec.ToStoneIndex != INDEX_NONE)
+		if (bStreaming)
 		{
-			const int32 FirstKeepStone = GetRuntimeKeepFromStone();
-			if (Spec.ToStoneIndex < FirstKeepStone
-				|| Spec.ToStoneIndex > GetRuntimeSpawnThroughStone())
+			const float TrackDistance = StoneSpecs.IsValidIndex(Spec.ToStoneIndex)
+				? StoneSpecs[Spec.ToStoneIndex].TrackDistance
+				: FVector::DotProduct(
+					Spec.WorldTransform.GetLocation() - TrackOrigin,
+					TrackForward);
+			if (TrackDistance < ProgressDistance - UnloadBehindDistance
+				|| FMath::Abs(TrackDistance - ProgressDistance) > RoadsideVisibleDistance)
 			{
 				continue;
 			}
@@ -3364,7 +3380,8 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 		|| Config->TaotieFoeOverrideCount < 0
 		|| Config->ForkHouseExclusionCm < 0.f
 		|| Config->RuntimeSpawnAheadStoneCount <= 0
-		|| Config->RuntimeUnloadBehindStoneCount < 0
+		|| Config->RuntimeUnloadBehindDistanceCm < 0.f
+		|| Config->RuntimeRoadsideVisibleDistanceCm <= 0.f
 		|| Config->BranchSpawnBatchSize <= 0
 		|| Config->DefaultKeySwapWarningSeconds < 0.f
 		|| Config->DefaultKeySwapSafetySeconds < 0.f)
@@ -3677,6 +3694,9 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	CourseWorldOffset = FVector::ZeroVector;
 	bBranchSelected = false;
 	bSpareLampConsumed = false;
+	RemainingGiftShieldCharges = FMath::Max(0, ActiveBootstrap.GiftBuffs.MatchShieldCharges);
+	GiftDashInvulnerableEndTime = 0.f;
+	bNearDeathGiftConsumed = false;
 	bBranchTransitionConsumed = false;
 	bBranchRemainderLoaded = false;
 	BranchBeatCount = 0;
@@ -3760,6 +3780,23 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	bDidEnterRuntimeCourse = true;
 	ElapsedSeconds = 0.f;
 	CurrentStoneIndex = 0;
+	// Runtime streaming uses ProgressDistance while spawning its first window.
+	// Seed it from the first composed stone so all distance gates share one origin.
+	ProgressDistance = StoneSpecs.IsValidIndex(0)
+		? StoneSpecs[0].TrackDistance
+		: 0.f;
+	if (RemainingGiftShieldCharges > 0)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[Gift][BlessedAmulet] Match shield armed with %d charge(s)."), RemainingGiftShieldCharges);
+	}
+	if (ActiveBootstrap.GiftBuffs.PreForkGatherAmountBonus > 0.f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[Gift][WindfallWealth] Pre-fork ingredient amount bonus active: +%.0f%%."), ActiveBootstrap.GiftBuffs.PreForkGatherAmountBonus * 100.f);
+	}
+	if (ActiveBootstrap.GiftBuffs.NearDeathHealAmount > 0.f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[Gift][WildMilk] Near-death heal armed: +%.1f Soul at <= %.1f."), ActiveBootstrap.GiftBuffs.NearDeathHealAmount, ActiveBootstrap.GiftBuffs.NearDeathThreshold);
+	}
 	ActiveBeatIndex = INDEX_NONE;
 	bWindowOpen = false;
 	bAdvancing = false;
@@ -3774,7 +3811,6 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		return;
 	}
 
-	ProgressDistance = StoneSpecs.IsValidIndex(0) ? StoneSpecs[0].TrackDistance : 0.f;
 	SyncPawnToProgress(true);
 	SetPhase(ENightCoursePhase::BaseSegment);
 	if (IsRegistered())
@@ -4354,7 +4390,8 @@ void UNightCourseDirector::HandleFailedInput(
 	const bool bProtectedBySpareLamp =
 		bBranchBeat
 		&& ActiveBootstrap.GiftBuffs.bSpareLamp
-		&& !bSpareLampConsumed;
+		&& !bSpareLampConsumed
+		&& ElapsedSeconds >= GiftDashInvulnerableEndTime;
 	if (bProtectedBySpareLamp)
 	{
 		bSpareLampConsumed = true;
@@ -4368,10 +4405,12 @@ void UNightCourseDirector::HandleFailedInput(
 			const float RoutePenaltyScale = bHasActiveRouteRule
 				? ActiveRouteRule.SoulPenaltyScale
 				: 1.f;
-			INightFeelBridge::Execute_ApplySoulPenalty(
-				FeelBridgeObject,
+			ApplyGiftAwareSoulPenalty(
 				BasePenalty * RoutePenaltyScale,
-				Outcome);
+				Outcome,
+				true,
+				true,
+				TEXT("WrongInput"));
 		}
 		INightFeelBridge::Execute_PlayFailFeedback(
 			FeelBridgeObject,
@@ -4405,7 +4444,8 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		bBranchBeat
 		&& Outcome != ENightJudgeOutcome::Success
 		&& ActiveBootstrap.GiftBuffs.bSpareLamp
-		&& !bSpareLampConsumed;
+		&& !bSpareLampConsumed
+		&& ElapsedSeconds >= GiftDashInvulnerableEndTime;
 	if (bProtectedBySpareLamp)
 	{
 		bSpareLampConsumed = true;
@@ -4435,10 +4475,14 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 				const float RoutePenaltyScale = bHasActiveRouteRule
 					? ActiveRouteRule.SoulPenaltyScale
 					: 1.f;
-				INightFeelBridge::Execute_ApplySoulPenalty(
-					FeelBridgeObject,
+				ApplyGiftAwareSoulPenalty(
 					Penalty * RoutePenaltyScale,
-					Outcome);
+					Outcome,
+					true,
+					true,
+					Outcome == ENightJudgeOutcome::Miss
+						? TEXT("Miss")
+						: TEXT("WrongInput"));
 			}
 			INightFeelBridge::Execute_PlayFailFeedback(FeelBridgeObject, Outcome, Beat.Action);
 		}
@@ -4678,11 +4722,13 @@ int32 UNightCourseDirector::GetRuntimeSpawnThroughStone() const
 			StoneIndex < StoneSpecs.Num();
 			++StoneIndex)
 		{
-			if (StoneSpecs[StoneIndex].TrackDistance > MaxVisibleDistance)
+			// Branch atoms can be rebased or authored with a non-monotonic
+			// TrackDistance sequence. Do not stop at the first distant stone:
+			// a later gameplay stone may still be inside the streaming window.
+			if (StoneSpecs[StoneIndex].TrackDistance <= MaxVisibleDistance)
 			{
-				break;
+				LastStone = StoneIndex;
 			}
-			LastStone = StoneIndex;
 		}
 		return LastStone;
 	}
@@ -4708,38 +4754,51 @@ int32 UNightCourseDirector::GetRuntimeKeepFromStone() const
 	{
 		return 0;
 	}
-	if (bBranchSelected && bBranchRemainderLoaded && bHasActiveRouteRule)
-	{
-		const float MinVisibleDistance = ProgressDistance
-			- FMath::Max(1.f, ActiveRouteRule.VisibleDistanceCm);
-		int32 FirstKeepStone = 0;
-		while (FirstKeepStone < StoneSpecs.Num()
-			&& StoneSpecs[FirstKeepStone].TrackDistance < MinVisibleDistance)
-		{
-			++FirstKeepStone;
-		}
-		return FMath::Min(FirstKeepStone, CurrentStoneIndex);
-	}
-	return FMath::Max(
+
+	const float MinKeepDistance = ProgressDistance
+		- FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm);
+	const int32 ClampedCurrent = FMath::Clamp(
+		CurrentStoneIndex,
 		0,
-		CurrentStoneIndex
-			- FMath::Max(0, Config->RuntimeUnloadBehindStoneCount));
+		FMath::Max(0, StoneSpecs.Num() - 1));
+	int32 FirstKeepStone = ClampedCurrent;
+	for (int32 StoneIndex = 0; StoneIndex <= ClampedCurrent; ++StoneIndex)
+	{
+		if (StoneSpecs.IsValidIndex(StoneIndex)
+			&& StoneSpecs[StoneIndex].TrackDistance >= MinKeepDistance)
+		{
+			FirstKeepStone = FMath::Min(FirstKeepStone, StoneIndex);
+		}
+	}
+	return FirstKeepStone;
 }
 
-void UNightCourseDirector::DestroyRuntimeActorsBeforeStone(int32 FirstKeepStone)
+void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 {
 	if (!IsRuntimeActorStreamingEnabled())
 	{
 		return;
 	}
 
-	FirstKeepStone = FMath::Max(0, FirstKeepStone);
+	const float UnloadBeforeDistance = ProgressDistance
+		- FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm);
+	const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
+		? FVector::ForwardVector
+		: Config->TrackForward.GetSafeNormal();
+	const auto GetWorldDistance = [this, TrackForward](const FVector& Location)
+	{
+		return FVector::DotProduct(Location - Config->TrackOrigin, TrackForward);
+	};
+	const auto IsPassedStoneBehind = [this, UnloadBeforeDistance](const int32 StoneIndex)
+	{
+		return StoneSpecs.IsValidIndex(StoneIndex)
+			&& StoneIndex < CurrentStoneIndex
+			&& StoneSpecs[StoneIndex].TrackDistance < UnloadBeforeDistance;
+	};
+
 	for (int32 StoneIndex = 0; StoneIndex < SpawnedStones.Num(); ++StoneIndex)
 	{
-		if (StoneIndex < FirstKeepStone
-			&& SpawnedStones[StoneIndex]
-			&& StoneSpecs.IsValidIndex(StoneIndex)
-			&& !StoneSpecs[StoneIndex].bForkConnectorVisualOnly)
+		if (SpawnedStones[StoneIndex] && IsPassedStoneBehind(StoneIndex))
 		{
 			SpawnedStones[StoneIndex]->Destroy();
 			SpawnedStones[StoneIndex] = nullptr;
@@ -4747,86 +4806,81 @@ void UNightCourseDirector::DestroyRuntimeActorsBeforeStone(int32 FirstKeepStone)
 	}
 	for (int32 BridgeIndex = 0; BridgeIndex < SpawnedBridges.Num(); ++BridgeIndex)
 	{
-		if (!BridgeSpecs.IsValidIndex(BridgeIndex)
-			|| BridgeSpecs[BridgeIndex].bForkConnectorVisualOnly
-			|| BridgeSpecs[BridgeIndex].ToStoneIndex >= FirstKeepStone
-			|| !SpawnedBridges[BridgeIndex])
+		if (!SpawnedBridges[BridgeIndex] || !BridgeSpecs.IsValidIndex(BridgeIndex))
 		{
 			continue;
 		}
-		SpawnedBridges[BridgeIndex]->Destroy();
-		SpawnedBridges[BridgeIndex] = nullptr;
+		const FNightBridgeSpec& Bridge = BridgeSpecs[BridgeIndex];
+		const float Distance = StoneSpecs.IsValidIndex(Bridge.ToStoneIndex)
+			? StoneSpecs[Bridge.ToStoneIndex].TrackDistance
+			: GetWorldDistance(Bridge.WorldLocation);
+		const bool bPassed = Bridge.ToStoneIndex != INDEX_NONE
+			? Bridge.ToStoneIndex < CurrentStoneIndex
+			: Distance < ProgressDistance;
+		if (bPassed && Distance < UnloadBeforeDistance)
+		{
+			SpawnedBridges[BridgeIndex]->Destroy();
+			SpawnedBridges[BridgeIndex] = nullptr;
+		}
 	}
-	for (int32 BindingIndex = 0;
-		BindingIndex < SpawnedVisualActors.Num();
-		++BindingIndex)
+	for (int32 BindingIndex = 0; BindingIndex < SpawnedVisualActors.Num(); ++BindingIndex)
 	{
-		if (!SpawnedVisualActors[BindingIndex]
-			|| !VisualBindings.IsValidIndex(BindingIndex))
+		if (!SpawnedVisualActors[BindingIndex] || !VisualBindings.IsValidIndex(BindingIndex))
 		{
 			continue;
 		}
 		const FNightAtomVisualBinding& Binding = VisualBindings[BindingIndex];
-		if (Binding.bForkConnectorVisualOnly)
-		{
-			continue;
-		}
 		int32 OwnerStoneIndex = Binding.StoneIndex;
 		if (Binding.bIsBridge && BridgeSpecs.IsValidIndex(Binding.BridgeIndex))
 		{
 			OwnerStoneIndex = BridgeSpecs[Binding.BridgeIndex].ToStoneIndex;
 		}
-		if (OwnerStoneIndex != INDEX_NONE && OwnerStoneIndex < FirstKeepStone)
+		const float Distance = StoneSpecs.IsValidIndex(OwnerStoneIndex)
+			? StoneSpecs[OwnerStoneIndex].TrackDistance
+			: GetWorldDistance(Binding.LocalTransform.GetLocation());
+		const bool bPassed = OwnerStoneIndex != INDEX_NONE
+			? OwnerStoneIndex < CurrentStoneIndex
+			: Distance < ProgressDistance;
+		if (bPassed && Distance < UnloadBeforeDistance)
 		{
 			SpawnedVisualActors[BindingIndex]->Destroy();
 			SpawnedVisualActors[BindingIndex] = nullptr;
 		}
 	}
-	for (int32 RoadsideIndex = 0;
-		RoadsideIndex < SpawnedRoadsideActors.Num();
-		++RoadsideIndex)
+	for (int32 RoadsideIndex = 0; RoadsideIndex < SpawnedRoadsideActors.Num(); ++RoadsideIndex)
 	{
-		if (!SpawnedRoadsideActors[RoadsideIndex]
-			|| !RoadsideSpecs.IsValidIndex(RoadsideIndex))
+		if (!SpawnedRoadsideActors[RoadsideIndex] || !RoadsideSpecs.IsValidIndex(RoadsideIndex))
 		{
 			continue;
 		}
 		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[RoadsideIndex];
-		if (Spec.ToStoneIndex != INDEX_NONE
-			&& Spec.ToStoneIndex < FirstKeepStone)
+		const float Distance = StoneSpecs.IsValidIndex(Spec.ToStoneIndex)
+			? StoneSpecs[Spec.ToStoneIndex].TrackDistance
+			: GetWorldDistance(Spec.WorldTransform.GetLocation());
+		const bool bPassed = Spec.ToStoneIndex != INDEX_NONE
+			? Spec.ToStoneIndex < CurrentStoneIndex
+			: Distance < ProgressDistance;
+		if (bPassed && Distance < UnloadBeforeDistance)
 		{
 			SpawnedRoadsideActors[RoadsideIndex]->Destroy();
 			SpawnedRoadsideActors[RoadsideIndex] = nullptr;
 		}
 	}
-
-	const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? FVector::ForwardVector
-		: Config->TrackForward.GetSafeNormal();
-	const float KeepDistance = StoneSpecs.IsValidIndex(FirstKeepStone)
-		? StoneSpecs[FirstKeepStone].TrackDistance
-		: TNumericLimits<float>::Max();
-	for (int32 ForkIndex = 0;
-		ForkIndex < SpawnedForkAtoms.Num();
-		++ForkIndex)
+	for (int32 ForkIndex = 0; ForkIndex < SpawnedForkAtoms.Num(); ++ForkIndex)
 	{
-		if (!SpawnedForkAtoms[ForkIndex]
-			|| !ForkAtomSpecs.IsValidIndex(ForkIndex))
+		if (!SpawnedForkAtoms[ForkIndex] || !ForkAtomSpecs.IsValidIndex(ForkIndex))
 		{
 			continue;
 		}
-		const float ForkDistance = FVector::DotProduct(
-			ForkAtomSpecs[ForkIndex].WorldTransform.GetLocation()
-				- Config->TrackOrigin,
-			TrackForward);
-		if (ForkDistance < KeepDistance)
+		const float ForkDistance = GetWorldDistance(
+			ForkAtomSpecs[ForkIndex].WorldTransform.GetLocation());
+		if (bBranchRemainderLoaded && ForkDistance < UnloadBeforeDistance)
 		{
 			SpawnedForkAtoms[ForkIndex]->Destroy();
 			SpawnedForkAtoms[ForkIndex] = nullptr;
 		}
 	}
 }
-
 void UNightCourseDirector::StreamRuntimeCourseActors()
 {
 	if (!IsRuntimeActorStreamingEnabled())
@@ -4836,12 +4890,27 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 
 	const int32 FirstKeepStone = GetRuntimeKeepFromStone();
 	const int32 LastSpawnStone = GetRuntimeSpawnThroughStone();
+	const float UnloadBeforeDistance = ProgressDistance
+		- FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm);
+	const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
+		? FVector::ForwardVector
+		: Config->TrackForward.GetSafeNormal();
+	const auto IsPassedStoneBehind = [this, UnloadBeforeDistance](const int32 StoneIndex)
+	{
+		return StoneSpecs.IsValidIndex(StoneIndex)
+			&& StoneIndex < CurrentStoneIndex
+			&& StoneSpecs[StoneIndex].TrackDistance < UnloadBeforeDistance;
+	};
+	const auto IsWorldLocationBehind = [this, TrackForward, UnloadBeforeDistance](const FVector& Location)
+	{
+		return FVector::DotProduct(Location - Config->TrackOrigin, TrackForward)
+			< UnloadBeforeDistance;
+	};
 	for (int32 StoneIndex = FirstKeepStone;
 		StoneIndex < StoneSpecs.Num() && StoneIndex <= LastSpawnStone;
 		++StoneIndex)
 	{
-		if (StoneSpecs[StoneIndex].bForkConnectorVisualOnly
-			|| StoneIndex >= FirstKeepStone)
+		if (!IsPassedStoneBehind(StoneIndex))
 		{
 			SpawnStoneActor(StoneIndex);
 		}
@@ -4849,9 +4918,13 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 	for (int32 BridgeIndex = 0; BridgeIndex < BridgeSpecs.Num(); ++BridgeIndex)
 	{
 		const FNightBridgeSpec& Bridge = BridgeSpecs[BridgeIndex];
-		if (Bridge.bForkConnectorVisualOnly
-			|| (Bridge.ToStoneIndex >= FirstKeepStone
-				&& Bridge.ToStoneIndex <= LastSpawnStone))
+		const bool bBehindUnloadBoundary = Bridge.ToStoneIndex != INDEX_NONE
+			? IsPassedStoneBehind(Bridge.ToStoneIndex)
+			: IsWorldLocationBehind(Bridge.WorldLocation);
+		if (!bBehindUnloadBoundary
+			&& (Bridge.bForkConnectorVisualOnly
+				|| (Bridge.ToStoneIndex >= FirstKeepStone
+					&& Bridge.ToStoneIndex <= LastSpawnStone)))
 		{
 			SpawnBridgeActor(BridgeIndex);
 		}
@@ -4862,9 +4935,11 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 	{
 		const FNightAtomVisualBinding& Binding = VisualBindings[BindingIndex];
 		bool bShouldSpawn = Binding.bForkConnectorVisualOnly;
+		int32 OwnerStoneIndex = Binding.StoneIndex;
 		if (Binding.bIsBridge && BridgeSpecs.IsValidIndex(Binding.BridgeIndex))
 		{
 			const int32 ToStoneIndex = BridgeSpecs[Binding.BridgeIndex].ToStoneIndex;
+			OwnerStoneIndex = ToStoneIndex;
 			bShouldSpawn = bShouldSpawn
 				|| (ToStoneIndex >= FirstKeepStone
 					&& ToStoneIndex <= LastSpawnStone);
@@ -4874,17 +4949,29 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 			bShouldSpawn = Binding.StoneIndex >= FirstKeepStone
 				&& Binding.StoneIndex <= LastSpawnStone;
 		}
-		if (bShouldSpawn)
+		const bool bBehindUnloadBoundary = OwnerStoneIndex != INDEX_NONE
+			? IsPassedStoneBehind(OwnerStoneIndex)
+			: IsWorldLocationBehind(Binding.LocalTransform.GetLocation());
+		if (bShouldSpawn && !bBehindUnloadBoundary)
 		{
 			SpawnVisualBinding(BindingIndex);
 		}
 	}
 	SpawnRoadsideActors();
-	DestroyRuntimeActorsBeforeStone(FirstKeepStone);
+	DestroyRuntimeActorsBehindPlayer();
 }
 
 void UNightCourseDirector::UpdateRouteVisibility()
 {
+	// Streaming is also required on the shared base route. There is no active
+	// branch rule before the fork is selected, but CurrentStoneIndex still
+	// advances and must keep materialising the next runtime actor window.
+	StreamRuntimeCourseActors();
+	const float RoadsideDistanceCm = Config
+		? FMath::Max(1.f, Config->RuntimeRoadsideVisibleDistanceCm)
+		: 1.f;
+	UpdateRoadsideVisibility(ProgressDistance, RoadsideDistanceCm);
+
 	if (!bHasActiveRouteRule)
 	{
 		return;
@@ -4918,7 +5005,6 @@ void UNightCourseDirector::UpdateRouteVisibility()
 			<= VisibleDistanceCm;
 	};
 
-	StreamRuntimeCourseActors();
 	for (int32 StoneIndex = 0; StoneIndex < SpawnedStones.Num(); ++StoneIndex)
 	{
 		if (SpawnedStones[StoneIndex])
@@ -5016,7 +5102,6 @@ void UNightCourseDirector::UpdateRouteVisibility()
 			SpawnedForkAtoms[ForkIndex]->SetActorEnableCollision(bVisible);
 		}
 	}
-	UpdateRoadsideVisibility(RunnerDistance, VisibleDistanceCm);
 }
 void UNightCourseDirector::RevealRemainingBranchCourse()
 {
@@ -5026,6 +5111,19 @@ void UNightCourseDirector::RevealRemainingBranchCourse()
 	}
 
 	bBranchRemainderLoaded = true;
+	const float DashSeconds = FMath::Max(
+		0.f,
+		ActiveBootstrap.GiftBuffs.PostForkInvulnerableSeconds);
+	if (DashSeconds > 0.f)
+	{
+		GiftDashInvulnerableEndTime = ElapsedSeconds + DashSeconds;
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[Gift][BossPie] Post-fork invulnerability started for %.2fs (ends at %.2fs)."),
+			DashSeconds,
+			GiftDashInvulnerableEndTime);
+	}
 	UE_LOG(
 		LogTemp,
 		Display,
@@ -5037,9 +5135,6 @@ void UNightCourseDirector::UpdateRoadsideVisibility(
 	const float RunnerDistance,
 	const float VisibleDistanceCm)
 {
-	const bool bUseBranchDistance = bBranchSelected;
-	const int32 LastVisibleStone = CurrentStoneIndex
-		+ FMath::Max(1, ActiveRouteRule.VisibleBlockCount);
 	const FVector TrackForward = Config
 		&& !Config->TrackForward.GetSafeNormal().IsNearlyZero()
 		? Config->TrackForward.GetSafeNormal()
@@ -5055,27 +5150,99 @@ void UNightCourseDirector::UpdateRoadsideVisibility(
 			continue;
 		}
 		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[Index];
-		float TrackDistance = Spec.DistanceAlongPath;
-		if (StoneSpecs.IsValidIndex(Spec.ToStoneIndex))
-		{
-			TrackDistance = StoneSpecs[Spec.ToStoneIndex].TrackDistance;
-		}
-		else
-		{
-			TrackDistance = FVector::DotProduct(
+		const float TrackDistance = StoneSpecs.IsValidIndex(Spec.ToStoneIndex)
+			? StoneSpecs[Spec.ToStoneIndex].TrackDistance
+			: FVector::DotProduct(
 				Spec.WorldTransform.GetLocation() - TrackOrigin,
 				TrackForward);
-		}
-		const bool bVisible = bUseBranchDistance
-			? FMath::Abs(TrackDistance - RunnerDistance)
-				<= VisibleDistanceCm
-			: (Spec.ToStoneIndex == INDEX_NONE
-				|| Spec.ToStoneIndex <= LastVisibleStone);
+		const bool bVisible = FMath::Abs(TrackDistance - RunnerDistance)
+			<= FMath::Max(1.f, VisibleDistanceCm);
 		SpawnedRoadsideActors[Index]->SetActorHiddenInGame(!bVisible);
 		SpawnedRoadsideActors[Index]->SetActorEnableCollision(false);
 	}
 }
+float UNightCourseDirector::ApplyGiftAwareSoulPenalty(
+	const float Amount,
+	const ENightJudgeOutcome Reason,
+	const bool bCanConsumeShield,
+	const bool bAffectedByDashInvulnerability,
+	const TCHAR* Source)
+{
+	INightFeelBridge* Feel = GetFeel();
+	if (!Feel || Amount <= 0.f)
+	{
+		return Feel
+			? INightFeelBridge::Execute_GetSoul(FeelBridgeObject)
+			: 0.f;
+	}
 
+	if (bAffectedByDashInvulnerability
+		&& ElapsedSeconds < GiftDashInvulnerableEndTime)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[Gift][BossPie] Blocked %.2f Soul damage from %s (%.2fs remaining)."),
+			Amount,
+			Source ? Source : TEXT("Unknown"),
+			GiftDashInvulnerableEndTime - ElapsedSeconds);
+		return INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+	}
+
+	if (bCanConsumeShield && RemainingGiftShieldCharges > 0)
+	{
+		--RemainingGiftShieldCharges;
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[Gift][BlessedAmulet] Shield blocked %.2f Soul damage from %s; %d charge(s) remain."),
+			Amount,
+			Source ? Source : TEXT("Unknown"),
+			RemainingGiftShieldCharges);
+		return INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+	}
+
+	INightFeelBridge::Execute_ApplySoulPenalty(
+		FeelBridgeObject,
+		Amount,
+		Reason);
+	TryTriggerNearDeathGift();
+	return INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+}
+
+void UNightCourseDirector::TryTriggerNearDeathGift()
+{
+	if (bNearDeathGiftConsumed
+		|| ActiveBootstrap.GiftBuffs.NearDeathHealAmount <= 0.f
+		|| ActiveBootstrap.GiftBuffs.NearDeathThreshold <= 0.f)
+	{
+		return;
+	}
+	INightFeelBridge* Feel = GetFeel();
+	if (!Feel)
+	{
+		return;
+	}
+	const float BeforeSoul = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+	if (BeforeSoul > ActiveBootstrap.GiftBuffs.NearDeathThreshold)
+	{
+		return;
+	}
+
+	bNearDeathGiftConsumed = true;
+	INightFeelBridge::Execute_RestoreSoul(
+		FeelBridgeObject,
+		ActiveBootstrap.GiftBuffs.NearDeathHealAmount,
+		Config ? Config->StartingSoul : BeforeSoul + ActiveBootstrap.GiftBuffs.NearDeathHealAmount);
+	const float AfterSoul = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[Gift][WildMilk] Near-death heal consumed: Soul %.2f -> %.2f (threshold %.2f)."),
+		BeforeSoul,
+		AfterSoul,
+		ActiveBootstrap.GiftBuffs.NearDeathThreshold);
+}
 void UNightCourseDirector::UpdateRouteEffects(float DeltaTime)
 {
 	if (!bHasActiveRouteRule
@@ -5107,12 +5274,14 @@ void UNightCourseDirector::UpdateRouteEffects(float DeltaTime)
 		const float DrainScale = Config
 			? FMath::Max(0.f, Config->ForkSoulDrainScale)
 			: 1.f;
-		INightFeelBridge::Execute_ApplySoulPenalty(
-			FeelBridgeObject,
+		ApplyGiftAwareSoulPenalty(
 			ActiveRouteRule.DotSoulPerSecond
 				* DrainScale
 				* FMath::Max(0.f, DeltaTime),
-			ENightJudgeOutcome::Miss);
+			ENightJudgeOutcome::Miss,
+			false,
+			true,
+			TEXT("RouteDoT"));
 		if (INightFeelBridge::Execute_GetSoul(FeelBridgeObject) <= 0.f)
 		{
 			BeginFailure(TEXT("Soul reached zero from the active route effect."));
@@ -5138,6 +5307,7 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		return;
 	}
+	TryTriggerNearDeathGift();
 	if (INightFeelBridge* Feel = GetFeel())
 	{
 		if (INightFeelBridge::Execute_GetSoul(FeelBridgeObject) <= 0.f)
@@ -5226,19 +5396,18 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 		Result.bSuccess = true;
 		Result.bFailedMidway = false;
 		Result.RouteTaken = CurrentRoute;
-		Result.Ingredients = CollectedIngredients;
+		TArray<FIngredientFloatStack> FinalCollectedAmounts = CollectedIngredients;
 		if (bHasActiveRouteRule && ActiveRouteRule.CarryOutBonus > 0.f)
 		{
-			for (const FIngredientStack& Stack : BranchCollectedIngredients)
+			for (const FIngredientFloatStack& Stack : BranchCollectedIngredients)
 			{
-				AddDropToArray(
-					Result.Ingredients,
+				AddFloatDropBonus(
+					FinalCollectedAmounts,
 					Stack.Id,
-					FMath::CeilToInt(
-						static_cast<float>(Stack.Count)
-						* ActiveRouteRule.CarryOutBonus));
+					Stack.Amount * ActiveRouteRule.CarryOutBonus);
 			}
 		}
+		Result.Ingredients = QuantizeCollectedIngredients(FinalCollectedAmounts);
 		if (ActiveBootstrap.GiftBuffs.bTaotieBox
 			&& ActiveBootstrap.GiftBuffs.TaotieLockIngredient != EIngredientId::None)
 		{
@@ -5273,40 +5442,107 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 	}
 }
 
-void UNightCourseDirector::AddDrop(EIngredientId Id, int32 Count)
+void UNightCourseDirector::AddDrop(EIngredientId Id, float Amount)
 {
-	if (Id == EIngredientId::None || Count <= 0)
+	if (Id == EIngredientId::None || Amount <= 0.f)
 	{
 		return;
 	}
-	AddDropToArray(CollectedIngredients, Id, Count);
+
+	float AppliedAmount = Amount;
+	if (!bBranchSelected
+		&& ActiveBootstrap.GiftBuffs.PreForkGatherAmountBonus > 0.f)
+	{
+		AppliedAmount *= 1.f
+			+ ActiveBootstrap.GiftBuffs.PreForkGatherAmountBonus;
+	}
+	AddDropToArray(CollectedIngredients, Id, AppliedAmount);
 	if (bBranchSelected)
 	{
-		AddDropToArray(BranchCollectedIngredients, Id, Count);
+		AddDropToArray(BranchCollectedIngredients, Id, AppliedAmount);
 	}
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Drop] Id=%d base=%.3f applied=%.3f preForkBonus=%.2f runningTotalFloat=%.3f."),
+		static_cast<int32>(Id),
+		Amount,
+		AppliedAmount,
+		!bBranchSelected ? ActiveBootstrap.GiftBuffs.PreForkGatherAmountBonus : 0.f,
+		[&]()
+		{
+			for (const FIngredientFloatStack& Stack : CollectedIngredients)
+			{
+				if (Stack.Id == Id)
+				{
+					return Stack.Amount;
+				}
+			}
+			return 0.f;
+		}());
 }
 
 void UNightCourseDirector::AddDropToArray(
-	TArray<FIngredientStack>& Target,
+	TArray<FIngredientFloatStack>& Target,
 	EIngredientId Id,
-	int32 Count) const
+	float Amount) const
 {
-	if (Id == EIngredientId::None || Count <= 0)
+	if (Id == EIngredientId::None || Amount <= 0.f)
 	{
 		return;
 	}
-	for (FIngredientStack& Stack : Target)
+	for (FIngredientFloatStack& Stack : Target)
 	{
 		if (Stack.Id == Id)
 		{
-			Stack.Count += Count;
+			Stack.Amount += Amount;
 			return;
 		}
 	}
-	FIngredientStack NewStack;
+	FIngredientFloatStack NewStack;
 	NewStack.Id = Id;
-	NewStack.Count = Count;
+	NewStack.Amount = Amount;
 	Target.Add(NewStack);
+}
+
+void UNightCourseDirector::AddFloatDropBonus(
+	TArray<FIngredientFloatStack>& Target,
+	EIngredientId Id,
+	float Amount) const
+{
+	AddDropToArray(Target, Id, Amount);
+}
+
+TArray<FIngredientStack> UNightCourseDirector::QuantizeCollectedIngredients(
+	const TArray<FIngredientFloatStack>& Source) const
+{
+	TArray<FIngredientStack> Result;
+	for (const FIngredientFloatStack& FloatStack : Source)
+	{
+		if (FloatStack.Id == EIngredientId::None || FloatStack.Amount <= 0.f)
+		{
+			continue;
+		}
+		const int32 WholeCount = FMath::Max(
+			0,
+			FMath::FloorToInt(FloatStack.Amount + KINDA_SMALL_NUMBER));
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][DropQuantize] Id=%d float=%.3f -> DayCount=%d (floor at Night->Day boundary)."),
+			static_cast<int32>(FloatStack.Id),
+			FloatStack.Amount,
+			WholeCount);
+		if (WholeCount <= 0)
+		{
+			continue;
+		}
+		FIngredientStack Stack;
+		Stack.Id = FloatStack.Id;
+		Stack.Count = WholeCount;
+		Result.Add(Stack);
+	}
+	return Result;
 }
 
 void UNightCourseDirector::FinishNight(const FNightResult& Result)
@@ -5381,7 +5617,7 @@ void UNightCourseDirector::BeginFailure(const FString& Reason)
 	Result.bSuccess = false;
 	Result.bFailedMidway = true;
 	Result.RouteTaken = CurrentRoute;
-	Result.Ingredients = CollectedIngredients;
+	Result.Ingredients = QuantizeCollectedIngredients(CollectedIngredients);
 	Result.SoulLeft = Config ? Config->StartingSoul : 0.f;
 	if (INightFeelBridge* Feel = GetFeel())
 	{
@@ -5429,6 +5665,10 @@ void UNightCourseDirector::ResetCourse()
 	bBuildingRuntimeCourse = false;
 	bForkPending = false;
 	bBranchSelected = false;
+	bSpareLampConsumed = false;
+	RemainingGiftShieldCharges = 0;
+	GiftDashInvulnerableEndTime = 0.f;
+	bNearDeathGiftConsumed = false;
 	bBranchRemainderLoaded = false;
 	bHasActiveRouteRule = false;
 	BranchBeatCount = 0;
@@ -5453,7 +5693,7 @@ void UNightCourseDirector::DebugForceFinish(bool bSuccess)
 	Result.bSuccess = bSuccess;
 	Result.bFailedMidway = !bSuccess;
 	Result.RouteTaken = CurrentRoute;
-	Result.Ingredients = CollectedIngredients;
+	Result.Ingredients = QuantizeCollectedIngredients(CollectedIngredients);
 	if (!bSuccess)
 	{
 		LastFailureReason = TEXT("DebugForceFinish(false).");

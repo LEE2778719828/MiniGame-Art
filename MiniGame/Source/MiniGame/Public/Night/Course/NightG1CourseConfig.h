@@ -143,8 +143,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "前方预生成距离", ToolTip = "主路运行时玩家前方预先生成的石块数量；数量越大越平滑但占用更多内存。", ClampMin = "1"))
 	int32 RuntimeSpawnAheadStoneCount = 8;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "身后保留距离", ToolTip = "玩家已经走过后仍保留的石块数量；更远的石块、桥、道路装饰会 Destroy。", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "兼容身后保留石块数", ToolTip = "旧版按石块数量卸载的兼容字段；运行时改用下面的身后 Actor 卸载距离。", ClampMin = "0"))
 	int32 RuntimeUnloadBehindStoneCount = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "身后Actor卸载距离", ToolTip = "已经走过的课程 Actor 超出该纵向距离后立即 Destroy，单位 cm。", ClampMin = "0.0"))
+	float RuntimeUnloadBehindDistanceCm = 800.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "Roadside可见距离", ToolTip = "Roadside Actor 使用的独立前后可见和生成距离，单位 cm。", ClampMin = "1.0"))
+	float RuntimeRoadsideVisibleDistanceCm = 4500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "岔路逐批生成数量", ToolTip = "选择岔路后每次只向前生成这么多石块；1 表示逐个生成，用于降低选路瞬间卡顿。", ClampMin = "1"))
 	int32 BranchSpawnBatchSize = 1;
