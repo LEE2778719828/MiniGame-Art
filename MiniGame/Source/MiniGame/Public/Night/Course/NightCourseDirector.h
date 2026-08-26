@@ -13,6 +13,7 @@
 class UNightG1CourseConfig;
 class ANightCourseStoneActor;
 class ANightBridgeSegmentActor;
+class ANightCourseForkAtomActor;
 class ANightCoursePawn;
 class ANightRoadsideSegmentActor;
 class AActor;
@@ -114,6 +115,13 @@ public:
 		TArray<FNightBridgeSpec>& OutBridges,
 		TArray<FNightAtomVisualBinding>& OutVisualBindings) const;
 
+	bool BuildCourseForPreview(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges,
+		TArray<FNightAtomVisualBinding>& OutVisualBindings,
+		TArray<FNightForkAtomSpec>& OutForkAtoms) const;
+
 	/** Builds roadside placements for either the current course or preview arrays. */
 	bool BuildRoadsideSpecs(
 		TArray<FNightRoadsidePropSpec>& OutSpecs) const;
@@ -121,6 +129,12 @@ public:
 	bool BuildRoadsideSpecs(
 		const TArray<FNightStoneSpec>& InStones,
 		const TArray<FNightBridgeSpec>& InBridges,
+		TArray<FNightRoadsidePropSpec>& OutSpecs) const;
+
+	bool BuildRoadsideSpecs(
+		const TArray<FNightStoneSpec>& InStones,
+		const TArray<FNightBridgeSpec>& InBridges,
+		const TArray<FNightForkAtomSpec>& InForkAtoms,
 		TArray<FNightRoadsidePropSpec>& OutSpecs) const;
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
@@ -174,6 +188,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
 	ENightRouteId GetCurrentRoute() const { return CurrentRoute; }
 
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Route")
+	ENightRouteId GetActiveDefaultRoute() const { return ActiveDefaultRoute; }
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course|Fork")
 	int32 GetBranchBeatCount() const { return BranchBeatCount; }
 
@@ -202,7 +219,7 @@ public:
 	bool IsCourseFailed() const { return Phase == ENightCoursePhase::Failed; }
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
-	const TArray<FIngredientStack>& GetCollectedIngredients() const { return CollectedIngredients; }
+	const TArray<FIngredientFloatStack>& GetCollectedIngredients() const { return CollectedIngredients; }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -252,6 +269,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Visual")
 	TArray<FNightAtomVisualBinding> VisualBindings;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
+	TArray<FNightForkAtomSpec> ForkAtomSpecs;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Roadside")
 	TArray<FNightRoadsidePropSpec> RoadsideSpecs;
 
@@ -264,17 +284,26 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Visual")
 	TArray<TObjectPtr<AActor>> SpawnedVisualActors;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
+	TArray<TObjectPtr<ANightCourseForkAtomActor>> SpawnedForkAtoms;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Roadside")
 	TArray<TObjectPtr<ANightRoadsideSegmentActor>> SpawnedRoadsideActors;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course")
-	TArray<FIngredientStack> CollectedIngredients;
+	TArray<FIngredientFloatStack> CollectedIngredients;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Drops")
-	TArray<FIngredientStack> BranchCollectedIngredients;
+	TArray<FIngredientFloatStack> BranchCollectedIngredients;
+
+	/** Runtime-only translation used to rebase the selected branch near X=0. */
+	FVector CourseWorldOffset = FVector::ZeroVector;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
 	ENightRouteId CurrentRoute = ENightRouteId::None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Route")
+	ENightRouteId ActiveDefaultRoute = ENightRouteId::A;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Fork")
 	ENightForkPair ActiveForkPair = ENightForkPair::AB;
@@ -308,7 +337,11 @@ protected:
 	bool bForkPending = false;
 	bool bBranchSelected = false;
 	bool bSpareLampConsumed = false;
+	int32 RemainingGiftShieldCharges = 0;
+	float GiftDashInvulnerableEndTime = 0.f;
+	bool bNearDeathGiftConsumed = false;
 	bool bBranchTransitionConsumed = false;
+	bool bBranchRemainderLoaded = false;
 	bool bBranchHasExplicitTransitionBeat = true;
 	int32 BaseBeatCount = 0;
 	int32 BranchTransitionBeatIndex = INDEX_NONE;
@@ -338,8 +371,21 @@ protected:
 	void ApplyKeySwapCue(const FNightKeySwapCue& Cue);
 	bool HasPendingKeySwap() const;
 	void UpdateRouteEffects(float DeltaTime);
+	float ApplyGiftAwareSoulPenalty(
+		float Amount,
+		ENightJudgeOutcome Reason,
+		bool bCanConsumeShield,
+		bool bAffectedByDashInvulnerability,
+		const TCHAR* Source);
+	void TryTriggerNearDeathGift();
 	void UpdateRouteVisibility();
-	void UpdateRoadsideVisibility(int32 LastVisibleStone);
+	void RevealRemainingBranchCourse();
+	void UpdateRoadsideVisibility(float RunnerDistance, float VisibleDistanceCm);
+	bool IsRuntimeActorStreamingEnabled() const;
+	int32 GetRuntimeSpawnThroughStone() const;
+	int32 GetRuntimeKeepFromStone() const;
+	void StreamRuntimeCourseActors();
+	void DestroyRuntimeActorsBehindPlayer();
 	void HandleFailedInput(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginFailure(const FString& Reason);
 	bool HasBranchQueueForRoute(ENightRouteId RouteId) const;
@@ -352,24 +398,52 @@ protected:
 		TArray<FNightBeatSpec>& OutBeats,
 		TArray<FNightBridgeSpec>& OutBridges,
 		TArray<FNightAtomVisualBinding>& OutVisualBindings) const;
+	bool BuildAtomRouteCourse(
+		TArray<FNightStoneSpec>& OutStones,
+		TArray<FNightBeatSpec>& OutBeats,
+		TArray<FNightBridgeSpec>& OutBridges,
+		TArray<FNightAtomVisualBinding>& OutVisualBindings,
+		TArray<FNightForkAtomSpec>& OutForkAtoms) const;
 	void SpawnStoneActor(int32 Index);
 	void SpawnBridgeActor(int32 Index);
 	void SpawnVisualBinding(int32 BindingIndex);
+	void SpawnForkAtom(int32 Index);
 	void SetStoneFoeVisibility(int32 StoneIndex, bool bVisible);
 	bool IsAtomTransformInsideLayoutBounds(
 		const ANightCourseAtomActor* AtomDefaults,
 		const FTransform& AtomWorld) const;
+	bool TryTranslateAtomAlongDirectionIntoLayoutBounds(
+		const ANightCourseAtomActor* AtomDefaults,
+		const FVector& WorldDirection,
+		FTransform& InOutAtomWorld) const;
 	bool TryTranslateAtomYIntoLayoutBounds(
 		const ANightCourseAtomActor* AtomDefaults,
 		FTransform& InOutAtomWorld) const;
+	bool IsLocalArtBoundsInsideLayoutBounds(
+		const FVector& LocalMin,
+		const FVector& LocalMax,
+		const FTransform& WorldTransform) const;
+	bool TryTranslateLocalArtBoundsYIntoLayoutBounds(
+		const FVector& LocalMin,
+		const FVector& LocalMax,
+		FTransform& InOutWorldTransform) const;
 	void TryOpenBeat(int32 BeatIndex);
 	void ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginAdvanceToStone(int32 StoneIndex);
 	void OnAdvanceArrived();
 	void OpenNextBeatOrExit();
 	void SyncPawnToProgress(bool bInstant);
-	void AddDrop(EIngredientId Id, int32 Count);
-	void AddDropToArray(TArray<FIngredientStack>& Target, EIngredientId Id, int32 Count) const;
+	void AddDrop(EIngredientId Id, float Amount);
+	void AddDropToArray(
+		TArray<FIngredientFloatStack>& Target,
+		EIngredientId Id,
+		float Amount) const;
+	void AddFloatDropBonus(
+		TArray<FIngredientFloatStack>& Target,
+		EIngredientId Id,
+		float Amount) const;
+	TArray<FIngredientStack> QuantizeCollectedIngredients(
+		const TArray<FIngredientFloatStack>& Source) const;
 	FVector GetTrackLocation(float Distance) const;
 	FVector GetStoneWorldLocation(int32 StoneIndex) const;
 	INightFeelBridge* GetFeel() const;

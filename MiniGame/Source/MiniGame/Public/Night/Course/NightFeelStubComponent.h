@@ -187,6 +187,7 @@ public:
 	virtual ENightJudgeOutcome TryResolveInput_Implementation(ENightFeelInput Input) override;
 	virtual float GetSoul_Implementation() const override;
 	virtual void ApplySoulPenalty_Implementation(float Amount, ENightJudgeOutcome Reason) override;
+	virtual void RestoreSoul_Implementation(float Amount, float MaxSoul) override;
 	virtual void PlaySuccessFeedback_Implementation(ENightNodeKind Kind) override;
 	virtual void PlayFailFeedback_Implementation(ENightJudgeOutcome Outcome, ENightNodeKind Kind) override;
 	virtual void SetControlScheme_Implementation(ENightControlScheme Scheme) override;

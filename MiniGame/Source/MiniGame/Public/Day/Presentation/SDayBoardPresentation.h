@@ -13,6 +13,7 @@ class UBorder;
 class UButton;
 class UCheckBox; //add by K2
 class UCanvasPanelSlot;
+class USDaySettlementWidget;
 class UCameraComponent;
 class UDirectionalLightComponent;
 class UImage;
@@ -587,6 +588,8 @@ protected:
 
 private:
 	void BuildWidgetTree();
+	void RefreshSettlement(const USChefGameInstance& GameInstance);
+	void RestoreDayInputMode();
 
 	UFUNCTION()
 	void Refresh();
@@ -661,6 +664,15 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UButton> FlowButton;
+
+	/** Assign /Game/Day/UI/Settlement/WBP_DaySettlement in WBP_SDayHUD defaults. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Day|Settlement", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<USDaySettlementWidget> SettlementWidgetClass;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USDaySettlementWidget> SettlementWidget;
+
+	bool bSettlementClassWarningLogged = false;
 
 #pragma region K2 moonyfli
 	UPROPERTY()

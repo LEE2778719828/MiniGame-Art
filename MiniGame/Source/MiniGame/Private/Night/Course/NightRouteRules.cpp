@@ -96,6 +96,7 @@ bool UNightRouteRulesAsset::ValidateRules(FString& OutError) const
 		}
 		SeenRoutes.Add(Row.RouteId);
 		if (Row.VisibleBlockCount <= 0
+			|| Row.VisibleDistanceCm <= 0.f
 			|| Row.SoulPenaltyScale < 0.f
 			|| Row.DotSoulPerSecond < 0.f
 			|| Row.EnterDropCount < 0

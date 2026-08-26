@@ -13,6 +13,7 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCourseHUD.h"
+#include "Night/Course/NightCourseDirector.h"
 #include "InputCoreTypes.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -114,14 +115,9 @@ ANightCoursePawn::ANightCoursePawn()
 		AttackAnim = AttackClip.Object;
 	}
 
-	// add by K2 (R1): fail shake wraps CA_CameraShake_Return; land/takeoff kicks stay notify-driven.
-	static ConstructorHelpers::FClassFinder<UCameraShakeBase> FailShakeClass(
-		TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return"));
-	if (FailShakeClass.Succeeded())
-	{
-		FailCameraShake = FailShakeClass.Class;
-	}
-
+	// Do not synchronously load the camera-shake Blueprint while constructing the CDO.
+	// The asset references a Level Sequence and can request Typed Elements before the
+	// registry exists during commandlet cooking. It is resolved on the first real use below.
 	// 刃心-style: behind + above the runner, looking forward down the lane.
 	// These are only the native defaults now. BP_NightCoursePawn may override any of them on the
 	// component and the override survives to runtime.
@@ -625,7 +621,13 @@ void ANightCoursePawn::PlayFailCameraShake()
 {
 	if (!FailCameraShake)
 	{
-		return;
+		FailCameraShake = LoadClass<UCameraShakeBase>(
+			nullptr,
+			TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return.CS_CameraShake_Return_C"));
+		if (!FailCameraShake)
+		{
+			return;
+		}
 	}
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC)
@@ -804,7 +806,7 @@ void ANightCoursePawn::OnHudTouchPressed(const ETouchIndex::Type FingerIndex, co
 
 void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
 {
-	if (!FeelStub)
+	if (!FeelStub && !CourseDirector)
 	{
 		return;
 	}
@@ -821,6 +823,22 @@ void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
 
 	ENightFeelInput Input = ENightFeelInput::Jump;
 	if (!ANightCourseHUD::HitTestActionButtons(ScreenX, ScreenY, static_cast<float>(ViewX), static_cast<float>(ViewY), Input))
+	{
+		return;
+	}
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
+	{
+		if (Input == ENightFeelInput::Jump)
+		{
+			CourseDirector->ChooseForkLeft();
+		}
+		else
+		{
+			CourseDirector->ChooseForkRight();
+		}
+		return;
+	}
+	if (!FeelStub)
 	{
 		return;
 	}
@@ -885,6 +903,11 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 {
 	(void)Value;
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
+	{
+		CourseDirector->ChooseForkLeft();
+		return;
+	}
 	if (FeelStub)
 	{
 		// add by K2 (R1): 移动中的输入不再丢弃，由 Feel 决定缓存 / 忽略 / 判定
@@ -907,6 +930,11 @@ void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 		}
 	}
 
+	if (CourseDirector && CourseDirector->IsForkChoiceActive())
+	{
+		CourseDirector->ChooseForkRight();
+		return;
+	}
 	if (FeelStub)
 	{
 		FeelStub->TryResolveInput_Implementation(ENightFeelInput::Attack);

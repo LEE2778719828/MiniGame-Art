@@ -421,6 +421,16 @@ void UNightFeelStubComponent::ApplySoulPenalty_Implementation(float Amount, ENig
 	OnDebugSoulChanged.Broadcast(Soul, LastOutcome);
 }
 
+void UNightFeelStubComponent::RestoreSoul_Implementation(float Amount, float MaxSoul)
+{
+	if (Amount <= 0.f)
+	{
+		return;
+	}
+	Soul = FMath::Clamp(Soul + Amount, 0.f, FMath::Max(0.f, MaxSoul));
+	OnDebugSoulChanged.Broadcast(Soul, LastOutcome);
+}
+
 void UNightFeelStubComponent::PlaySuccessFeedback_Implementation(ENightNodeKind Kind)
 {
 	const bool bAttack = (Kind == ENightNodeKind::Enemy);

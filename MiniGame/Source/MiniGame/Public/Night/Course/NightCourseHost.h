@@ -35,45 +35,45 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course")
 	TObjectPtr<UNightCourseDirector> Director;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course", meta = (DisplayName = "课程配置DA", ToolTip = "运行时课程配置；必须与 GameMode 的 CourseConfig 指向同一个 DA_Course。"))
 	TObjectPtr<UNightG1CourseConfig> Config;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course", meta = (DisplayName = "备用启动Bootstrap", ToolTip = "未接入 Day 流程时使用的备用启动参数；接入 Day 后路线由 DT_GameStages 传入。"))
 	FNightBootstrap Bootstrap;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Debug", meta = (DisplayName = "自动开始", ToolTip = "BeginPlay 时是否自动启动 Night 课程。"))
 	bool bAutoStart = true;
 
 	/** Use USChefGameInstance's Night → Day inventory and retry flow when present. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "使用Day流程", ToolTip = "开启后从 USChefGameInstance 读取 DT_GameStages 的 DefaultRoute/ForkPair/Seed。"))
 	bool bUseChefDayFlow = true;
 
 	/** Automatically restart a run after a gameplay failure. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "失败自动重试", ToolTip = "Night 中途失败后是否自动重新开始。"))
 	bool bAutoRetryOnFailure = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (ClampMin = "0.05"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "自动重试延迟", ToolTip = "失败到自动重试之间的等待时间，单位秒。", ClampMin = "0.05"))
 	float AutoRetryDelaySeconds = 0.5f;
 
 	/** Open the configured Day level after a successful Night run. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功后切Day", ToolTip = "Night 成功后是否打开配置的 Day 关卡。"))
 	bool bTravelToDayOnSuccess = true;
 
 	/** Primary per-level Day destination. Leave empty to use the GameMode fallback. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功Day关卡", ToolTip = "Night 成功后要打开的 Day World；为空时使用 GameMode 回退。"))
 	TSoftObjectPtr<UWorld> SuccessDayLevel;
 
 	/** Optional GameMode override for the configured Day destination. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功Day GameMode", ToolTip = "成功进入 Day 时可选的 GameMode 覆盖。"))
 	TSoftClassPtr<AGameModeBase> SuccessDayGameMode;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course|Layout")
 	TObjectPtr<UBoxComponent> LayoutBounds;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout", meta = (DisplayName = "启用LayoutBounds", ToolTip = "开启后普通 Atom 会检查是否落在 LayoutBounds 内；特殊岔路和分支可按规则绕过。"))
 	bool bEnforceLayoutBounds = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course|Layout", meta = (DisplayName = "LayoutBounds半尺寸", ToolTip = "Bounds 的半尺寸，单位 cm；中心是 Bounds 组件位置。普通课程必须能放入该范围。"))
 	FVector LayoutBoundsExtent = FVector(10000.f, 10000.f, 3000.f);
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Course|Debug")

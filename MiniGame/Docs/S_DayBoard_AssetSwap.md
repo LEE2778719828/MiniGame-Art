@@ -22,7 +22,7 @@
 | `BP_SDayCharacterStandIn` | 缺少场景座位时的白盒回退壳 | `CustomerMesh` / `NpcMesh` |
 | `WBP_SDayHUD` | 顶部订单/交付、营业额与开店倒计时、库存、谢礼页签、流程按钮 | Widget Blueprint 外观 |
 | `DT_SDayBoardLayout` | `/Game/Day/Data/` | 12 个逻辑格的世界位置与视觉半径 | 仅允许调 Transform/VisualRadius |
-| `DT_GameStages` | `/Game/Shared/Data/` | 关卡时长/目标/`CustomerConcurrentMax`（真实座位数）/刷客间隔/NPC 规则 | Day/Night 共用 |
+| `DT_GameStages` | `/Game/Shared/Data/` | 关卡时长/目标/`CustomerConcurrentMax`（真实座位数）/刷客间隔/NPC 规则/ Night `DefaultRoute` + `ForkPair` | Day/Night 共用 |
 | `DT_SDayBalance` | `/Game/Shared/Data/` | 结转单价、最高菜级、订单槽与等级权重、饕餮怪权重、座位上限 | 单行 `Default` |
 | `DT_Recipes` | `/Game/Shared/Data/` | 菜品售价 | Day/Night 共用 |
 | `DT_Ingredients` / `DT_SpecialNpcs` / `DT_Gifts` / `DT_CustomerNames` | `/Game/Shared/Data/` | 食材名；特殊 NPC 委托规则/对白/谢礼；谢礼文案与下局数值（`EffectTrigger`/`EffectValue`）；普通顾客名池 | Day/Night 共用配置 |

@@ -6,6 +6,14 @@
 
 class AActor;
 
+UENUM(BlueprintType)
+enum class ENightForkLandingLane : uint8
+{
+	MainRoad UMETA(DisplayName = "Main Road"),
+	LeftBranch UMETA(DisplayName = "Left Branch"),
+	RightBranch UMETA(DisplayName = "Right Branch")
+};
+
 #pragma region K2 moonyfli
 /**
  * Persistent visual authoring slot inside an Atom BP.
@@ -34,6 +42,17 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing")
 	bool bEnabled = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing|Fork")
+	ENightForkLandingLane ForkLane = ENightForkLandingLane::MainRoad;
+
+	/**
+	 * Fork Atom only: when enabled, this landing point becomes an Enemy
+	 * target and the Director resolves its foe from DA_Course.FoeActorMap.
+	 * Regular Atoms continue to derive enemy targets from DA_Rules actions.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Atom|Landing")
+	bool bSpawnFoe = false;
 };
 
 /**

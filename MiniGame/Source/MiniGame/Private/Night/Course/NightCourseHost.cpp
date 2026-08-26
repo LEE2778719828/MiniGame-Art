@@ -303,15 +303,38 @@ namespace NightCourseStage_Private
 		return ENightForkPair::AB;
 	}
 
+	static ENightRouteId ToNightRouteId(const FName RouteId)
+	{
+		if (RouteId.IsNone() || RouteId.ToString().Equals(TEXT("A"), ESearchCase::IgnoreCase))
+		{
+			return ENightRouteId::A;
+		}
+		if (RouteId.ToString().Equals(TEXT("B"), ESearchCase::IgnoreCase))
+		{
+			return ENightRouteId::B;
+		}
+		if (RouteId.ToString().Equals(TEXT("C"), ESearchCase::IgnoreCase))
+		{
+			return ENightRouteId::C;
+		}
+		return ENightRouteId::None;
+	}
+
 	static FNightBootstrap MakeNightBootstrap(const FSNightBootstrap& Source)
 	{
 		FNightBootstrap Bootstrap;
 		Bootstrap.LevelId = ToNightLevelId(Source.LevelId);
+		Bootstrap.DefaultRoute = ToNightRouteId(Source.DefaultRoute);
 		Bootstrap.ForkPair = ToNightForkPair(Source.ForkPair);
 		Bootstrap.GiftBuffs.bGuideKite = Source.GiftBuffState.bGuideKite;
 		Bootstrap.GiftBuffs.bSpareLamp = Source.GiftBuffState.bLifeLamp;
 		Bootstrap.GiftBuffs.bKeyCoin = Source.GiftBuffState.bBeatCoin;
 		Bootstrap.GiftBuffs.bTaotieBox = Source.GiftBuffState.bGluttonBox;
+		Bootstrap.GiftBuffs.PreForkGatherAmountBonus = Source.GiftBuffState.PreForkGatherAmountBonus;
+		Bootstrap.GiftBuffs.MatchShieldCharges = Source.GiftBuffState.MatchShieldCharges;
+		Bootstrap.GiftBuffs.PostForkInvulnerableSeconds = Source.GiftBuffState.PostForkInvulnDashSeconds;
+		Bootstrap.GiftBuffs.NearDeathHealAmount = Source.GiftBuffState.NearDeathHeal;
+		Bootstrap.GiftBuffs.NearDeathThreshold = Source.GiftBuffState.NearDeathThreshold;
 		Bootstrap.Seed = Source.Seed;
 		return Bootstrap;
 	}
@@ -406,12 +429,14 @@ void ANightCourseHost::RebuildEditorPreview()
 	TArray<FNightBeatSpec> PreviewBeats;
 	TArray<FNightBridgeSpec> PreviewBridges;
 	TArray<FNightAtomVisualBinding> VisualBindings;
+	TArray<FNightForkAtomSpec> PreviewForkAtoms;
 	TArray<FNightRoadsidePropSpec> PreviewRoadsideSpecs;
 	if (!Director->BuildCourseForPreview(
 		PreviewStones,
 		PreviewBeats,
 		PreviewBridges,
-		VisualBindings))
+		VisualBindings,
+		PreviewForkAtoms))
 	{
 		UE_LOG(
 			LogTemp,
@@ -423,6 +448,7 @@ void ANightCourseHost::RebuildEditorPreview()
 	if (!Director->BuildRoadsideSpecs(
 		PreviewStones,
 		PreviewBridges,
+		PreviewForkAtoms,
 		PreviewRoadsideSpecs))
 	{
 		UE_LOG(
@@ -431,6 +457,34 @@ void ANightCourseHost::RebuildEditorPreview()
 			TEXT("[NightCourse][Stage=Preview] Roadside build failed for Config='%s'."),
 			*Config->GetPathName());
 		return;
+	}
+
+	for (int32 ForkIndex = 0; ForkIndex < PreviewForkAtoms.Num(); ++ForkIndex)
+	{
+		const FNightForkAtomSpec& ForkSpec = PreviewForkAtoms[ForkIndex];
+		if (!ForkSpec.ActorClass)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=Preview] Fork Atom %d has no Blueprint class."),
+				ForkIndex);
+			continue;
+		}
+		if (AActor* Actor = NightCourseStage_Private::SpawnEditorPreviewVisual(
+			GetWorld(),
+			ForkSpec.ActorClass.Get(),
+			ForkSpec.WorldTransform,
+			nullptr,
+			INDEX_NONE,
+			nullptr,
+			FString::Printf(
+				TEXT("EditorPreview_Fork_%d_%d"),
+				static_cast<int32>(ForkSpec.ForkPair),
+				ForkIndex)))
+		{
+			EditorPreviewMeshActors.Add(Actor);
+		}
 	}
 
 	TSet<int32> ArtBridgeIndexes;
@@ -607,11 +661,12 @@ void ANightCourseHost::RebuildEditorPreview()
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Preview] Rebuild complete stones=%d beats=%d bridges=%d visualBindings=%d roadside=%d spawnedPreviewActors=%d."),
+		TEXT("[NightCourse][Stage=Preview] Rebuild complete stones=%d beats=%d bridges=%d visualBindings=%d forkAtoms=%d roadside=%d spawnedPreviewActors=%d."),
 		PreviewStones.Num(),
 		PreviewBeats.Num(),
 		PreviewBridges.Num(),
 		VisualBindings.Num(),
+		PreviewForkAtoms.Num(),
 		PreviewRoadsideSpecs.Num(),
 		EditorPreviewMeshActors.Num());
 }
@@ -649,8 +704,9 @@ void ANightCourseHost::PrepareChefNightFlow()
 		UE_LOG(
 			LogTemp,
 			Display,
-			TEXT("[NightCourse][Stage=Flow] NightRunning established from Day flow: stage=%s seed=%d forkPair=%s."),
+			TEXT("[NightCourse][Stage=Flow] NightRunning established from Day flow: stage=%s defaultRoute=%s seed=%d forkPair=%s."),
 			*GameInstance->StageId.ToString(),
+			*GameInstance->GetPendingNightBootstrap().DefaultRoute.ToString(),
 			Bootstrap.Seed,
 			*GameInstance->GetPendingNightBootstrap().ForkPair.ToString());
 	}
@@ -934,11 +990,12 @@ bool ANightCourseHost::StartNight_Implementation(
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=StartRequest] Host='%s' Config='%s' Director='%s' Level=%d Seed=%d ForkPair=%d."),
+		TEXT("[NightCourse][Stage=StartRequest] Host='%s' Config='%s' Director='%s' Level=%d DefaultRoute=%d Seed=%d ForkPair=%d."),
 		*GetNameSafe(this),
 		Config ? *Config->GetPathName() : TEXT("<null>"),
 		*GetNameSafe(Director),
 		static_cast<int32>(Bootstrap.LevelId),
+		static_cast<int32>(Bootstrap.DefaultRoute),
 		Bootstrap.Seed,
 		static_cast<int32>(Bootstrap.ForkPair));
 	WireFeelFromPlayer();

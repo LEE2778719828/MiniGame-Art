@@ -57,33 +57,32 @@ bool ANightCourseHUD::HitTestActionButtons(
 
 ANightCourseHUD::ANightCourseHUD()
 {
-	static ConstructorHelpers::FClassFinder<UUserWidget> HealthBarClass(
-		TEXT("/Game/Night/Course/Blueprints/WBP_HealthBar"));
-	if (HealthBarClass.Succeeded())
+	static ConstructorHelpers::FClassFinder<UUserWidget> MainHUDClass(
+		TEXT("/Game/Night/Course/Blueprints/WBP_NightHUD_Multi"));
+	if (MainHUDClass.Succeeded())
 	{
-		HealthBarWidgetClass = HealthBarClass.Class;
+		MainHUDWidgetClass = MainHUDClass.Class;
 	}
 }
-
 void ANightCourseHUD::BeginPlay()
 {
 	Super::BeginPlay();
-	EnsureHealthBar();
+	EnsureMainHUD();
 }
 
 void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (HealthBarWidget)
+	HealthBarWidget = nullptr;
+	if (MainHUDWidget)
 	{
-		HealthBarWidget->RemoveFromParent();
-		HealthBarWidget = nullptr;
+		MainHUDWidget->RemoveFromParent();
+		MainHUDWidget = nullptr;
 	}
 	Super::EndPlay(EndPlayReason);
 }
-
-void ANightCourseHUD::EnsureHealthBar()
+void ANightCourseHUD::EnsureMainHUD()
 {
-	if (HealthBarWidget || !HealthBarWidgetClass)
+	if (MainHUDWidget || !MainHUDWidgetClass)
 	{
 		return;
 	}
@@ -92,22 +91,31 @@ void ANightCourseHUD::EnsureHealthBar()
 	{
 		return;
 	}
-	HealthBarWidget = CreateWidget<UUserWidget>(PC, HealthBarWidgetClass);
-	if (!HealthBarWidget)
+	MainHUDWidget = CreateWidget<UUserWidget>(PC, MainHUDWidgetClass);
+	if (!MainHUDWidget)
 	{
 		return;
 	}
-	HealthBarWidget->AddToViewport(20);
-	HealthBarPlacement = FVector2D(-1.f, -1.f);
-	HealthBarWidget->SetRenderTransformPivot(FVector2D(0.f, 0.f));
-	HealthBarWidget->SetRenderScale(FVector2D(HealthBarScale, HealthBarScale));
+	MainHUDWidget->AddToViewport(20);
+	MainHUDPlacement = FVector2D(-1.f, -1.f);
+	MainHUDWidget->SetRenderTransformPivot(FVector2D(0.f, 0.f));
+	MainHUDWidget->SetRenderScale(FVector2D(MainHUDScale, MainHUDScale));
 
+	HealthBarWidget = Cast<UUserWidget>(
+		MainHUDWidget->GetWidgetFromName(TEXT("WBP_HealthBar")));
+	if (!HealthBarWidget)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightHUD] WBP_NightHUD_Multi is missing its nested WBP_HealthBar widget; Soul falls back to Canvas text."));
+		return;
+	}
 	SetHealthBarNumeric(TEXT("FullBarWidth"), HealthBarDesignSize.X);
 }
-
-void ANightCourseHUD::UpdateHealthBarPlacement()
+void ANightCourseHUD::UpdateMainHUDPlacement()
 {
-	if (!HealthBarWidget)
+	if (!MainHUDWidget)
 	{
 		return;
 	}
@@ -137,20 +145,25 @@ void ANightCourseHUD::UpdateHealthBarPlacement()
 	}
 
 	const FVector2D Placement(
-		FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi + HealthBarLeftMargin,
-		FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi + HealthBarTopMargin);
+		FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi + MainHUDLeftMargin,
+		FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi + MainHUDTopMargin);
 
-	if (Placement.Equals(HealthBarPlacement)
-		&& FMath::IsNearlyEqual(HealthBarWidget->GetRenderTransform().Scale.X, HealthBarScale))
+	// MainHUDScale is authored against the 1920x1080 design space.
+	// The global UMG DPI scale is already applied by Slate; compensate it here so portrait
+	// devices do not shrink the HUD a second time under UIScaleRule=ShortestSide.
+	const float EffectiveHUDScale = MainHUDScale / Dpi;
+	if (Placement.Equals(MainHUDPlacement)
+		&& FMath::IsNearlyEqual(MainHUDWidget->GetRenderTransform().Scale.X, EffectiveHUDScale))
 	{
 		return;
 	}
 
-	HealthBarWidget->SetRenderScale(FVector2D(HealthBarScale, HealthBarScale));
-	HealthBarWidget->SetRenderTranslation(Placement);
-	HealthBarPlacement = Placement;
+	MainHUDWidget->SetRenderScale(FVector2D(EffectiveHUDScale, EffectiveHUDScale));
+	// Placement has already been converted to Slate/design units, so keep the
+	// precomputed DPI conversion instead of applying it a second time.
+	MainHUDWidget->SetPositionInViewport(Placement, false);
+	MainHUDPlacement = Placement;
 }
-
 void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
 {
 	if (!HealthBarWidget)
@@ -168,7 +181,7 @@ void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
 
 void ANightCourseHUD::PushSoulToHealthBar(float Soul)
 {
-	EnsureHealthBar();
+	EnsureMainHUD();
 	if (!HealthBarWidget)
 	{
 		return;
@@ -267,7 +280,7 @@ void ANightCourseHUD::DrawHUD()
 	}
 
 	PushSoulToHealthBar(Soul);
-	UpdateHealthBarPlacement();
+	UpdateMainHUDPlacement();
 	if (!HealthBarWidget)
 	{
 		FCanvasTextItem SoulText(FVector2D(W * 0.06f, H * 0.05f), FText::FromString(FString::Printf(TEXT("SOUL  %.0f"), Soul)), GEngine->GetLargeFont(), FLinearColor(1.f, 0.95f, 0.7f));
