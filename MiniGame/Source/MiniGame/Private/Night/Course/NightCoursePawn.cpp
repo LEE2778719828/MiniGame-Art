@@ -83,6 +83,19 @@ ANightCoursePawn::ANightCoursePawn()
 	HeroSkelMesh->SetVisibility(false);
 	HeroSkelMesh->SetHiddenInGame(true);
 
+#pragma region K2 moonyfli
+	// Child BPs cannot assign Parent Socket on a component parented to this native mesh.
+	KnifeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Knife"));
+	KnifeMesh->SetupAttachment(HeroSkelMesh, TEXT("KnifeSocket"));
+	KnifeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> KnifeDao(
+		TEXT("/Game/Night/Character/Knife_dao.Knife_dao"));
+	if (KnifeDao.Succeeded())
+	{
+		KnifeMesh->SetStaticMesh(KnifeDao.Object);
+	}
+#pragma endregion K2 moonyfli
+
 	// 美术 0824 交付的跳跃（492ms，Takeoff 45ms / Land 331ms）。它替掉了 Jump_noknife2，
 	// 后者留在资产里作为通知量法的参照。
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> JumpClip(
@@ -286,6 +299,27 @@ void ANightCoursePawn::UpdateCameraKicks(float DeltaSeconds)
 }
 #pragma endregion K2 moonyfli
 
+void ANightCoursePawn::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	AttachKnifeToHand();
+}
+
+void ANightCoursePawn::AttachKnifeToHand()
+{
+	if (!KnifeMesh || !HeroSkelMesh)
+	{
+		return;
+	}
+
+	static const FName SocketName(TEXT("KnifeSocket"));
+	const FName Socket = HeroSkelMesh->DoesSocketExist(SocketName) ? SocketName : NAME_None;
+	KnifeMesh->AttachToComponent(
+		HeroSkelMesh,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+		Socket);
+}
+
 void ANightCoursePawn::BeginPlay()
 {
 	Super::BeginPlay();
@@ -453,6 +487,7 @@ void ANightCoursePawn::ApplyConfiguredHeroVisual()
 	if (HeroSkeletalMesh && HeroSkelMesh)
 	{
 		HeroSkelMesh->SetSkeletalMeshAsset(HeroSkeletalMesh);
+		AttachKnifeToHand();
 		HeroSkelMesh->SetRelativeLocation(
 			HeroMeshOffset + HeroPivotOffsetCm * HeroScale);
 		HeroSkelMesh->SetRelativeScale3D(FVector(FMath::Max(0.01f, HeroScale)));
@@ -497,6 +532,11 @@ void ANightCoursePawn::ApplyConfiguredHeroVisual()
 		HeroSkelMesh->SetVisibility(false);
 		HeroSkelMesh->SetHiddenInGame(true);
 	}
+	if (KnifeMesh)
+	{
+		KnifeMesh->SetVisibility(false);
+		KnifeMesh->SetHiddenInGame(true);
+	}
 }
 
 // add by K2 (R1)
@@ -515,6 +555,15 @@ void ANightCoursePawn::ResolveHeroArt()
 		ApplyHeroZCompensation(IsEditorPreviewWorld(this));
 		HeroSkelMesh->SetVisibility(bSkeletalReady);
 		HeroSkelMesh->SetHiddenInGame(!bSkeletalReady);
+	}
+	if (KnifeMesh)
+	{
+		if (bSkeletalReady)
+		{
+			AttachKnifeToHand();
+		}
+		KnifeMesh->SetVisibility(bSkeletalReady);
+		KnifeMesh->SetHiddenInGame(!bSkeletalReady);
 	}
 
 	if (!bSkeletalReady)

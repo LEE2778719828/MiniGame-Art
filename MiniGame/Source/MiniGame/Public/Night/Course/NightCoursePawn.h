@@ -62,6 +62,17 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<USkeletalMeshComponent> HeroSkelMesh;
 
+#pragma region K2 moonyfli
+	/**
+	 * Right-hand knife. Attached in C++ to HeroSkelMesh / KnifeSocket because a child Blueprint
+	 * cannot change the socket of a native inherited component (the Details lock you hit).
+	 * Mesh defaults to /Game/Night/Character/Knife_dao; override the component's Static Mesh
+	 * in BP_NightCoursePawn if art delivers a new blade. Do not add a second Knife in the BP.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TObjectPtr<UStaticMeshComponent> KnifeMesh;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
 	bool bPreferSkeletalHero = true;
 
@@ -211,6 +222,7 @@ public:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
@@ -270,6 +282,11 @@ public:
 
 	/** 骨骼主角在场时隐藏静态白模，两套美术只显示一套；改完 HeroMeshOffset 等外观参数后调它生效。 */
 	void ResolveHeroArt(); //add by K2
+
+#pragma region K2 moonyfli
+	/** Rebind the knife after the skeletal mesh exists so KnifeSocket can resolve. */
+	void AttachKnifeToHand();
+#pragma endregion K2 moonyfli
 
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
