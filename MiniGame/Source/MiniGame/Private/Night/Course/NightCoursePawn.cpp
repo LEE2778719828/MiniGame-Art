@@ -547,13 +547,22 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 
 	if (UAnimInstance* Instance = GetSlotDrivenInstance(HeroSkelMesh))
 	{
-		// Zero blend on both ends. The clips are only 370-490ms, so the montage defaults (250ms in,
-		// 250ms out) would still be fading the slash in at its 179ms contact frame and would
-		// already have started fading it out before reaching it. Playing the sequence as a
-		// dynamic montage keeps the sequence's own notifies, so Contact / Land stay where they
-		// were measured, and it avoids having to maintain montage assets for two one-shot clips.
+		// The montage defaults (250ms both ends) are far too long for clips of 370-490ms: they
+		// would still be fading the slash in at its 179ms contact frame and would already be
+		// fading it out before reaching it. Hence the tunables, clamped to stay clear of the
+		// anchor notifies. Playing the sequence as a dynamic montage keeps the sequence's own
+		// notifies, so Contact / Land stay where they were measured, and it avoids having to
+		// maintain montage assets for two one-shot clips.
+		const float ClipLength = Clip->GetPlayLength();
+		const float AnchorSeconds =
+			FMath::Max(10.f, bAttack ? AttackAnchorMs : JumpAnchorMs) * 0.001f;
+		// Never let the fade start before the anchor, whatever the clip is swapped to.
+		const float BlendOut = FMath::Clamp(
+			ActionBlendOutSeconds, 0.f, FMath::Max(0.f, ClipLength - AnchorSeconds));
+		const float BlendIn = FMath::Clamp(ActionBlendInSeconds, 0.f, AnchorSeconds);
+
 		Instance->PlaySlotAnimationAsDynamicMontage(
-			Clip, TEXT("DefaultSlot"), 0.f, 0.f, HeroAnimPlayRate, 1, -1.f, 0.f);
+			Clip, TEXT("DefaultSlot"), BlendIn, BlendOut, HeroAnimPlayRate, 1, -1.f, 0.f);
 		return;
 	}
 

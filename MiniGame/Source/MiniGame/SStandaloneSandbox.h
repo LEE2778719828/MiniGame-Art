@@ -115,7 +115,7 @@ struct FSGameStageRow : public FTableRowBase
 	FName CustomerConfigId = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FName GuaranteedNpcRules = TEXT("ALing_SangPo");
+	FName GuaranteedNpcRules = TEXT("All");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName NextLevelId = NAME_None;
@@ -258,6 +258,10 @@ struct FSGiftDefRow : public FTableRowBase
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString EffectText;
+
+	/** Transparent preview shown beside a special NPC while the NPC is seated. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Gifts")
+	TSoftObjectPtr<UTexture2D> SeatPreviewIcon;
 
 	/** When the night buff applies: BeforeFork / EnterMatch / AfterFork / NearDeath. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -857,11 +861,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "S Config")
 	FString ResolveIngredientShortName(FName IngredientId) const;
 
+	/** Stable NPC ids currently authored in DT_SpecialNpcs. */
+	UFUNCTION(BlueprintPure, Category = "S Config")
+	TArray<FName> GetConfiguredSpecialNpcIds() const;
+
 	UFUNCTION(BlueprintPure, Category = "S Config")
 	bool TryGetSpecialNpcDef(FName NpcId, FSSpecialNpcDefRow& OutRow) const;
 
 	UFUNCTION(BlueprintPure, Category = "S Config")
 	bool TryGetGiftDef(FName GiftId, FSGiftDefRow& OutRow) const;
+
+	/** Resolves the configured seat preview without granting or activating the gift. */
+	UFUNCTION(BlueprintPure, Category = "S Gifts")
+	UTexture2D* ResolveGiftSeatPreviewIcon(FName GiftId) const;
 
 	UFUNCTION(BlueprintPure, Category = "S Config")
 	TArray<FString> GetCustomerNamePool() const;

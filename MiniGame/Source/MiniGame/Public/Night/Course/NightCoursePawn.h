@@ -128,6 +128,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "10.0"))
 	float AttackAnchorMs = 179.f;
 
+#pragma region K2 moonyfli
+	/**
+	 * Cross-fade back to idle at the end of a one-shot action. Zero cuts the pose in a single
+	 * frame, which reads as a snap once the hero has already arrived and is standing still.
+	 *
+	 * The blend starts at (clip length - this), so it must stay short enough to begin after the
+	 * clip's anchor notify or it would fade the action out before landing / contact:
+	 * Jump is 492ms with Land at 331ms (161ms of room), Slash is 367ms with Contact at 179ms
+	 * (188ms). The default eats the dead tail after the anchor and leaves both notifies intact.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "0.0", ClampMax = "0.16"))
+	float ActionBlendOutSeconds = 0.15f;
+
+	/**
+	 * Cross-fade into a one-shot action. Kept at zero because Jump's Takeoff notify sits at 45ms:
+	 * any meaningful blend-in would still be ramping the crouch when the hero is meant to leave
+	 * the stone, softening the push-off.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Anim", meta = (ClampMin = "0.0", ClampMax = "0.16"))
+	float ActionBlendInSeconds = 0.f;
+#pragma endregion K2 moonyfli
+
 	/**
 	 * Camera framing lives on these two components and nowhere else: edit arm length, boom
 	 * rotation, socket offset and FOV on the components in BP_NightCoursePawn and what you set

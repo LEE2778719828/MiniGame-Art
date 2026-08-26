@@ -1523,14 +1523,15 @@ void ASDayCharacterStandIn::NotifySeatOccupied(
 	const FString& OccupantKey,
 	const bool bSpecialNpc,
 	const FName IngredientId,
-	const int32 Level)
+	const int32 Level,
+	const FName GiftId)
 {
 	if (PresentedOccupantKey == OccupantKey)
 	{
 		return;
 	}
 	PresentedOccupantKey = OccupantKey;
-	OnSeatOccupied(OccupantKey, bSpecialNpc, IngredientId, Level);
+	OnSeatOccupied(OccupantKey, bSpecialNpc, IngredientId, Level, GiftId);
 }
 
 void ASDayCharacterStandIn::NotifySeatVacated()
@@ -2285,7 +2286,8 @@ void ASDayBoardPresenter::RefreshCharacters()
 				Customer.CustomerId,
 				false,
 				Customer.Order.IngredientId,
-				Customer.Order.Level);
+				Customer.Order.Level,
+				NAME_None);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.95f, 0.75f, 0.65f));
 			Seat->SetHeadline(
 				FString::Printf(
@@ -2321,7 +2323,8 @@ void ASDayBoardPresenter::RefreshCharacters()
 				SeatedNpc.NpcId.ToString(),
 				true,
 				SeatedNpc.Order.IngredientId,
-				SeatedNpc.Order.Level);
+				SeatedNpc.Order.Level,
+				SeatedNpc.GiftId);
 			ApplyTint(Seat->CharacterMesh, FLinearColor(0.20f, 0.85f, 0.70f));
 			Seat->SetHeadline(
 				FString::Printf(
