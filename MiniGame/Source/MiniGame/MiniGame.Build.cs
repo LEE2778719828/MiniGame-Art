@@ -5,6 +5,8 @@ public class MiniGame : ModuleRules
 	public MiniGame(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		PublicDefinitions.Add("MINIGAME_DEFER_CONSOLE_COMMANDS=0");
+		PublicDefinitions.Add("MINIGAME_DEFER_AUTOMATION_TESTS=0");
 
 #pragma region K2 moonyfli
 		PublicDependencyModuleNames.AddRange(new string[]
@@ -15,7 +17,8 @@ public class MiniGame : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"UMG",
-			"Niagara"
+			"Niagara",
+			"MoviePlayer"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

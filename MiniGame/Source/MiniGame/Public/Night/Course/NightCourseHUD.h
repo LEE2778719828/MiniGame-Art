@@ -57,6 +57,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Layout")
 	bool bUseLegacyHUDPlacement = false;
 
+	/** 20:9 Loading image used for both directions of scene travel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Loading")
+	TSoftObjectPtr<UTexture2D> SceneLoadingTexture;
+
 	/** Portrait authoring frame. 900 x 2000 is exactly 9:20 and is shared by PC and Android. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Layout", meta = (ClampMin = "1.0"))
 	FVector2D HUDDesignSize = FVector2D(900.f, 2000.f);

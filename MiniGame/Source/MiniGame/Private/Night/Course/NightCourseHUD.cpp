@@ -3,6 +3,7 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "../../../SStandaloneSandbox.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
@@ -74,6 +75,13 @@ ANightCourseHUD::ANightCourseHUD()
 void ANightCourseHUD::BeginPlay()
 {
 	Super::BeginPlay();
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		if (!SceneLoadingTexture.IsNull())
+		{
+			GameInstance->RegisterSceneLoadingTexture(SceneLoadingTexture);
+		}
+	}
 	EnsureMainHUD();
 }
 

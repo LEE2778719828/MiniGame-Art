@@ -3,6 +3,10 @@
 #include "Day/Input/SDayPlayerController.h"
 #include "Day/Presentation/SDayBoardPresentation.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/ScaleBox.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "Components/Button.h"
@@ -34,6 +38,9 @@
 #include "HAL/PlatformMisc.h"
 #include "HighResScreenshot.h"
 #include "ImageUtils.h"
+#include "Engine/Texture2D.h"
+#include "MoviePlayer.h"
+#include "UObject/UObjectGlobals.h"
 #include "Templates/Function.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
@@ -134,9 +141,46 @@ namespace
 #pragma endregion K2 moonyfli
 }
 
+TSharedRef<SWidget> USceneLoadingScreenWidget::RebuildWidget()
+{
+	if (WidgetTree && !WidgetTree->RootWidget)
+	{
+		UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SceneLoadingRoot"));
+		WidgetTree->RootWidget = Root;
+		UBorder* Background = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SceneLoadingBackground"));
+		Background->SetBrushColor(FLinearColor::Black);
+		Root->AddChildToOverlay(Background);
+		UScaleBox* FitBox = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("SceneLoadingFit"));
+		FitBox->SetStretch(EStretch::ScaleToFit);
+		Root->AddChildToOverlay(FitBox);
+		LoadingImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("SceneLoadingImage"));
+		FitBox->AddChild(LoadingImage);
+	}
+
+	if (LoadingImage)
+	{
+		LoadingImage->SetBrushFromTexture(LoadingTexture, true);
+		LoadingImage->SetVisibility(LoadingTexture ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+
+	return Super::RebuildWidget();
+}
+
+void USceneLoadingScreenWidget::SetLoadingTexture(UTexture2D* InTexture)
+{
+	LoadingTexture = InTexture;
+	if (LoadingImage)
+	{
+		LoadingImage->SetBrushFromTexture(LoadingTexture, true);
+		LoadingImage->SetVisibility(LoadingTexture ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
 void USChefGameInstance::Init()
 {
 	Super::Init();
+	PreLoadMapDelegateHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &USChefGameInstance::HandlePreLoadMap);
+	PostLoadMapDelegateHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &USChefGameInstance::HandlePostLoadMap);
 	if (StageTable.IsNull())
 	{
 		StageTable = TSoftObjectPtr<UDataTable>(
@@ -182,6 +226,106 @@ void USChefGameInstance::Init()
 		NotifyStateChanged();
 	}
 #pragma endregion K2 moonyfli
+}
+
+void USChefGameInstance::Shutdown()
+{
+	if (PreLoadMapDelegateHandle.IsValid())
+	{
+		FCoreUObjectDelegates::PreLoadMap.Remove(PreLoadMapDelegateHandle);
+		PreLoadMapDelegateHandle.Reset();
+	}
+	if (PostLoadMapDelegateHandle.IsValid())
+	{
+		FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadMapDelegateHandle);
+		PostLoadMapDelegateHandle.Reset();
+	}
+	HideSceneLoadingScreen();
+	Super::Shutdown();
+}
+
+void USChefGameInstance::HandlePreLoadMap(const FString& MapName)
+{
+	(void)MapName;
+	ShowSceneLoadingScreen();
+}
+
+void USChefGameInstance::HandlePostLoadMap(UWorld* LoadedWorld)
+{
+	(void)LoadedWorld;
+	HideSceneLoadingScreen();
+}
+
+void USChefGameInstance::RegisterSceneLoadingTexture(const TSoftObjectPtr<UTexture2D>& InTexture)
+{
+	if (!InTexture.IsNull())
+	{
+		SceneLoadingTexture = InTexture;
+	}
+}
+
+void USChefGameInstance::ShowSceneLoadingScreen()
+{
+	if (!bEnableSceneLoadingScreen || bSceneLoadingVisible)
+	{
+		return;
+	}
+	UClass* WidgetClass = SceneLoadingWidgetClass.IsNull()
+		? nullptr
+		: SceneLoadingWidgetClass.LoadSynchronous();
+	UTexture2D* Texture = SceneLoadingTexture.IsNull()
+		? nullptr
+		: SceneLoadingTexture.LoadSynchronous();
+	if (!WidgetClass && !Texture)
+	{
+		UE_LOG(LogSSandbox, Verbose, TEXT("[SceneLoading] No Loading texture or widget configured; travel overlay skipped."));
+		return;
+	}
+	if (!WidgetClass)
+	{
+		WidgetClass = USceneLoadingScreenWidget::StaticClass();
+	}
+	SceneLoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass);
+	if (!SceneLoadingWidget)
+	{
+		UE_LOG(LogSSandbox, Warning, TEXT("[SceneLoading] Failed to create Loading widget class=%s."), *GetNameSafe(WidgetClass));
+		return;
+	}
+	if (USceneLoadingScreenWidget* FallbackWidget = Cast<USceneLoadingScreenWidget>(SceneLoadingWidget))
+	{
+		FallbackWidget->SetLoadingTexture(Texture);
+	}
+	bSceneLoadingVisible = true;
+	bSceneLoadingUsingMoviePlayer = false;
+	if (IsMoviePlayerEnabled() && GetMoviePlayer())
+	{
+		FLoadingScreenAttributes Attributes;
+		Attributes.WidgetLoadingScreen = SceneLoadingWidget->TakeWidget();
+		Attributes.MinimumLoadingScreenDisplayTime = 0.f;
+		Attributes.bAutoCompleteWhenLoadingCompletes = true;
+		Attributes.bMoviesAreSkippable = false;
+		GetMoviePlayer()->SetupLoadingScreen(Attributes);
+		bSceneLoadingUsingMoviePlayer = GetMoviePlayer()->PlayMovie();
+	}
+	if (!bSceneLoadingUsingMoviePlayer)
+	{
+		SceneLoadingWidget->AddToViewport(SceneLoadingZOrder);
+	}
+}
+
+void USChefGameInstance::HideSceneLoadingScreen()
+{
+	if (bSceneLoadingUsingMoviePlayer && GetMoviePlayer() && GetMoviePlayer()->IsMovieCurrentlyPlaying())
+	{
+		GetMoviePlayer()->StopMovie();
+	}
+	if (SceneLoadingWidget)
+	{
+		SceneLoadingWidget->RemoveFromParent();
+		SceneLoadingWidget = nullptr;
+	}
+	bSceneLoadingUsingMoviePlayer = false;
+	bSceneLoadingVisible = false;
 }
 
 void USChefGameInstance::InitializeIngredientMaps()

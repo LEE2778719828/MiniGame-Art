@@ -11,8 +11,12 @@
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "DrawDebugHelpers.h"
+#include "HAL/PlatformTime.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/PostProcessVolume.h"
+#include "EngineUtils.h"
+#include "Materials/MaterialInterface.h"
 #include "Components/BoxComponent.h"
 #include "Math/RotationMatrix.h"
 #include "Misc/PackageName.h"
@@ -124,6 +128,100 @@ void UNightCourseDirector::SyncPawnToProgress(bool bInstant)
 	}
 }
 
+APostProcessVolume* UNightCourseDirector::ResolveCoursePostProcessVolume()
+{
+	if (ManagedPostProcessVolume.IsValid())
+	{
+		return ManagedPostProcessVolume.Get();
+	}
+	UWorld* World = GetWorld();
+	if (!World || !Config)
+	{
+		return nullptr;
+	}
+
+	APostProcessVolume* FirstUnboundVolume = nullptr;
+	for (TActorIterator<APostProcessVolume> It(World); It; ++It)
+	{
+		APostProcessVolume* Volume = *It;
+		if (!Volume)
+		{
+			continue;
+		}
+		if (!Config->PostProcessVolumeTag.IsNone()
+			&& Volume->ActorHasTag(Config->PostProcessVolumeTag))
+		{
+			ManagedPostProcessVolume = Volume;
+			return Volume;
+		}
+		if (Config->PostProcessVolumeTag.IsNone()
+			&& !FirstUnboundVolume
+			&& Volume->bUnbound)
+		{
+			FirstUnboundVolume = Volume;
+		}
+	}
+	ManagedPostProcessVolume = FirstUnboundVolume;
+	return FirstUnboundVolume;
+}
+
+void UNightCourseDirector::ApplyCoursePostProcessMaterial(UMaterialInterface* Material)
+{
+	if (!Config)
+	{
+		return;
+	}
+	APostProcessVolume* Volume = ResolveCoursePostProcessVolume();
+	if (!Volume)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][PostProcess] No matching PostProcessVolume; material switch skipped."));
+		return;
+	}
+
+	TSet<const UObject*> ManagedMaterials;
+	if (Config->DefaultPostProcessMaterial)
+	{
+		ManagedMaterials.Add(Config->DefaultPostProcessMaterial);
+	}
+	if (Config->RouteRules)
+	{
+		for (const FNightRouteRuleRow& Row : Config->RouteRules->Rows)
+		{
+			if (Row.PostProcessMaterial)
+			{
+				ManagedMaterials.Add(Row.PostProcessMaterial);
+			}
+		}
+	}
+	if (ActiveCoursePostProcessMaterial)
+	{
+		ManagedMaterials.Add(ActiveCoursePostProcessMaterial);
+	}
+
+	Volume->Settings.WeightedBlendables.Array.RemoveAll(
+		[&ManagedMaterials](const FWeightedBlendable& Blendable)
+		{
+			return Blendable.Object && ManagedMaterials.Contains(Blendable.Object);
+		});
+	if (Material && Config->PostProcessMaterialWeight > 0.f)
+	{
+		Volume->Settings.AddBlendable(Material, Config->PostProcessMaterialWeight);
+	}
+	ActiveCoursePostProcessMaterial = Material;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][PostProcess] Applied '%s' to '%s' weight=%.2f."),
+		*GetNameSafe(Material),
+		*GetNameSafe(Volume),
+		Config->PostProcessMaterialWeight);
+}
+
+void UNightCourseDirector::ApplyDefaultCoursePostProcessMaterial()
+{
+	ApplyCoursePostProcessMaterial(
+		Config ? Config->DefaultPostProcessMaterial.Get() : nullptr);
+}
 bool UNightCourseDirector::EnsureCourse(FString& OutError)
 {
 	OutError.Reset();
@@ -3154,6 +3252,82 @@ void UNightCourseDirector::ClearSpawnedCourseActors()
 	SpawnedStones.Reset();
 }
 
+void UNightCourseDirector::QueueSpawnedCourseActorsForDeferredDestroy()
+{
+	int32 QueuedCount = 0;
+	auto QueueActor = [this, &QueuedCount](AActor* Actor)
+	{
+		if (!Actor || DeferredRuntimeActors.Contains(Actor))
+		{
+			return;
+		}
+		Actor->SetActorHiddenInGame(true);
+		Actor->SetActorEnableCollision(false);
+		DeferredRuntimeActors.Add(Actor);
+		++QueuedCount;
+	};
+	for (ANightRoadsideSegmentActor* Actor : SpawnedRoadsideActors)
+	{
+		QueueActor(Actor);
+	}
+	for (AActor* Actor : SpawnedVisualActors)
+	{
+		QueueActor(Actor);
+	}
+	for (ANightCourseForkAtomActor* Actor : SpawnedForkAtoms)
+	{
+		QueueActor(Actor);
+	}
+	for (ANightBridgeSegmentActor* Actor : SpawnedBridges)
+	{
+		QueueActor(Actor);
+	}
+	for (ANightCourseStoneActor* Actor : SpawnedStones)
+	{
+		QueueActor(Actor);
+	}
+	SpawnedRoadsideActors.Reset();
+	SpawnedVisualActors.Reset();
+	SpawnedForkAtoms.Reset();
+	SpawnedBridges.Reset();
+	SpawnedStones.Reset();
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Streaming] queued %d old runtime actors for deferred destroy; pending=%d."),
+		QueuedCount,
+		DeferredRuntimeActors.Num());
+}
+
+void UNightCourseDirector::DestroyDeferredRuntimeActors()
+{
+	// Destroy a bounded slice so route selection never pays the full cleanup
+	// cost in one frame. The queue is force-cleared at FinishNight/ResetCourse.
+	constexpr int32 DestroyBudgetPerFrame = 8;
+	int32 DestroyedCount = 0;
+	while (DeferredRuntimeActors.Num() > 0 && DestroyedCount < DestroyBudgetPerFrame)
+	{
+		AActor* Actor = DeferredRuntimeActors.Pop(EAllowShrinking::No);
+		if (Actor)
+		{
+			Actor->Destroy();
+			++DestroyedCount;
+		}
+	}
+}
+
+void UNightCourseDirector::ClearDeferredRuntimeActors()
+{
+	for (AActor* Actor : DeferredRuntimeActors)
+	{
+		if (Actor)
+		{
+			Actor->Destroy();
+		}
+	}
+	DeferredRuntimeActors.Reset();
+}
+
 bool UNightCourseDirector::SpawnCourseActors()
 {
 	SpawnedStones.Init(nullptr, StoneSpecs.Num());
@@ -3668,6 +3842,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	}
 
 	ClearSpawnedCourseActors();
+	ClearDeferredRuntimeActors();
 	ActiveBootstrap = Bootstrap;
 	if (Bootstrap.DefaultRoute == ENightRouteId::None)
 	{
@@ -3707,6 +3882,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	KeySwapEndTime = 0.f;
 	ActiveKeySwapCues = AuthoredKeySwapCues;
 	bHasActiveRouteRule = false;
+	PreparedBranchRoutes.Reset();
 	RuntimeSeed = Bootstrap.Seed;
 	if (RuntimeSeed == 0)
 	{
@@ -3739,6 +3915,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		return;
 	}
 	UE_LOG(LogTemp, Display, TEXT("[NightCourse][Stage=Start] configuration validation passed."));
+	ApplyDefaultCoursePostProcessMaterial();
 
 	ENightRouteId LeftRoute = ENightRouteId::None;
 	ENightRouteId RightRoute = ENightRouteId::None;
@@ -3854,6 +4031,395 @@ bool UNightCourseDirector::HasBranchQueueForRoute(ENightRouteId RouteId) const
 	return false;
 }
 
+bool UNightCourseDirector::BuildPreparedBranchRoute(
+	ENightRouteId RouteId,
+	FNightPreparedBranchRoute& OutPrepared,
+	FString& OutError)
+{
+	OutPrepared = FNightPreparedBranchRoute();
+	OutError.Reset();
+	if (!Config || !Config->RouteRules || RouteId == ENightRouteId::None)
+	{
+		OutError = TEXT("A valid Config, RouteRules asset and route are required to prepare a branch.");
+		return false;
+	}
+
+	const ENightRouteId PreviousRoute = CurrentRoute;
+	CurrentRoute = RouteId;
+	TArray<FNightStoneSpec> NewStones;
+	TArray<FNightBeatSpec> NewBeats;
+	TArray<FNightBridgeSpec> NewBridges;
+	TArray<FNightAtomVisualBinding> NewVisualBindings;
+	TArray<FNightForkAtomSpec> NewForkAtomSpecs;
+	const bool bBuilt = BuildCourseForPreview(
+		NewStones,
+		NewBeats,
+		NewBridges,
+		NewVisualBindings,
+		NewForkAtomSpecs);
+	CurrentRoute = PreviousRoute;
+	if (!bBuilt)
+	{
+		OutError = FString::Printf(
+			TEXT("Could not prepare route %d before fork selection."),
+			static_cast<int32>(RouteId));
+		return false;
+	}
+
+	FVector BranchRebaseOffset = FVector::ZeroVector;
+	if (NewForkAtomSpecs.Num() > 0)
+	{
+		ENightRouteId LeftRoute = ENightRouteId::None;
+		ENightRouteId RightRoute = ENightRouteId::None;
+		bool bForcedAB = false;
+		UNightForkController::ResolvePairRoutes(
+			ActiveForkPair,
+			LeftRoute,
+			RightRoute,
+			bForcedAB);
+		(void)bForcedAB;
+
+		const FTransform* SelectedExit = nullptr;
+		if (RouteId == LeftRoute)
+		{
+			SelectedExit = &NewForkAtomSpecs[0].LeftExitTransform;
+		}
+		else if (RouteId == RightRoute)
+		{
+			SelectedExit = &NewForkAtomSpecs[0].RightExitTransform;
+		}
+		if (SelectedExit)
+		{
+			const float SelectedExitX = SelectedExit->GetLocation().X;
+			BranchRebaseOffset.X = -SelectedExitX;
+			const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
+				? FVector::ForwardVector
+				: Config->TrackForward.GetSafeNormal();
+			for (FNightStoneSpec& Stone : NewStones)
+			{
+				if (Stone.bUseWorldPose)
+				{
+					Stone.WorldLocation += BranchRebaseOffset;
+					Stone.TrackDistance = NightCourseAtom_Private::GetTrackDistance(
+						Stone.WorldLocation,
+						Config->TrackOrigin,
+						TrackForward);
+				}
+				else
+				{
+					Stone.TrackDistance += FVector::DotProduct(
+						BranchRebaseOffset,
+						TrackForward);
+				}
+			}
+			for (FNightBridgeSpec& Bridge : NewBridges)
+			{
+				Bridge.WorldLocation += BranchRebaseOffset;
+			}
+			for (FNightAtomVisualBinding& Binding : NewVisualBindings)
+			{
+				Binding.LocalTransform.AddToTranslation(BranchRebaseOffset);
+			}
+			for (FNightForkAtomSpec& ForkAtom : NewForkAtomSpecs)
+			{
+				ForkAtom.WorldTransform.AddToTranslation(BranchRebaseOffset);
+				ForkAtom.LeftExitTransform.AddToTranslation(BranchRebaseOffset);
+				ForkAtom.RightExitTransform.AddToTranslation(BranchRebaseOffset);
+			}
+		}
+	}
+
+	TArray<FNightRoadsidePropSpec> NewRoadsideSpecs;
+	if (!BuildRoadsideSpecs(
+		NewStones,
+		NewBridges,
+		NewForkAtomSpecs,
+		NewRoadsideSpecs))
+	{
+		OutError = FString::Printf(
+			TEXT("Could not prepare roadside props for route %d."),
+			static_cast<int32>(RouteId));
+		return false;
+	}
+	if (NewBeats.Num() <= BaseBeatCount)
+	{
+		OutError = FString::Printf(
+			TEXT("Prepared route %d did not append a transition and branch segment."),
+			static_cast<int32>(RouteId));
+		return false;
+	}
+
+	FNightRouteRuleRow NewRouteRule;
+	if (!Config->RouteRules->TryGetRule(RouteId, NewRouteRule))
+	{
+		OutError = FString::Printf(
+			TEXT("RouteRules has no authored row for prepared route %d."),
+			static_cast<int32>(RouteId));
+		return false;
+	}
+
+	OutPrepared.bValid = true;
+	OutPrepared.Stones = MoveTemp(NewStones);
+	OutPrepared.Beats = MoveTemp(NewBeats);
+	OutPrepared.Bridges = MoveTemp(NewBridges);
+	OutPrepared.VisualBindings = MoveTemp(NewVisualBindings);
+	OutPrepared.ForkAtoms = MoveTemp(NewForkAtomSpecs);
+	OutPrepared.RoadsideSpecs = MoveTemp(NewRoadsideSpecs);
+	OutPrepared.RouteRule = NewRouteRule;
+	OutPrepared.CourseWorldOffset = BranchRebaseOffset;
+	return true;
+}
+
+bool UNightCourseDirector::PrepareBranchRoutesForFork(FString& OutError)
+{
+	OutError.Reset();
+	PreparedBranchRoutes.Reset();
+
+	ENightRouteId LeftRoute = ENightRouteId::None;
+	ENightRouteId RightRoute = ENightRouteId::None;
+	bool bForcedAB = false;
+	UNightForkController::ResolvePairRoutes(
+		ActiveForkPair,
+		LeftRoute,
+		RightRoute,
+		bForcedAB);
+	(void)bForcedAB;
+
+	for (const ENightRouteId RouteId : {LeftRoute, RightRoute})
+	{
+		FNightPreparedBranchRoute Prepared;
+		if (!BuildPreparedBranchRoute(RouteId, Prepared, OutError))
+		{
+			PreparedBranchRoutes.Reset();
+			return false;
+		}
+		PreparedBranchRoutes.Add(RouteId, MoveTemp(Prepared));
+	}
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=ForkPrepare] prepared left=%d right=%d before showing fork choice."),
+		static_cast<int32>(LeftRoute),
+		static_cast<int32>(RightRoute));
+	return true;
+}
+
+void UNightCourseDirector::BeginBranchRoutePreparation()
+{
+	PreparedBranchRoutes.Reset();
+	BranchRoutePreparationOrder.Reset();
+	NextBranchRoutePreparationIndex = 0;
+	bBranchRoutePreparationActive = false;
+	bBranchSelectionPending = false;
+	PendingBranchRoute = ENightRouteId::None;
+
+	ENightRouteId LeftRoute = ENightRouteId::None;
+	ENightRouteId RightRoute = ENightRouteId::None;
+	bool bForcedAB = false;
+	UNightForkController::ResolvePairRoutes(
+		ActiveForkPair,
+		LeftRoute,
+		RightRoute,
+		bForcedAB);
+	(void)bForcedAB;
+	for (const ENightRouteId RouteId : {LeftRoute, RightRoute})
+	{
+		if (RouteId != ENightRouteId::None
+			&& !BranchRoutePreparationOrder.Contains(RouteId))
+		{
+			BranchRoutePreparationOrder.Add(RouteId);
+		}
+	}
+
+	bBranchRoutePreparationActive = BranchRoutePreparationOrder.Num() > 0;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=ForkPrepare] started incremental preparation routes=%d; fork choice is responsive."),
+		BranchRoutePreparationOrder.Num());
+}
+
+bool UNightCourseDirector::PrepareNextBranchRoute(FString& OutError)
+{
+	OutError.Reset();
+	if (!bBranchRoutePreparationActive)
+	{
+		return true;
+	}
+	if (!BranchRoutePreparationOrder.IsValidIndex(NextBranchRoutePreparationIndex))
+	{
+		bBranchRoutePreparationActive = false;
+		return true;
+	}
+
+	const ENightRouteId RouteId =
+		BranchRoutePreparationOrder[NextBranchRoutePreparationIndex];
+	FNightPreparedBranchRoute Prepared;
+	const double PrepareStartSeconds = FPlatformTime::Seconds();
+	if (!BuildPreparedBranchRoute(RouteId, Prepared, OutError))
+	{
+		PreparedBranchRoutes.Reset();
+		bBranchRoutePreparationActive = false;
+		return false;
+	}
+	PreparedBranchRoutes.Add(RouteId, MoveTemp(Prepared));
+	++NextBranchRoutePreparationIndex;
+	const double PrepareMilliseconds =
+		(FPlatformTime::Seconds() - PrepareStartSeconds) * 1000.0;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=ForkPrepare] route=%d prepared in %.2f ms (%d/%d)."),
+		static_cast<int32>(RouteId),
+		PrepareMilliseconds,
+		NextBranchRoutePreparationIndex,
+		BranchRoutePreparationOrder.Num());
+
+	if (NextBranchRoutePreparationIndex >= BranchRoutePreparationOrder.Num())
+	{
+		bBranchRoutePreparationActive = false;
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=ForkPrepare] incremental preparation complete; cached routes=%d."),
+			PreparedBranchRoutes.Num());
+	}
+	return true;
+}
+
+void UNightCourseDirector::ProcessBranchRoutePreparation()
+{
+	if (!bBranchRoutePreparationActive)
+	{
+		return;
+	}
+
+	FString PrepareError;
+	if (!PrepareNextBranchRoute(PrepareError))
+	{
+		BeginFailure(PrepareError.IsEmpty()
+			? TEXT("Incremental branch route preparation failed.")
+			: PrepareError);
+		return;
+	}
+	if (bBranchRoutePreparationActive || !bBranchSelectionPending)
+	{
+		return;
+	}
+
+	CurrentRoute = PendingBranchRoute;
+	bBranchSelectionPending = false;
+	PendingBranchRoute = ENightRouteId::None;
+	FString BuildError;
+	if (!RebuildCourseForSelectedRoute(BuildError))
+	{
+		BeginFailure(BuildError);
+	}
+}
+
+bool UNightCourseDirector::InstallPreparedBranchRoute(
+	FNightPreparedBranchRoute&& Prepared,
+	int32 PreviousStoneIndex,
+	float PreviousProgressDistance,
+	const TArray<FNightStoneSpec>& PreviousStones,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!Prepared.bValid || Prepared.Beats.Num() <= BaseBeatCount)
+	{
+		OutError = TEXT("Prepared branch route is invalid or missing its transition segment.");
+		return false;
+	}
+
+	const int32 SharedStoneCount = FMath::Min(
+		PreviousStoneIndex + 1,
+		Prepared.Stones.Num());
+	for (int32 Index = 0; Index < SharedStoneCount; ++Index)
+	{
+		if (PreviousStones.IsValidIndex(Index) && PreviousStones[Index].bHasFoe)
+		{
+			Prepared.Stones[Index].bHasFoe = true;
+			Prepared.Stones[Index].FoeId = PreviousStones[Index].FoeId;
+		}
+		else
+		{
+			Prepared.Stones[Index].bHasFoe = false;
+			Prepared.Stones[Index].FoeId = EFoeId::None;
+		}
+	}
+
+	QueueSpawnedCourseActorsForDeferredDestroy();
+	StoneSpecs = MoveTemp(Prepared.Stones);
+	BeatSpecs = MoveTemp(Prepared.Beats);
+	BridgeSpecs = MoveTemp(Prepared.Bridges);
+	VisualBindings = MoveTemp(Prepared.VisualBindings);
+	ForkAtomSpecs = MoveTemp(Prepared.ForkAtoms);
+	RoadsideSpecs = MoveTemp(Prepared.RoadsideSpecs);
+	ActiveRouteRule = Prepared.RouteRule;
+	bHasActiveRouteRule = true;
+	CourseWorldOffset = Prepared.CourseWorldOffset;
+	BeatConsumed.Init(0, BeatSpecs.Num());
+	for (int32 Index = 0; Index < FMath::Min(BaseBeatCount, BeatConsumed.Num()); ++Index)
+	{
+		BeatConsumed[Index] = 1;
+	}
+
+	BranchTransitionBeatIndex = BaseBeatCount;
+	bBranchHasExplicitTransitionBeat =
+		BeatSpecs.IsValidIndex(BranchTransitionBeatIndex)
+		&& BeatSpecs[BranchTransitionBeatIndex].FromStoneIndex == PreviousStoneIndex;
+	bBranchTransitionConsumed = false;
+	bBranchSelected = true;
+	bBranchRemainderLoaded = false;
+	bForkPending = false;
+	BranchBeatCount = 0;
+	CurrentStoneIndex = FMath::Clamp(
+		PreviousStoneIndex,
+		0,
+		FMath::Max(0, StoneSpecs.Num() - 1));
+	ProgressDistance = StoneSpecs.IsValidIndex(PreviousStoneIndex)
+		? StoneSpecs[PreviousStoneIndex].TrackDistance
+		: PreviousProgressDistance;
+	ActiveBeatIndex = INDEX_NONE;
+	bWindowOpen = false;
+	bAdvancing = false;
+
+	const EIngredientId EnterDropId = ActiveRouteRule.EnterDropId != EIngredientId::None
+		? ActiveRouteRule.EnterDropId
+		: Config->DefaultDropId;
+	if (ActiveRouteRule.EnterDropCount > 0)
+	{
+		AddDrop(EnterDropId, ActiveRouteRule.EnterDropCount);
+	}
+
+	ActiveKeySwapCues = AuthoredKeySwapCues;
+	if (Config->bKeySwapOnlyOnRouteC && CurrentRoute != ENightRouteId::C)
+	{
+		ActiveKeySwapCues.Reset();
+	}
+	NextKeySwapCueIndex = 0;
+	if (ActiveBootstrap.GiftBuffs.bKeyCoin && ActiveKeySwapCues.Num() > 0)
+	{
+		NextKeySwapCueIndex = 1;
+	}
+
+	ApplyCoursePostProcessMaterial(
+		ActiveRouteRule.PostProcessMaterial
+			? ActiveRouteRule.PostProcessMaterial.Get()
+			: Config->DefaultPostProcessMaterial.Get());
+
+	if (!SpawnCourseActors())
+	{
+		OutError = TEXT("Prepared branch runtime actor spawning failed; verify branch bindings.");
+		return false;
+	}
+	SyncPawnToProgress(true);
+	BranchEnterBufferEndTime =
+		ElapsedSeconds + FMath::Max(0.f, Config->BranchEnterBufferSeconds);
+	SetPhase(ENightCoursePhase::BranchEnterBuffer);
+	UpdateRouteVisibility();
+	return true;
+}
 void UNightCourseDirector::BeginForkChoice()
 {
 	if (!bRunning || !bForkPending || !Config)
@@ -3887,9 +4453,10 @@ void UNightCourseDirector::BeginForkChoice()
 	ActiveBeatIndex = INDEX_NONE;
 	SetPhase(ENightCoursePhase::ForkChoice);
 	ForkController->BeginFork(
-				ActiveForkPair,
+		ActiveForkPair,
 		FMath::Max(0.01f, Config->ForkTimeoutSeconds),
 		Config->bForkTimeoutPickLeft);
+	BeginBranchRoutePreparation();
 }
 
 void UNightCourseDirector::HandleForkResolved(
@@ -3910,7 +4477,18 @@ void UNightCourseDirector::HandleForkResolved(
 	}
 
 	CurrentRoute = RouteTaken;
-	FString BuildError;
+	if (bBranchRoutePreparationActive)
+	{
+		bBranchSelectionPending = true;
+		PendingBranchRoute = RouteTaken;
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=ForkResolve] route=%d queued until incremental preparation completes (timedOut=%d)."),
+			static_cast<int32>(RouteTaken),
+			bTimedOut ? 1 : 0);
+		return;
+	}	FString BuildError;
 	if (!RebuildCourseForSelectedRoute(BuildError))
 	{
 		BeginFailure(BuildError);
@@ -4071,6 +4649,18 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 	const int32 PreviousStoneIndex = CurrentStoneIndex;
 	const float PreviousProgressDistance = ProgressDistance;
 	const TArray<FNightStoneSpec> PreviousStones = StoneSpecs;
+
+	if (FNightPreparedBranchRoute* CachedRoute = PreparedBranchRoutes.Find(CurrentRoute))
+	{
+		FNightPreparedBranchRoute Prepared = MoveTemp(*CachedRoute);
+		PreparedBranchRoutes.Remove(CurrentRoute);
+		return InstallPreparedBranchRoute(
+			MoveTemp(Prepared),
+			PreviousStoneIndex,
+			PreviousProgressDistance,
+			PreviousStones,
+			OutError);
+	}
 
 	TArray<FNightStoneSpec> NewStones;
 	TArray<FNightBeatSpec> NewBeats;
@@ -4259,6 +4849,10 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 
 	ActiveRouteRule = NewRouteRule;
 	bHasActiveRouteRule = true;
+	ApplyCoursePostProcessMaterial(
+		ActiveRouteRule.PostProcessMaterial
+			? ActiveRouteRule.PostProcessMaterial.Get()
+			: Config->DefaultPostProcessMaterial.Get());
 
 	const EIngredientId EnterDropId = ActiveRouteRule.EnterDropId != EIngredientId::None
 		? ActiveRouteRule.EnterDropId
@@ -5316,6 +5910,7 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 			return;
 		}
 	}
+	DestroyDeferredRuntimeActors();
 	UpdateRouteVisibility();
 
 	if (GetDebug().bDrawDebug)
@@ -5338,7 +5933,8 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 	if (Phase == ENightCoursePhase::ForkChoice)
 	{
-		if (ForkController)
+		ProcessBranchRoutePreparation();
+		if (Phase == ENightCoursePhase::ForkChoice && ForkController)
 		{
 			ForkController->TickFork(DeltaTime);
 		}
@@ -5565,7 +6161,14 @@ void UNightCourseDirector::FinishNight(const FNightResult& Result)
 		ForkController->CancelFork();
 	}
 	ClearSpawnedCourseActors();
+	ClearDeferredRuntimeActors();
+	ApplyDefaultCoursePostProcessMaterial();
 	bRunning = false;
+	PreparedBranchRoutes.Reset();
+	bBranchRoutePreparationActive = false;
+	BranchRoutePreparationOrder.Reset();
+	bBranchSelectionPending = false;
+	PendingBranchRoute = ENightRouteId::None;
 	bAdvancing = false;
 	bWindowOpen = false;
 	ActiveBeatIndex = INDEX_NONE;
@@ -5642,6 +6245,8 @@ void UNightCourseDirector::ResetCourse()
 		ForkController->CancelFork();
 	}
 	ClearSpawnedCourseActors();
+	ClearDeferredRuntimeActors();
+	ApplyDefaultCoursePostProcessMaterial();
 	if (IsRegistered())
 	{
 		SetComponentTickEnabled(false);
@@ -5671,6 +6276,11 @@ void UNightCourseDirector::ResetCourse()
 	bNearDeathGiftConsumed = false;
 	bBranchRemainderLoaded = false;
 	bHasActiveRouteRule = false;
+	PreparedBranchRoutes.Reset();
+	bBranchRoutePreparationActive = false;
+	BranchRoutePreparationOrder.Reset();
+	bBranchSelectionPending = false;
+	PendingBranchRoute = ENightRouteId::None;
 	BranchBeatCount = 0;
 	BeatConsumed.Reset();
 	CollectedIngredients.Reset();

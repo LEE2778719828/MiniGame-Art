@@ -20,6 +20,8 @@ class AActor;
 class UBoxComponent;
 class INightFeelBridge;
 class UNightForkController;
+class APostProcessVolume;
+class UMaterialInterface;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNightCoursePhaseChanged, ENightCoursePhase, OldPhase, ENightCoursePhase, NewPhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNightCourseNodeEvent, int32, NodeIndex, ENightNodeKind, Kind, ENightJudgeOutcome, Outcome);
@@ -30,6 +32,19 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseDebugTick, float, Elap
  * 刃心 stone-chain director: stand on stone, Jump/Attack to next stone.
  * Idle = frozen; action advances runner to ToStone.
  */
+struct FNightPreparedBranchRoute
+{
+	bool bValid = false;
+	TArray<FNightStoneSpec> Stones;
+	TArray<FNightBeatSpec> Beats;
+	TArray<FNightBridgeSpec> Bridges;
+	TArray<FNightAtomVisualBinding> VisualBindings;
+	TArray<FNightForkAtomSpec> ForkAtoms;
+	TArray<FNightRoadsidePropSpec> RoadsideSpecs;
+	FNightRouteRuleRow RouteRule;
+	FVector CourseWorldOffset = FVector::ZeroVector;
+};
+
 UCLASS(ClassGroup = (Night), meta = (BlueprintSpawnableComponent))
 class MINIGAME_API UNightCourseDirector : public UActorComponent
 {
@@ -353,6 +368,17 @@ protected:
 	float KeySwapEndTime = 0.f;
 	TArray<FNightKeySwapCue> AuthoredKeySwapCues;
 	TArray<FNightKeySwapCue> ActiveKeySwapCues;
+	TMap<ENightRouteId, FNightPreparedBranchRoute> PreparedBranchRoutes;
+	bool bBranchRoutePreparationActive = false;
+	int32 NextBranchRoutePreparationIndex = 0;
+	TArray<ENightRouteId> BranchRoutePreparationOrder;
+	bool bBranchSelectionPending = false;
+	ENightRouteId PendingBranchRoute = ENightRouteId::None;
+	UPROPERTY()
+	TArray<TObjectPtr<AActor>> DeferredRuntimeActors;
+	TWeakObjectPtr<APostProcessVolume> ManagedPostProcessVolume;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> ActiveCoursePostProcessMaterial;
 
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
@@ -364,6 +390,20 @@ protected:
 	bool SpawnCourseActors();
 	bool SpawnRoadsideActors();
 	bool RebuildCourseForSelectedRoute(FString& OutError);
+	bool BuildPreparedBranchRoute(
+		ENightRouteId RouteId,
+		FNightPreparedBranchRoute& OutPrepared,
+		FString& OutError);
+	bool PrepareBranchRoutesForFork(FString& OutError);
+	void BeginBranchRoutePreparation();
+	bool PrepareNextBranchRoute(FString& OutError);
+	void ProcessBranchRoutePreparation();
+	bool InstallPreparedBranchRoute(
+		FNightPreparedBranchRoute&& Prepared,
+		int32 PreviousStoneIndex,
+		float PreviousProgressDistance,
+		const TArray<FNightStoneSpec>& PreviousStones,
+		FString& OutError);
 	void BeginForkChoice();
 	UFUNCTION()
 	void HandleForkResolved(ENightRouteId RouteTaken, bool bTimedOut);
@@ -386,6 +426,12 @@ protected:
 	int32 GetRuntimeKeepFromStone() const;
 	void StreamRuntimeCourseActors();
 	void DestroyRuntimeActorsBehindPlayer();
+	void QueueSpawnedCourseActorsForDeferredDestroy();
+	void DestroyDeferredRuntimeActors();
+	void ClearDeferredRuntimeActors();
+	APostProcessVolume* ResolveCoursePostProcessVolume();
+	void ApplyCoursePostProcessMaterial(UMaterialInterface* Material);
+	void ApplyDefaultCoursePostProcessMaterial();
 	void HandleFailedInput(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginFailure(const FString& Reason);
 	bool HasBranchQueueForRoute(ENightRouteId RouteId) const;
