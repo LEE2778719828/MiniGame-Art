@@ -25,6 +25,8 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraFunctionLibrary.h" //add by K2
+#include "NiagaraSystem.h" //add by K2
 
 #pragma region K2 moonyfli
 namespace
@@ -94,6 +96,19 @@ ANightCoursePawn::ANightCoursePawn()
 	if (KnifeDao.Succeeded())
 	{
 		KnifeMesh->SetStaticMesh(KnifeDao.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder(
+		TEXT("/Game/Night/Course/VFX/ns/DG1.DG1"));
+	if (SlashTrailFinder.Succeeded())
+	{
+		SlashTrailFX = SlashTrailFinder.Object;
+	}
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder(
+		TEXT("/Game/Night/Course/VFX/ns/phase1-shouji1.phase1-shouji1"));
+	if (HitImpactFinder.Succeeded())
+	{
+		HitImpactFX = HitImpactFinder.Object;
 	}
 #pragma endregion K2 moonyfli
 
@@ -315,6 +330,44 @@ void ANightCoursePawn::AttachKnifeToHand()
 		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 		Socket);
 }
+
+#pragma region K2 moonyfli
+void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
+{
+	if (SlashTrailFX)
+	{
+		if (KnifeMesh)
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAttached(
+				SlashTrailFX,
+				KnifeMesh,
+				NAME_None,
+				FVector::ZeroVector,
+				FRotator::ZeroRotator,
+				EAttachLocation::SnapToTarget,
+				true);
+		}
+		else if (UWorld* World = GetWorld())
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				World,
+				SlashTrailFX,
+				GetActorLocation());
+		}
+	}
+
+	if (HitImpactFX)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				World,
+				HitImpactFX,
+				HitWorldLocation);
+		}
+	}
+}
+#pragma endregion K2 moonyfli
 
 void ANightCoursePawn::BeginPlay()
 {

@@ -1,4 +1,6 @@
 #include "Night/Course/NightFoeActor.h"
+#include "Night/Course/NightCoursePawn.h" //add by K2
+#include "Kismet/GameplayStatics.h" //add by K2
 
 #pragma region K2 moonyfli
 ANightFoeActor::ANightFoeActor()
@@ -12,6 +14,10 @@ void ANightFoeActor::OnResolved_Implementation(ENightJudgeOutcome Outcome)
 {
 	if (Outcome == ENightJudgeOutcome::Success)
 	{
+		if (ANightCoursePawn* Hero = Cast<ANightCoursePawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+		{
+			Hero->PlayAttackVFX(GetActorLocation());
+		}
 		PlaySlashVFX();
 		PlayDropBurst(Spec.DropId, Spec.DropCount);
 	}

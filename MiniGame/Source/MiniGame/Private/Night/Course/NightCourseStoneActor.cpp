@@ -1,10 +1,12 @@
 #include "Night/Course/NightCourseStoneActor.h"
+#include "Night/Course/NightCoursePawn.h" //add by K2
 #include "Components/SceneComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Kismet/GameplayStatics.h" //add by K2
 
 #pragma region K2 moonyfli
 ANightCourseStoneActor::ANightCourseStoneActor()
@@ -278,6 +280,23 @@ void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 	}
 
 	Spec.bHasFoe = false;
+
+#pragma region K2 moonyfli
+	FVector HitLoc = GetActorLocation() + FVector(0.f, 0.f, FoeHeightOffsetCm);
+	if (bSkeletalVisible && FoeSkeletalMeshComponent)
+	{
+		HitLoc = FoeSkeletalMeshComponent->GetComponentLocation();
+	}
+	else if (bCapsuleVisible && FoeCapsule)
+	{
+		HitLoc = FoeCapsule->GetComponentLocation();
+	}
+	if (ANightCoursePawn* Hero = Cast<ANightCoursePawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+	{
+		Hero->PlayAttackVFX(HitLoc);
+	}
+#pragma endregion K2 moonyfli
+
 	PlayFoeClearedVFX();
 	PlaySlashVFX();
 

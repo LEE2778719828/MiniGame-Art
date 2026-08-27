@@ -19,6 +19,7 @@ class USkeletalMeshComponent;
 class UAnimSequence;
 class UCameraShakeBase;
 class UNightCourseDirector;
+class UNiagaraSystem;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -71,6 +72,14 @@ public:
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> KnifeMesh;
+
+	/** First-tier slash trail. Swap later when combo picks DG2–4. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	TObjectPtr<UNiagaraSystem> SlashTrailFX;
+
+	/** First-tier hit burst at the foe. Swap later when combo picks phase2–4. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	TObjectPtr<UNiagaraSystem> HitImpactFX;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
@@ -286,6 +295,10 @@ public:
 #pragma region K2 moonyfli
 	/** Rebind the knife after the skeletal mesh exists so KnifeSocket can resolve. */
 	void AttachKnifeToHand();
+
+	/** Spawn DG1 on the knife and the hit burst at HitWorldLocation. Combo tiers come later. */
+	UFUNCTION(BlueprintCallable, Category = "Night|VFX")
+	void PlayAttackVFX(const FVector& HitWorldLocation);
 #pragma endregion K2 moonyfli
 
 protected:
