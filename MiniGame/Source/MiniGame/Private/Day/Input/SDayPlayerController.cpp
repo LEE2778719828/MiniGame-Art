@@ -53,20 +53,25 @@ void ASDayPlayerController::BeginPlay()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 
-	ActivateDayPointerContext();
+	bDayPointerContextActive = ActivateDayPointerContext();
 	ResolveBoardPresenter();
 }
 
-void ASDayPlayerController::ActivateDayPointerContext()
+bool ASDayPlayerController::ActivateDayPointerContext()
 {
 	UEnhancedInputLocalPlayerSubsystem* Subsystem =
 		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
-	if (!Subsystem || !MappingContext)
+	if (!Subsystem || !MappingContext || !PointerPressAction)
 	{
-		return;
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Day pointer Enhanced Input is unavailable; using the presenter raw pointer fallback."));
+		return false;
 	}
 
 	Subsystem->AddMappingContext(MappingContext, 0);
+	return true;
 }
 
 void ASDayPlayerController::BindPointerActions()
@@ -106,8 +111,8 @@ void ASDayPlayerController::RegisterBoardPresenter(ASDayBoardPresenter* Presente
 		return;
 	}
 	BoardPresenter = Presenter;
-	Presenter->SetUseExternalPointerDriver(true);
-	bDrivingBoardPointer = true;
+	bDrivingBoardPointer = bDayPointerContextActive;
+	Presenter->SetUseExternalPointerDriver(bDrivingBoardPointer);
 }
 
 void ASDayPlayerController::ResolveBoardPresenter()

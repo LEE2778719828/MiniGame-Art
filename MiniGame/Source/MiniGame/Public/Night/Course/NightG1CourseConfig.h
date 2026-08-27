@@ -14,6 +14,7 @@ class UNightCourseAtomRouteData;
 class UNightCourseRuleData;
 class UNightRouteRulesAsset;
 class ANightRoadsideSegmentActor;
+class UMaterialInterface;
 
 USTRUCT(BlueprintType)
 struct MINIGAME_API FNightLevelCourseRule
@@ -137,6 +138,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Fork", meta = (DisplayName = "分支入口跳跃间距", ToolTip = "特殊岔路出口到首个分支 Atom 的衔接跳跃距离，单位 cm。"))
 	float BranchEntryGapCm = 280.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Post Process", meta = (DisplayName = "默认跑酷后处理材质实例", ToolTip = "进入跑酷时使用的基础后处理材质实例；分支路线没有单独配置时也回退到这里。"))
+	TObjectPtr<UMaterialInterface> DefaultPostProcessMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Post Process", meta = (DisplayName = "后处理体积Actor Tag", ToolTip = "非空时只修改带此 Actor Tag 的 PostProcessVolume；为空时使用关卡中的第一个 Unbound PostProcessVolume。"))
+	FName PostProcessVolumeTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Post Process", meta = (DisplayName = "后处理材质权重", ToolTip = "默认和分支后处理材质加入 PostProcessVolume 时使用的混合权重。", ClampMin = "0.0"))
+	float PostProcessMaterialWeight = 1.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "启用运行时动态装卸", ToolTip = "开启后只生成玩家附近课程 Actor，远离玩家且已经走过的 Actor 会 Destroy；关闭后恢复整条课程一次性生成。"))
 	bool bEnableRuntimeActorStreaming = true;
 

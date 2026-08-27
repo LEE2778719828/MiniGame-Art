@@ -5,6 +5,7 @@
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightCourseHUD.h"
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightFeelStubComponent.h"
@@ -1069,6 +1070,7 @@ void ANightCourseHost::ResetCourse()
 	{
 		Director->ResetCourse();
 	}
+	ClearPendingResultPresentation(true);
 	ClearCourseResult();
 	EmitDebugMessage(TEXT("NightCourse reset."), false);
 }
@@ -1135,7 +1137,40 @@ void ANightCourseHost::HandleFinished(const FNightResult& Result)
 			TEXT("[NightCourse][Stage=Flow] Day rejected the Night result; automatic transition/retry was not applied."));
 	}
 
-	if (Result.bSuccess && !Result.bFailedMidway)
+	if (bWaitForResultPresentation)
+	{
+		ANightCourseHUD* NightHUD = nullptr;
+		if (APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+		{
+			NightHUD = Cast<ANightCourseHUD>(PC->GetHUD());
+		}
+		if (NightHUD)
+		{
+			NightHUD->OnNightResultContinueRequested.RemoveDynamic(
+				this,
+				&ANightCourseHost::HandleNightResultContinueRequested);
+			NightHUD->OnNightResultContinueRequested.AddDynamic(
+				this,
+				&ANightCourseHost::HandleNightResultContinueRequested);
+			bPendingDayFlowAccepted = bDayFlowAccepted;
+			bAwaitingResultContinue = true;
+			const bool bPresented = NightHUD->PresentNightResult(Result);
+			if (bPresented || !bAwaitingResultContinue)
+			{
+				return;
+			}
+
+			// Missing embedded result widget: preserve the previous immediate flow.
+			ClearPendingResultPresentation(false);
+		}
+	}
+
+	ApplyPostResultFlow(bDayFlowAccepted);
+}
+
+void ANightCourseHost::ApplyPostResultFlow(bool bDayFlowAccepted)
+{
+	if (LastResult.bSuccess && !LastResult.bFailedMidway)
 	{
 		if (bDayFlowAccepted)
 		{
@@ -1145,7 +1180,7 @@ void ANightCourseHost::HandleFinished(const FNightResult& Result)
 	}
 
 	if (bAutoRetryOnFailure
-		&& !Result.bSuccess
+		&& !LastResult.bSuccess
 		&& Director
 		&& Director->DidEnterRuntimeCourse()
 		&& bDayFlowAccepted)
@@ -1163,6 +1198,42 @@ void ANightCourseHost::HandleFinished(const FNightResult& Result)
 				Display,
 				TEXT("[NightCourse][Stage=Flow] Gameplay failure accepted; retry scheduled in %.2fs."),
 				FMath::Max(0.05f, AutoRetryDelaySeconds));
+		}
+	}
+}
+
+void ANightCourseHost::HandleNightResultContinueRequested()
+{
+	ContinueAfterNightResult();
+}
+
+void ANightCourseHost::ContinueAfterNightResult()
+{
+	if (!bAwaitingResultContinue)
+	{
+		return;
+	}
+
+	const bool bDayFlowAccepted = bPendingDayFlowAccepted;
+	ClearPendingResultPresentation(true);
+	ApplyPostResultFlow(bDayFlowAccepted);
+}
+
+void ANightCourseHost::ClearPendingResultPresentation(bool bHideHUD)
+{
+	bAwaitingResultContinue = false;
+	bPendingDayFlowAccepted = false;
+	if (APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+	{
+		if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+		{
+			NightHUD->OnNightResultContinueRequested.RemoveDynamic(
+				this,
+				&ANightCourseHost::HandleNightResultContinueRequested);
+			if (bHideHUD)
+			{
+				NightHUD->HideNightResult();
+			}
 		}
 	}
 }

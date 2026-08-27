@@ -19,6 +19,7 @@ class AStaticMeshActor;
 class AActor;
 class AGameModeBase;
 class UWorld;
+class ANightCourseHUD;
 
 #pragma region K2 moonyfli
 /**
@@ -58,6 +59,13 @@ public:
 	/** Open the configured Day level after a successful Night run. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功后切Day", ToolTip = "Night 成功后是否打开配置的 Day 关卡。"))
 	bool bTravelToDayOnSuccess = true;
+
+	/** Show WBP_Success/WBP_Failed and wait for its Blueprint button/animation before changing flow. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow|Result", meta = (DisplayName = "等待结算界面确认"))
+	bool bWaitForResultPresentation = true;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Flow|Result")
+	bool bAwaitingResultContinue = false;
 
 	/** Primary per-level Day destination. Leave empty to use the GameMode fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功Day关卡", ToolTip = "Night 成功后要打开的 Day World；为空时使用 GameMode 回退。"))
@@ -139,6 +147,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course|Result")
 	FNightResult GetCourseResult() const { return LastResult; }
 
+	/** Can also be called directly from Blueprint; normally the HUD result button calls its request function. */
+	UFUNCTION(BlueprintCallable, Category = "Night|Course|Result")
+	void ContinueAfterNightResult();
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course|Debug")
 	FString GetLastFailureReason() const { return LastFailureReason; }
 
@@ -163,6 +175,9 @@ protected:
 	void HandleFinished(const FNightResult& Result);
 
 	UFUNCTION()
+	void HandleNightResultContinueRequested();
+
+	UFUNCTION()
 	void HandleDirectorDebugMessage(const FString& Message, bool bIsError);
 
 	UFUNCTION()
@@ -175,6 +190,8 @@ protected:
 	void PrepareChefNightFlow();
 	void RetryAfterFailure();
 	void TravelToDay();
+	void ApplyPostResultFlow(bool bDayFlowAccepted);
+	void ClearPendingResultPresentation(bool bHideHUD);
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> StageCubeMesh;
@@ -184,5 +201,6 @@ protected:
 
 	FTimerHandle AutoStartTimer;
 	FTimerHandle RetryTimer;
+	bool bPendingDayFlowAccepted = false;
 };
 #pragma endregion K2 moonyfli

@@ -14,6 +14,8 @@
 
 class UTextBlock;
 class UTexture2D;
+class UImage;
+class UWorld;
 class UUniformGridPanel;
 class ASMergeBoard;
 class USDebugPanel;
@@ -752,6 +754,26 @@ struct FSSpecialNpcState
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSSandboxStateChanged);
 
+/** Persistent full-screen Loading layer used during Day <-> Night OpenLevel travel. */
+UCLASS(Blueprintable)
+class MINIGAME_API USceneLoadingScreenWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void SetLoadingTexture(UTexture2D* InTexture);
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> LoadingImage;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> LoadingTexture;
+};
+
 UCLASS()
 class MINIGAME_API USChefGameInstance : public UGameInstance
 {
@@ -759,6 +781,33 @@ class MINIGAME_API USChefGameInstance : public UGameInstance
 
 public:
 	virtual void Init() override;
+	virtual void Shutdown() override;
+
+	/** Optional project-level fallback texture. HUDs can register the same texture at runtime. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Flow|Loading")
+	TSoftObjectPtr<UTexture2D> SceneLoadingTexture;
+
+	/** Optional custom Loading WBP. If unset, C++ builds a 20:9 ScaleToFit image widget. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Flow|Loading")
+	TSoftClassPtr<UUserWidget> SceneLoadingWidgetClass;
+
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Flow|Loading")
+	bool bEnableSceneLoadingScreen = true;
+
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Flow|Loading", meta = (ClampMin = "0"))
+	int32 SceneLoadingZOrder = 10000;
+
+	/** HUDs call this when their configured loading texture is available. */
+	void RegisterSceneLoadingTexture(const TSoftObjectPtr<UTexture2D>& InTexture);
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow|Loading")
+	void ShowSceneLoadingScreen();
+
+	UFUNCTION(BlueprintCallable, Category = "S Flow|Loading")
+	void HideSceneLoadingScreen();
+
+	UFUNCTION(BlueprintPure, Category = "S Flow|Loading")
+	bool IsSceneLoadingScreenVisible() const { return bSceneLoadingVisible; }
 
 	UFUNCTION(BlueprintCallable, Category = "S Sandbox")
 	bool ConsumeNightResult(const FSNightResult& Result);
@@ -1151,6 +1200,14 @@ public:
 	FString LastSaveFeedback = TEXT("尚未存档。");
 
 private:
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> SceneLoadingWidget;
+
+	FDelegateHandle PreLoadMapDelegateHandle;
+	FDelegateHandle PostLoadMapDelegateHandle;
+	bool bSceneLoadingVisible = false;
+	bool bSceneLoadingUsingMoviePlayer = false;
+
 	static const TCHAR* SaveSlotName;
 	static const int32 SaveUserIndex;
 
@@ -1159,6 +1216,9 @@ private:
 
 	UPROPERTY()
 	TSet<FString> ConsumedResultIds;
+
+	void HandlePreLoadMap(const FString& MapName);
+	void HandlePostLoadMap(UWorld* LoadedWorld);
 
 	bool IsKnownIngredient(FName IngredientId) const;
 	void InitializeIngredientMaps();

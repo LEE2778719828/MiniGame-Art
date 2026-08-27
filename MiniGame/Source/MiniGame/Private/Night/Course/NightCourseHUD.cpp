@@ -3,13 +3,21 @@
 #include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "../../../SStandaloneSandbox.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/Button.h"
+#include "Components/EditableTextBox.h"
+#include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h" //add by K2
+#include "Components/Widget.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
-#include "UObject/ConstructorHelpers.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
 #pragma region K2 moonyfli
@@ -58,16 +66,22 @@ bool ANightCourseHUD::HitTestActionButtons(
 
 ANightCourseHUD::ANightCourseHUD()
 {
-	static ConstructorHelpers::FClassFinder<UUserWidget> MainHUDClass(
-		TEXT("/Game/Night/Course/Blueprints/WBP_NightHUD_Multi"));
-	if (MainHUDClass.Succeeded())
-	{
-		MainHUDWidgetClass = MainHUDClass.Class;
-	}
+	SuccessIngredientTextWidgetNames.Add(EIngredientId::F01_LingGu, TEXT("1"));
+	SuccessIngredientTextWidgetNames.Add(EIngredientId::F02_YinShanJun, TEXT("2"));
+	SuccessIngredientTextWidgetNames.Add(EIngredientId::F03_ChiYanJiao, TEXT("3"));
+	SuccessIngredientTextWidgetNames.Add(EIngredientId::F04_YueLinYu, TEXT("4"));
+	SuccessIngredientTextWidgetNames.Add(EIngredientId::F05_XuanYuQin, TEXT("5"));
 }
 void ANightCourseHUD::BeginPlay()
 {
 	Super::BeginPlay();
+	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
+	{
+		if (!SceneLoadingTexture.IsNull())
+		{
+			GameInstance->RegisterSceneLoadingTexture(SceneLoadingTexture);
+		}
+	}
 	EnsureMainHUD();
 }
 
@@ -76,6 +90,16 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	HealthBarWidget = nullptr;
 	ComboWidget = nullptr;
 	ComboCountText = nullptr;
+	if (SuccessResultWidget)
+	{
+		SuccessResultWidget->RemoveFromParent();
+		SuccessResultWidget = nullptr;
+	}
+	if (FailureResultWidget)
+	{
+		FailureResultWidget->RemoveFromParent();
+		FailureResultWidget = nullptr;
+	}
 	if (MainHUDWidget)
 	{
 		MainHUDWidget->RemoveFromParent();
@@ -85,6 +109,15 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 }
 void ANightCourseHUD::EnsureMainHUD()
 {
+	// Resolve the widget only after the HUD CDO has finished loading. Resolving it in the
+	// constructor can recursively load this HUD's CDO through the widget blueprint and deadlock
+	// the function-local static FClassFinder guard.
+	if (!MainHUDWidgetClass)
+	{
+		MainHUDWidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Night/Course/Blueprints/WBP_NightHUD_Multi.WBP_NightHUD_Multi_C"));
+	}
 	if (MainHUDWidget || !MainHUDWidgetClass)
 	{
 		return;
@@ -102,7 +135,13 @@ void ANightCourseHUD::EnsureMainHUD()
 	MainHUDWidget->AddToViewport(20);
 	MainHUDPlacement = FVector2D(-1.f, -1.f);
 	MainHUDWidget->SetRenderTransformPivot(FVector2D(0.f, 0.f));
-	MainHUDWidget->SetRenderScale(FVector2D(MainHUDScale, MainHUDScale));
+	MainHUDWidget->SetRenderScale(
+		bUseLegacyHUDPlacement
+			? FVector2D(MainHUDScale, MainHUDScale)
+			: FVector2D(1.f, 1.f));
+
+	EnsureResultWidgets();
+	HideNightResult();
 
 	HealthBarWidget = Cast<UUserWidget>(
 		MainHUDWidget->GetWidgetFromName(TEXT("WBP_HealthBar")));
@@ -133,6 +172,261 @@ void ANightCourseHUD::EnsureMainHUD()
 	}
 #pragma endregion K2 moonyfli
 }
+
+void ANightCourseHUD::EnsureResultWidgets()
+{
+	if (!SuccessResultWidgetClass)
+	{
+		SuccessResultWidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Night/Course/Blueprints/WBP_Success.WBP_Success_C"));
+	}
+	if (!FailureResultWidgetClass)
+	{
+		FailureResultWidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Night/Course/Blueprints/WBP_Failed.WBP_Failed_C"));
+	}
+
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (!SuccessResultWidget && SuccessResultWidgetClass)
+	{
+		SuccessResultWidget = CreateWidget<UUserWidget>(PC, SuccessResultWidgetClass);
+		if (SuccessResultWidget)
+		{
+			SuccessResultWidget->AddToViewport(ResultWidgetZOrder);
+			SuccessResultWidget->SetVisibility(ESlateVisibility::Collapsed);
+			ConfigureResultWidget(SuccessResultWidget, SuccessContinueButtonName);
+		}
+	}
+	if (!FailureResultWidget && FailureResultWidgetClass)
+	{
+		FailureResultWidget = CreateWidget<UUserWidget>(PC, FailureResultWidgetClass);
+		if (FailureResultWidget)
+		{
+			FailureResultWidget->AddToViewport(ResultWidgetZOrder);
+			FailureResultWidget->SetVisibility(ESlateVisibility::Collapsed);
+			ConfigureResultWidget(FailureResultWidget, FailureContinueButtonName);
+		}
+	}
+}
+
+void ANightCourseHUD::ConfigureResultWidget(UUserWidget* ResultWidget, const FName ContinueButtonName)
+{
+	if (!ResultWidget)
+	{
+		return;
+	}
+
+	UButton* ContinueButton = Cast<UButton>(ResultWidget->GetWidgetFromName(ContinueButtonName));
+	if (!ContinueButton && ResultWidget->WidgetTree)
+	{
+		if (UCanvasPanel* RootCanvas = Cast<UCanvasPanel>(ResultWidget->GetRootWidget()))
+		{
+			ContinueButton = ResultWidget->WidgetTree->ConstructWidget<UButton>(
+				UButton::StaticClass(),
+				ContinueButtonName);
+			if (UCanvasPanelSlot* ButtonSlot = RootCanvas->AddChildToCanvas(ContinueButton))
+			{
+				ButtonSlot->SetPosition(RuntimeContinueButtonPosition);
+				ButtonSlot->SetSize(RuntimeContinueButtonSize);
+				ButtonSlot->SetZOrder(100);
+				ContinueButton->SetRenderOpacity(0.f);
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("[NightHUD] Created runtime continue button '%s' for '%s'."),
+					*ContinueButtonName.ToString(),
+					*ResultWidget->GetName());
+			}
+		}
+	}
+
+	if (!ContinueButton)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightHUD] Result widget '%s' is missing button '%s' and has no Canvas root for a runtime fallback."),
+			*ResultWidget->GetName(),
+			*ContinueButtonName.ToString());
+		return;
+	}
+
+	ContinueButton->OnClicked.RemoveDynamic(this, &ANightCourseHUD::RequestContinueAfterNightResult);
+	ContinueButton->OnClicked.AddDynamic(this, &ANightCourseHUD::RequestContinueAfterNightResult);
+}
+void ANightCourseHUD::ApplySuccessIngredientCounts(const FNightResult& Result)
+{
+	if (!SuccessResultWidget)
+	{
+		return;
+	}
+
+	TMap<EIngredientId, int32> Counts;
+	for (const FIngredientStack& Stack : Result.Ingredients)
+	{
+		if (Stack.Id != EIngredientId::None)
+		{
+			Counts.FindOrAdd(Stack.Id) += FMath::Max(0, Stack.Count);
+		}
+	}
+
+	for (const TPair<EIngredientId, FName>& Binding : SuccessIngredientTextWidgetNames)
+	{
+		UWidget* Target = SuccessResultWidget->GetWidgetFromName(Binding.Value);
+		if (!Target)
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightHUD] WBP_Success is missing ingredient text widget '%s' for Ingredient=%d."),
+				*Binding.Value.ToString(),
+				static_cast<int32>(Binding.Key));
+			continue;
+		}
+
+		FFormatOrderedArguments Arguments;
+		Arguments.Add(FText::AsNumber(Counts.FindRef(Binding.Key)));
+		const FText CountText = FText::Format(
+			FText::FromString(SuccessIngredientCountFormat),
+			Arguments);
+
+		if (UTextBlock* TextBlock = Cast<UTextBlock>(Target))
+		{
+			TextBlock->SetText(CountText);
+		}
+		else if (URichTextBlock* RichTextBlock = Cast<URichTextBlock>(Target))
+		{
+			RichTextBlock->SetText(CountText);
+		}
+		else if (UEditableTextBox* EditableTextBox = Cast<UEditableTextBox>(Target))
+		{
+			EditableTextBox->SetIsReadOnly(true);
+			EditableTextBox->SetText(CountText);
+		}
+		else
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightHUD] Ingredient widget '%s' has unsupported class '%s'."),
+				*Binding.Value.ToString(),
+				*Target->GetClass()->GetName());
+		}
+	}
+}
+
+void ANightCourseHUD::SetResultInputMode(UUserWidget* ActiveResultWidget)
+{
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (ActiveResultWidget)
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(ActiveResultWidget->TakeWidget());
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
+	else
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
+	}
+}
+bool ANightCourseHUD::PresentNightResult(const FNightResult& Result)
+{
+	EnsureMainHUD();
+	EnsureResultWidgets();
+	CurrentNightResult = Result;
+
+	const bool bSucceeded = Result.bSuccess && !Result.bFailedMidway;
+	if (bSucceeded)
+	{
+		ApplySuccessIngredientCounts(Result);
+	}
+	UpdateMainHUDPlacement();
+
+	if (SuccessResultWidget)
+	{
+		SuccessResultWidget->SetVisibility(
+			bSucceeded ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (FailureResultWidget)
+	{
+		FailureResultWidget->SetVisibility(
+			bSucceeded ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+
+	UUserWidget* ActiveResultWidget = bSucceeded
+		? SuccessResultWidget.Get()
+		: FailureResultWidget.Get();
+	bNightResultVisible = ActiveResultWidget != nullptr;
+	if (bNightResultVisible)
+	{
+		if (MainHUDWidget)
+		{
+			MainHUDWidget->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		SetResultInputMode(ActiveResultWidget);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightHUD] Standalone result widget class for '%s' could not be loaded or created; flow will not wait for presentation."),
+			bSucceeded ? TEXT("Success") : TEXT("Failure"));
+	}
+
+	OnNightResultReady.Broadcast(Result);
+	BP_OnNightResultReady(Result);
+	return bNightResultVisible;
+}
+void ANightCourseHUD::HideNightResult()
+{
+	if (SuccessResultWidget)
+	{
+		SuccessResultWidget->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (FailureResultWidget)
+	{
+		FailureResultWidget->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (MainHUDWidget)
+	{
+		if (UWidget* EmbeddedSuccess = MainHUDWidget->GetWidgetFromName(TEXT("WBP_Success")))
+		{
+			EmbeddedSuccess->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		if (UWidget* EmbeddedFailure = MainHUDWidget->GetWidgetFromName(TEXT("WBP_Failed")))
+		{
+			EmbeddedFailure->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		MainHUDWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
+	SetResultInputMode(nullptr);
+	bNightResultVisible = false;
+}
+void ANightCourseHUD::RequestContinueAfterNightResult()
+{
+	if (!bNightResultVisible)
+	{
+		return;
+	}
+	HideNightResult();
+	OnNightResultContinueRequested.Broadcast();
+}
+
 void ANightCourseHUD::UpdateMainHUDPlacement()
 {
 	if (!MainHUDWidget)
@@ -164,13 +458,56 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 		GameH = Canvas->SizeY;
 	}
 
+	if (!bUseLegacyHUDPlacement)
+	{
+		const FVector2D GameViewportSize(GameW / Dpi, GameH / Dpi);
+		const FVector2D GameViewportOffset(
+			FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi,
+			FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi);
+
+		const float SafeDesignX = FMath::Max(1.f, HUDDesignSize.X);
+		const float SafeDesignY = FMath::Max(1.f, HUDDesignSize.Y);
+		HUDCameraFitScale = FMath::Min(
+			GameViewportSize.X / SafeDesignX,
+			GameViewportSize.Y / SafeDesignY);
+		HUDCameraFrameSize = FVector2D(SafeDesignX, SafeDesignY) * HUDCameraFitScale;
+		HUDCameraFrameOffset = GameViewportOffset
+			+ (GameViewportSize - HUDCameraFrameSize) * 0.5f;
+
+		MainHUDWidget->SetRenderScale(FVector2D(1.f, 1.f));
+		MainHUDWidget->SetPositionInViewport(HUDCameraFrameOffset, false);
+		MainHUDWidget->SetDesiredSizeInViewport(HUDCameraFrameSize);
+		auto PlaceResultWidget = [this](UUserWidget* ResultWidget)
+		{
+			if (!ResultWidget)
+			{
+				return;
+			}
+			ResultWidget->SetRenderScale(FVector2D(1.f, 1.f));
+			ResultWidget->SetPositionInViewport(HUDCameraFrameOffset, false);
+			ResultWidget->SetDesiredSizeInViewport(HUDCameraFrameSize);
+		};
+		PlaceResultWidget(SuccessResultWidget);
+		PlaceResultWidget(FailureResultWidget);
+
+		if (!HUDCameraFrameSize.Equals(LastNotifiedCameraFrameSize)
+			|| !HUDCameraFrameOffset.Equals(LastNotifiedCameraFrameOffset))
+		{
+			LastNotifiedCameraFrameSize = HUDCameraFrameSize;
+			LastNotifiedCameraFrameOffset = HUDCameraFrameOffset;
+			BP_OnHUDCameraFrameChanged(
+				HUDCameraFrameOffset,
+				HUDCameraFrameSize,
+				HUDCameraFitScale);
+		}
+		return;
+	}
+
 	const FVector2D Placement(
 		FMath::Max(0.f, (static_cast<float>(FullX) - GameW) * 0.5f) / Dpi + MainHUDLeftMargin,
 		FMath::Max(0.f, (static_cast<float>(FullY) - GameH) * 0.5f) / Dpi + MainHUDTopMargin);
 
-	// MainHUDScale is authored against the 1920x1080 design space.
-	// The global UMG DPI scale is already applied by Slate; compensate it here so portrait
-	// devices do not shrink the HUD a second time under UIScaleRule=ShortestSide.
+	// Legacy path for old maps which still use a fixed top-left placement.
 	const float EffectiveHUDScale = MainHUDScale / Dpi;
 	if (Placement.Equals(MainHUDPlacement)
 		&& FMath::IsNearlyEqual(MainHUDWidget->GetRenderTransform().Scale.X, EffectiveHUDScale))

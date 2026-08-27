@@ -15,7 +15,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 
-#if WITH_AUTOMATION_TESTS
+#if WITH_AUTOMATION_TESTS && !MINIGAME_DEFER_AUTOMATION_TESTS
 
 namespace NightCourseAutomation_Private
 {

@@ -38,7 +38,7 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	void ActivateDayPointerContext();
+	bool ActivateDayPointerContext();
 	void BindPointerActions();
 	void ResolveBoardPresenter();
 	void ReadPointerScreenPosition(FVector2D& OutScreenPosition, bool bPreferTouch) const;
@@ -48,6 +48,7 @@ private:
 	void HandlePointerCanceled();
 
 	TWeakObjectPtr<ASDayBoardPresenter> BoardPresenter;
+	bool bDayPointerContextActive = false;
 	bool bDrivingBoardPointer = false;
 	bool bActivePointerIsTouch = false;
 	FVector2D PressScreenPosition = FVector2D::ZeroVector;

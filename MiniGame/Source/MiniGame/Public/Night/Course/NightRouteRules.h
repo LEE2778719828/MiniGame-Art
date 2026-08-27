@@ -5,6 +5,8 @@
 #include "Night/Shared/NightSharedTypes.h"
 #include "NightRouteRules.generated.h"
 
+class UMaterialInterface;
+
 #pragma region K2 moonyfli
 /** Per-route modifiers for branch segment (A/B/C fully tunable). */
 USTRUCT(BlueprintType)
@@ -22,6 +24,10 @@ struct FNightRouteRuleRow
 	/** Longitudinal distance from the runner within which branch Actors stay visible. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route", meta = (DisplayName = "分支Actor可见距离", ToolTip = "以主角当前位置为中心，沿课程轨道前后保持分支 Actor 可见并参与流式生成的距离，单位 cm。", ClampMin = "1.0"))
 	float VisibleDistanceCm = 3000.f;
+
+	/** Optional post-process material instance selected for this branch. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route|Art", meta = (DisplayName = "分支后处理材质实例", ToolTip = "玩家选择本路线后替换跑酷默认后处理材质。建议绑定材质实例；为空时继续使用 DA_Course 的默认跑酷后处理材质。"))
+	TObjectPtr<UMaterialInterface> PostProcessMaterial = nullptr;
 
 	/** Multiplies Wrong/Miss soul penalty while on branch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route", meta = (DisplayName = "灵魂惩罚倍率", ToolTip = "分支期间错误/漏判惩罚的倍率，1 表示不变。"))
