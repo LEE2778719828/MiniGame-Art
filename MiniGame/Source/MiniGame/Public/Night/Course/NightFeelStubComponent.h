@@ -61,6 +61,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel")
 	float Soul = 100.f;
 
+#pragma region K2 moonyfli
+	/** Successful jump or slash +1; miss / wrong button clears. 0 hides the combo HUD. */
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
+	int32 Combo = 0;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
 	FNightJudgeRequest ActiveRequest;
 

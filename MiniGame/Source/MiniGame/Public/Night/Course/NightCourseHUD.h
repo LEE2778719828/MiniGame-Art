@@ -6,6 +6,7 @@
 #include "NightCourseHUD.generated.h"
 
 class UUserWidget;
+class UTextBlock;
 
 #pragma region K2 moonyfli
 /** G1 parkour HUD host: composite UMG, soul updates, window prompt and key hints. */
@@ -60,11 +61,21 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> HealthBarWidget;
 
+#pragma region K2 moonyfli
+	/** Nested WBP_Combo instance owned by MainHUDWidget. */
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> ComboWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ComboCountText;
+#pragma endregion K2 moonyfli
+
 	FVector2D MainHUDPlacement = FVector2D(-1.f, -1.f);
 
 	void EnsureMainHUD();
 	void UpdateMainHUDPlacement();
 	void PushSoulToHealthBar(float Soul);
 	void SetHealthBarNumeric(FName PropertyName, double Value);
+	void PushComboToHUD(int32 Combo); //add by K2
 };
 #pragma endregion K2 moonyfli

@@ -5,6 +5,7 @@
 #include "Night/Course/NightCourseTypes.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/TextBlock.h" //add by K2
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
@@ -73,6 +74,8 @@ void ANightCourseHUD::BeginPlay()
 void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	HealthBarWidget = nullptr;
+	ComboWidget = nullptr;
+	ComboCountText = nullptr;
 	if (MainHUDWidget)
 	{
 		MainHUDWidget->RemoveFromParent();
@@ -103,15 +106,32 @@ void ANightCourseHUD::EnsureMainHUD()
 
 	HealthBarWidget = Cast<UUserWidget>(
 		MainHUDWidget->GetWidgetFromName(TEXT("WBP_HealthBar")));
-	if (!HealthBarWidget)
+	if (HealthBarWidget)
+	{
+		SetHealthBarNumeric(TEXT("FullBarWidth"), HealthBarDesignSize.X);
+	}
+	else
 	{
 		UE_LOG(
 			LogTemp,
 			Error,
 			TEXT("[NightHUD] WBP_NightHUD_Multi is missing its nested WBP_HealthBar widget; Soul falls back to Canvas text."));
-		return;
 	}
-	SetHealthBarNumeric(TEXT("FullBarWidth"), HealthBarDesignSize.X);
+
+#pragma region K2 moonyfli
+	ComboWidget = Cast<UUserWidget>(MainHUDWidget->GetWidgetFromName(TEXT("WBP_Combo")));
+	if (ComboWidget)
+	{
+		ComboCountText = Cast<UTextBlock>(ComboWidget->GetWidgetFromName(TEXT("Txt_ComboCount")));
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightHUD] WBP_NightHUD_Multi is missing nested WBP_Combo; combo count will stay hidden."));
+	}
+#pragma endregion K2 moonyfli
 }
 void ANightCourseHUD::UpdateMainHUDPlacement()
 {
@@ -178,6 +198,24 @@ void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
 			Num->ContainerPtrToValuePtr<void>(HealthBarWidget), Value);
 	}
 }
+
+#pragma region K2 moonyfli
+void ANightCourseHUD::PushComboToHUD(int32 Combo)
+{
+	EnsureMainHUD();
+	if (!ComboWidget)
+	{
+		return;
+	}
+
+	const bool bShow = Combo > 0;
+	ComboWidget->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	if (bShow && ComboCountText)
+	{
+		ComboCountText->SetText(FText::AsNumber(Combo));
+	}
+}
+#pragma endregion K2 moonyfli
 
 void ANightCourseHUD::PushSoulToHealthBar(float Soul)
 {
@@ -280,6 +318,7 @@ void ANightCourseHUD::DrawHUD()
 	}
 
 	PushSoulToHealthBar(Soul);
+	PushComboToHUD(Feel ? Feel->Combo : 0);
 	UpdateMainHUDPlacement();
 	if (!HealthBarWidget)
 	{
