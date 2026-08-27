@@ -190,7 +190,7 @@ protected:
 	void PrepareChefNightFlow();
 	void RetryAfterFailure();
 	void TravelToDay();
-	void ApplyPostResultFlow(bool bDayFlowAccepted);
+	void ApplyPostResultFlow(bool bDayFlowAccepted, bool bManualContinue = false);
 	void ClearPendingResultPresentation(bool bHideHUD);
 
 	UPROPERTY()

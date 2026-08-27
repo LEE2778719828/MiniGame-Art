@@ -241,7 +241,7 @@ public:
 	void SetTrackTarget(const FVector& WorldLocation, const FRotator& WorldRotation);
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
-	void BeginTrackAdvance(const FVector& WorldLocation, const FRotator& WorldRotation, float SpeedCmPerSec);
+	void BeginTrackAdvance(const FVector& WorldLocation, const FRotator& WorldRotation, float SpeedCmPerSec, bool bUseRawSpeed = false);
 
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	bool IsTrackAdvancing() const { return bTrackAdvancing; }

@@ -418,7 +418,7 @@ void ANightCoursePawn::SetTrackTarget(const FVector& WorldLocation, const FRotat
 	AdvanceTargetRotation = WorldRotation;
 }
 
-void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRotator& WorldRotation, float SpeedCmPerSec)
+void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRotator& WorldRotation, float SpeedCmPerSec, bool bUseRawSpeed)
 {
 	AdvanceTargetLocation = WorldLocation;
 	AdvanceTargetRotation = WorldRotation;
@@ -426,7 +426,9 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 
 	// add by K2 (R1): 动画驱动模式下丢掉 Director 传来的速度，改由锚点反推——
 	// 这样位移在动作的关键帧（落地 / 接触）那一刻结束，倍率一改两者一起缩放。
-	if (bAnimDrivenAdvance)
+	// 岔口过渡传 bUseRawSpeed=true：保留 Director 给的 ForkTransitionAdvanceSpeed，
+	// 避免大间距被 AnchorSeconds 压缩成瞬移。
+	if (!bUseRawSpeed && bAnimDrivenAdvance)
 	{
 		const float AnchorSeconds =
 			FMath::Max(10.f, bLastActionWasAttack ? AttackAnchorMs : JumpAnchorMs)
@@ -737,7 +739,9 @@ void ANightCoursePawn::Tick(float DeltaSeconds)
 
 	const FVector Current = GetActorLocation();
 	const FVector Next = FMath::VInterpConstantTo(Current, AdvanceTargetLocation, DeltaSeconds, AdvanceSpeed);
-	SetActorLocationAndRotation(Next, AdvanceTargetRotation);
+	// 朝向用恒定角速度平滑插值，避免进入分支时朝向瞬间弹到 TrackForward 造成的 POP。
+	const FRotator NextRot = FMath::RInterpConstantTo(GetActorRotation(), AdvanceTargetRotation, DeltaSeconds, 540.f);
+	SetActorLocationAndRotation(Next, NextRot);
 
 	if (FVector::DistSquared(Next, AdvanceTargetLocation) <= 4.f)
 	{

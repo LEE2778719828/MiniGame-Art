@@ -179,6 +179,12 @@ void USceneLoadingScreenWidget::SetLoadingTexture(UTexture2D* InTexture)
 void USChefGameInstance::Init()
 {
 	Super::Init();
+
+	
+	if (SceneLoadingTexture.IsNull())
+	{
+		SceneLoadingTexture = TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/UI/Loading/T_LoadingScene_20x9.T_LoadingScene_20x9")));
+	}
 	PreLoadMapDelegateHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &USChefGameInstance::HandlePreLoadMap);
 	PostLoadMapDelegateHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &USChefGameInstance::HandlePostLoadMap);
 	if (StageTable.IsNull())

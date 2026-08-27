@@ -3261,8 +3261,6 @@ void UNightCourseDirector::QueueSpawnedCourseActorsForDeferredDestroy()
 		{
 			return;
 		}
-		Actor->SetActorHiddenInGame(true);
-		Actor->SetActorEnableCollision(false);
 		DeferredRuntimeActors.Add(Actor);
 		++QueuedCount;
 	};
@@ -3299,6 +3297,17 @@ void UNightCourseDirector::QueueSpawnedCourseActorsForDeferredDestroy()
 		DeferredRuntimeActors.Num());
 }
 
+void UNightCourseDirector::HideDeferredRuntimeActors()
+{
+	for (AActor* Actor : DeferredRuntimeActors)
+	{
+		if (Actor)
+		{
+			Actor->SetActorHiddenInGame(true);
+			Actor->SetActorEnableCollision(false);
+		}
+	}
+}
 void UNightCourseDirector::DestroyDeferredRuntimeActors()
 {
 	// Destroy a bounded slice so route selection never pays the full cleanup
@@ -3874,6 +3883,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	bNearDeathGiftConsumed = false;
 	bBranchTransitionConsumed = false;
 	bBranchRemainderLoaded = false;
+	bBranchRemainderPreGenerated = false;
 	BranchBeatCount = 0;
 	BaseBeatCount = 0;
 	BranchTransitionBeatIndex = INDEX_NONE;
@@ -4066,69 +4076,10 @@ bool UNightCourseDirector::BuildPreparedBranchRoute(
 		return false;
 	}
 
-	FVector BranchRebaseOffset = FVector::ZeroVector;
-	if (NewForkAtomSpecs.Num() > 0)
-	{
-		ENightRouteId LeftRoute = ENightRouteId::None;
-		ENightRouteId RightRoute = ENightRouteId::None;
-		bool bForcedAB = false;
-		UNightForkController::ResolvePairRoutes(
-			ActiveForkPair,
-			LeftRoute,
-			RightRoute,
-			bForcedAB);
-		(void)bForcedAB;
-
-		const FTransform* SelectedExit = nullptr;
-		if (RouteId == LeftRoute)
-		{
-			SelectedExit = &NewForkAtomSpecs[0].LeftExitTransform;
-		}
-		else if (RouteId == RightRoute)
-		{
-			SelectedExit = &NewForkAtomSpecs[0].RightExitTransform;
-		}
-		if (SelectedExit)
-		{
-			const float SelectedExitX = SelectedExit->GetLocation().X;
-			BranchRebaseOffset.X = -SelectedExitX;
-			const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
-				? FVector::ForwardVector
-				: Config->TrackForward.GetSafeNormal();
-			for (FNightStoneSpec& Stone : NewStones)
-			{
-				if (Stone.bUseWorldPose)
-				{
-					Stone.WorldLocation += BranchRebaseOffset;
-					Stone.TrackDistance = NightCourseAtom_Private::GetTrackDistance(
-						Stone.WorldLocation,
-						Config->TrackOrigin,
-						TrackForward);
-				}
-				else
-				{
-					Stone.TrackDistance += FVector::DotProduct(
-						BranchRebaseOffset,
-						TrackForward);
-				}
-			}
-			for (FNightBridgeSpec& Bridge : NewBridges)
-			{
-				Bridge.WorldLocation += BranchRebaseOffset;
-			}
-			for (FNightAtomVisualBinding& Binding : NewVisualBindings)
-			{
-				Binding.LocalTransform.AddToTranslation(BranchRebaseOffset);
-			}
-			for (FNightForkAtomSpec& ForkAtom : NewForkAtomSpecs)
-			{
-				ForkAtom.WorldTransform.AddToTranslation(BranchRebaseOffset);
-				ForkAtom.LeftExitTransform.AddToTranslation(BranchRebaseOffset);
-				ForkAtom.RightExitTransform.AddToTranslation(BranchRebaseOffset);
-			}
-		}
-	}
-
+	// The Atom composer already anchors the first branch Atom to the selected fork exit.
+	// Keep the shared pre-fork course in authored world space; globally moving it causes
+	// a visible scene/pawn jump when the selected route is installed.
+	CourseWorldOffset = FVector::ZeroVector;
 	TArray<FNightRoadsidePropSpec> NewRoadsideSpecs;
 	if (!BuildRoadsideSpecs(
 		NewStones,
@@ -4166,7 +4117,7 @@ bool UNightCourseDirector::BuildPreparedBranchRoute(
 	OutPrepared.ForkAtoms = MoveTemp(NewForkAtomSpecs);
 	OutPrepared.RoadsideSpecs = MoveTemp(NewRoadsideSpecs);
 	OutPrepared.RouteRule = NewRouteRule;
-	OutPrepared.CourseWorldOffset = BranchRebaseOffset;
+	OutPrepared.CourseWorldOffset = FVector::ZeroVector;
 	return true;
 }
 
@@ -4371,6 +4322,7 @@ bool UNightCourseDirector::InstallPreparedBranchRoute(
 	bBranchTransitionConsumed = false;
 	bBranchSelected = true;
 	bBranchRemainderLoaded = false;
+	bBranchRemainderPreGenerated = false;
 	bForkPending = false;
 	BranchBeatCount = 0;
 	CurrentStoneIndex = FMath::Clamp(
@@ -4413,10 +4365,14 @@ bool UNightCourseDirector::InstallPreparedBranchRoute(
 		OutError = TEXT("Prepared branch runtime actor spawning failed; verify branch bindings.");
 		return false;
 	}
-	SyncPawnToProgress(true);
+	// The shared pre-fork stone remains in place; do not teleport the runner during route install.
+	HideDeferredRuntimeActors();
 	BranchEnterBufferEndTime =
 		ElapsedSeconds + FMath::Max(0.f, Config->BranchEnterBufferSeconds);
 	SetPhase(ENightCoursePhase::BranchEnterBuffer);
+	// 提前打开分支余量流式生成窗口：让分支首石之后的 atom 在 BranchEnterBuffer
+	// 期间就生成并可见，主角到达时地面已经存在（消除“只有衔接处一个”的卡顿 / 悬空）。
+	bBranchRemainderPreGenerated = true;
 	UpdateRouteVisibility();
 	return true;
 }
@@ -4488,7 +4444,8 @@ void UNightCourseDirector::HandleForkResolved(
 			static_cast<int32>(RouteTaken),
 			bTimedOut ? 1 : 0);
 		return;
-	}	FString BuildError;
+	}
+	FString BuildError;
 	if (!RebuildCourseForSelectedRoute(BuildError))
 	{
 		BeginFailure(BuildError);
@@ -4679,91 +4636,10 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		return false;
 	}
 
-	FVector BranchRebaseOffset = FVector::ZeroVector;
-	if (NewForkAtomSpecs.Num() > 0)
-	{
-		ENightRouteId LeftRoute = ENightRouteId::None;
-		ENightRouteId RightRoute = ENightRouteId::None;
-		bool bForcedAB = false;
-		UNightForkController::ResolvePairRoutes(
-			ActiveForkPair,
-			LeftRoute,
-			RightRoute,
-			bForcedAB);
-		(void)bForcedAB;
-
-		const FTransform* SelectedExit = nullptr;
-		if (CurrentRoute == LeftRoute)
-		{
-			SelectedExit = &NewForkAtomSpecs[0].LeftExitTransform;
-		}
-		else if (CurrentRoute == RightRoute)
-		{
-			SelectedExit = &NewForkAtomSpecs[0].RightExitTransform;
-		}
-
-		if (SelectedExit)
-		{
-			// Rebase only the generated course along world X. The selected
-			// fork exit becomes X=0 while Y/Z remain authored for terrain and
-			// branch-side alignment. The level's actors and World origin stay
-			// untouched.
-			const float SelectedExitX = SelectedExit->GetLocation().X;
-			BranchRebaseOffset.X = -SelectedExitX;
-			CourseWorldOffset = BranchRebaseOffset;
-			const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
-				? FVector::ForwardVector
-				: Config->TrackForward.GetSafeNormal();
-			for (FNightStoneSpec& Stone : NewStones)
-			{
-				if (Stone.bUseWorldPose)
-				{
-					Stone.WorldLocation += BranchRebaseOffset;
-					Stone.TrackDistance = NightCourseAtom_Private::GetTrackDistance(
-						Stone.WorldLocation,
-						Config->TrackOrigin,
-						TrackForward);
-				}
-				else
-				{
-					Stone.TrackDistance += FVector::DotProduct(
-						BranchRebaseOffset,
-						TrackForward);
-				}
-			}
-			for (FNightBridgeSpec& Bridge : NewBridges)
-			{
-				Bridge.WorldLocation += BranchRebaseOffset;
-			}
-			for (FNightAtomVisualBinding& Binding : NewVisualBindings)
-			{
-				Binding.LocalTransform.AddToTranslation(BranchRebaseOffset);
-			}
-			for (FNightForkAtomSpec& ForkAtom : NewForkAtomSpecs)
-			{
-				ForkAtom.WorldTransform.AddToTranslation(BranchRebaseOffset);
-				ForkAtom.LeftExitTransform.AddToTranslation(BranchRebaseOffset);
-				ForkAtom.RightExitTransform.AddToTranslation(BranchRebaseOffset);
-			}
-			UE_LOG(
-				LogTemp,
-				Display,
-				TEXT("[NightCourse][Stage=BranchRebase] route=%d selected fork exit X=%.2fcm; applied course offset %s."),
-				static_cast<int32>(CurrentRoute),
-				SelectedExitX,
-				*BranchRebaseOffset.ToCompactString());
-		}
-		else
-		{
-			CourseWorldOffset = FVector::ZeroVector;
-			UE_LOG(
-				LogTemp,
-				Warning,
-				TEXT("[NightCourse][Stage=BranchRebase] route=%d did not match either fork exit; course remains at its authored origin."),
-				static_cast<int32>(CurrentRoute));
-		}
-	}
-
+	// The Atom composer already anchors the first branch Atom to the selected fork exit.
+	// Keep the shared pre-fork course in authored world space; globally moving it causes
+	// a visible scene/pawn jump when the selected route is installed.
+	CourseWorldOffset = FVector::ZeroVector;
 	if (!BuildRoadsideSpecs(
 		NewStones,
 		NewBridges,
@@ -4834,6 +4710,7 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 	bBranchTransitionConsumed = false;
 	bBranchSelected = true;
 	bBranchRemainderLoaded = false;
+	bBranchRemainderPreGenerated = false;
 	bForkPending = false;
 	BranchBeatCount = 0;
 	CurrentStoneIndex = FMath::Clamp(
@@ -4878,10 +4755,14 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		OutError = TEXT("Branch runtime actor spawning failed; verify FoeActorMap, fork Atom mappings and bridge bindings.");
 		return false;
 	}
-	SyncPawnToProgress(true);
+	// The shared pre-fork stone remains in place; do not teleport the runner during route install.
+	HideDeferredRuntimeActors();
 	BranchEnterBufferEndTime =
 		ElapsedSeconds + FMath::Max(0.f, Config->BranchEnterBufferSeconds);
 	SetPhase(ENightCoursePhase::BranchEnterBuffer);
+	// 提前打开分支余量流式生成窗口：让分支首石之后的 atom 在 BranchEnterBuffer
+	// 期间就生成并可见，主角到达时地面已经存在（消除“只有衔接处一个”的卡顿 / 悬空）。
+	bBranchRemainderPreGenerated = true;
 	UpdateRouteVisibility();
 	return true;
 }
@@ -5169,10 +5050,28 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 	AdvanceTargetDistance = StoneSpecs[StoneIndex].TrackDistance;
 	if (RunnerPawn)
 	{
+		// 镜头调度：把"真实行进方向"从仅岔路过渡推广到整条路线。
+		// 每个石间推进都用 起点→目标石 的真实朝向，使挂在 pawn 上的 SpringArm 镜头
+		// 随动作/转向微微旋转、跟随，而不是始终朝向固定全局 TrackForward。
+		// 速度仍由 bAnimDrivenAdvance 按动画锚点反推；仅岔路过渡改用 ForkTransitionAdvanceSpeed 直驱。
+		const bool bForkTransition = bBranchSelected && bBranchTransitionConsumed;
+		const FVector FromLoc = RunnerPawn->GetActorLocation();
+		const FVector ToLoc = GetStoneWorldLocation(StoneIndex);
+		FRotator TargetRotation = Config->TrackForward.Rotation();
+		if (FVector::DistSquared(FromLoc, ToLoc) > KINDA_SMALL_NUMBER)
+		{
+			TargetRotation = (ToLoc - FromLoc).Rotation();
+		}
+		float TargetSpeed = Config->AdvanceSpeed;
+		if (bForkTransition)
+		{
+			TargetSpeed = Config->ForkTransitionAdvanceSpeed;
+		}
 		RunnerPawn->BeginTrackAdvance(
 			GetStoneWorldLocation(StoneIndex),
-			Config->TrackForward.Rotation(),
-			Config->AdvanceSpeed);
+			TargetRotation,
+			TargetSpeed,
+			/*bUseRawSpeed=*/bForkTransition);
 	}
 	else
 	{
@@ -5304,7 +5203,7 @@ int32 UNightCourseDirector::GetRuntimeSpawnThroughStone() const
 		return MAX_int32;
 	}
 
-	if (bBranchSelected && bBranchRemainderLoaded && bHasActiveRouteRule)
+	if (bBranchSelected && (bBranchRemainderLoaded || bBranchRemainderPreGenerated) && bHasActiveRouteRule)
 	{
 		const float MaxVisibleDistance = ProgressDistance
 			+ FMath::Max(1.f, ActiveRouteRule.VisibleDistanceCm);
@@ -5466,13 +5365,26 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 		{
 			continue;
 		}
-		const float ForkDistance = GetWorldDistance(
-			ForkAtomSpecs[ForkIndex].WorldTransform.GetLocation());
-		if (bBranchRemainderLoaded && ForkDistance < UnloadBeforeDistance)
+		// 岔口模型延迟销毁：必须等分支地面已流式生成（bBranchRemainderLoaded）
+		// 且主角沿真实 3D 距离明显离开岔口之后再销毁，避免主角落到半空。
+		if (!bBranchRemainderLoaded)
 		{
-			SpawnedForkAtoms[ForkIndex]->Destroy();
-			SpawnedForkAtoms[ForkIndex] = nullptr;
+			continue;
 		}
+		const FVector ForkWorldLoc =
+			ForkAtomSpecs[ForkIndex].WorldTransform.GetLocation();
+		const float KeepMargin = Config->RuntimeUnloadBehindDistanceCm + 800.f;
+		if (RunnerPawn
+			&& FVector::Dist(RunnerPawn->GetActorLocation(), ForkWorldLoc) < KeepMargin)
+		{
+			continue;
+		}
+		if (!RunnerPawn && GetWorldDistance(ForkWorldLoc) < UnloadBeforeDistance)
+		{
+			continue;
+		}
+		SpawnedForkAtoms[ForkIndex]->Destroy();
+		SpawnedForkAtoms[ForkIndex] = nullptr;
 	}
 }
 void UNightCourseDirector::StreamRuntimeCourseActors()
@@ -6275,6 +6187,7 @@ void UNightCourseDirector::ResetCourse()
 	GiftDashInvulnerableEndTime = 0.f;
 	bNearDeathGiftConsumed = false;
 	bBranchRemainderLoaded = false;
+	bBranchRemainderPreGenerated = false;
 	bHasActiveRouteRule = false;
 	PreparedBranchRoutes.Reset();
 	bBranchRoutePreparationActive = false;

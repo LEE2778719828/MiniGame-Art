@@ -1168,7 +1168,7 @@ void ANightCourseHost::HandleFinished(const FNightResult& Result)
 	ApplyPostResultFlow(bDayFlowAccepted);
 }
 
-void ANightCourseHost::ApplyPostResultFlow(bool bDayFlowAccepted)
+void ANightCourseHost::ApplyPostResultFlow(bool bDayFlowAccepted, bool bManualContinue)
 {
 	if (LastResult.bSuccess && !LastResult.bFailedMidway)
 	{
@@ -1179,25 +1179,28 @@ void ANightCourseHost::ApplyPostResultFlow(bool bDayFlowAccepted)
 		return;
 	}
 
-	if (bAutoRetryOnFailure
-		&& !LastResult.bSuccess
+	// 手动"重试"按钮复用 continue 通道进入此处；必须能直接重启，不应被 bAutoRetryOnFailure 卡住。
+	// bAutoRetryOnFailure 仅控制"无操作自动重开"，与玩家主动点击的重试解耦。
+	if (!LastResult.bSuccess
 		&& Director
 		&& Director->DidEnterRuntimeCourse()
-		&& bDayFlowAccepted)
+		&& bDayFlowAccepted
+		&& (bAutoRetryOnFailure || bManualContinue))
 	{
 		if (UWorld* World = GetWorld())
 		{
+			const float RetryDelay = bManualContinue ? 0.f : FMath::Max(0.05f, AutoRetryDelaySeconds);
 			World->GetTimerManager().SetTimer(
 				RetryTimer,
 				this,
 				&ANightCourseHost::RetryAfterFailure,
-				FMath::Max(0.05f, AutoRetryDelaySeconds),
+				RetryDelay,
 				false);
 			UE_LOG(
 				LogTemp,
 				Display,
-				TEXT("[NightCourse][Stage=Flow] Gameplay failure accepted; retry scheduled in %.2fs."),
-				FMath::Max(0.05f, AutoRetryDelaySeconds));
+				TEXT("[NightCourse][Stage=Flow] Gameplay failure accepted; retry scheduled (%s)."),
+				bManualContinue ? TEXT("manual") : TEXT("auto"));
 		}
 	}
 }
@@ -1216,7 +1219,7 @@ void ANightCourseHost::ContinueAfterNightResult()
 
 	const bool bDayFlowAccepted = bPendingDayFlowAccepted;
 	ClearPendingResultPresentation(true);
-	ApplyPostResultFlow(bDayFlowAccepted);
+	ApplyPostResultFlow(bDayFlowAccepted, /*bManualContinue=*/true);
 }
 
 void ANightCourseHost::ClearPendingResultPresentation(bool bHideHUD)
