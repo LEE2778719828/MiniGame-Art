@@ -1243,15 +1243,6 @@ bool USChefGameInstance::TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder)
 	return true;
 }
 
-void USChefGameInstance::RequeueGuestOrder(const FSOrderRequest& Order)
-{
-	FSPlannedOrder Slot;
-	Slot.Kind = ESOrderSlotKind::Guest;
-	Slot.Order = Order;
-	PlannedDayOrders.Add(Slot);
-	NotifyStateChanged();
-}
-
 void USChefGameInstance::RevealLeadingNpcOrders()
 {
 	ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this);
@@ -3737,7 +3728,7 @@ bool ASCustomerDirector::IsSeatOccupied(const int32 SeatIndex) const
 	return false;
 }
 
-void ASCustomerDirector::ClearCustomer(const FString& CustomerId, const FString& Reason, const bool bRequeueOrder)
+void ASCustomerDirector::ClearCustomer(const FString& CustomerId, const FString& Reason)
 {
 	const int32 CustomerIndex = ActiveCustomers.IndexOfByPredicate(
 		[&CustomerId](const FSCustomerState& Customer) { return Customer.CustomerId == CustomerId; });
@@ -3746,18 +3737,8 @@ void ASCustomerDirector::ClearCustomer(const FString& CustomerId, const FString&
 		return;
 	}
 
-	const FSOrderRequest RequeuedOrder = ActiveCustomers[CustomerIndex].Order;
 	const int32 SeatIndex = ActiveCustomers[CustomerIndex].SeatIndex;
 	ActiveCustomers.RemoveAt(CustomerIndex);
-#pragma region K2 moonyfli
-	if (bRequeueOrder)
-	{
-		if (USChefGameInstance* GameInstance = GetChefGameInstance())
-		{
-			GameInstance->RequeueGuestOrder(RequeuedOrder);
-		}
-	}
-#pragma endregion K2 moonyfli
 	NotifySeatVacated(SeatIndex);
 	SetFeedback(Reason);
 }
@@ -3878,8 +3859,7 @@ void ASCustomerDirector::Tick(const float DeltaSeconds)
 	{
 		ClearCustomer(CustomerId, FString::Printf(
 			TEXT("顾客 %s 耐心耗尽离店，该座位稍后补客。"),
-			*CustomerId),
-			true);
+			*CustomerId));
 	}
 #pragma endregion K2 moonyfli
 

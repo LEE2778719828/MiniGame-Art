@@ -20,6 +20,8 @@ class AActor;
 class AGameModeBase;
 class UWorld;
 class ANightCourseHUD;
+class UAudioComponent;
+class USoundBase;
 
 #pragma region K2 moonyfli
 /**
@@ -66,6 +68,19 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Flow|Result")
 	bool bAwaitingResultContinue = false;
+	/** Background music that plays only while the Night course itself is running. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Audio", meta = (DisplayName = "播放战斗内配乐"))
+	bool bPlayCombatMusic = true;
+
+	/** Replace this in BP_NightCourseHost or the placed Host actor after new combat music is imported. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Audio", meta = (DisplayName = "战斗内配乐"))
+	TSoftObjectPtr<USoundBase> CombatMusic;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Audio", meta = (DisplayName = "战斗配乐音量", ClampMin = "0.0", ClampMax = "2.0"))
+	float CombatMusicVolumeMultiplier = 0.65f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Audio", meta = (DisplayName = "循环战斗内配乐"))
+	bool bLoopCombatMusic = true;
 
 	/** Primary per-level Day destination. Leave empty to use the GameMode fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Flow", meta = (DisplayName = "成功Day关卡", ToolTip = "Night 成功后要打开的 Day World；为空时使用 GameMode 回退。"))
@@ -192,12 +207,21 @@ protected:
 	void TravelToDay();
 	void ApplyPostResultFlow(bool bDayFlowAccepted, bool bManualContinue = false);
 	void ClearPendingResultPresentation(bool bHideHUD);
+	void PlayCombatMusic();
+	void StopCombatMusic();
+
+	UFUNCTION()
+	void HandleCombatMusicFinished();
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> StageCubeMesh;
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> StageMaterial;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Audio")
+	TObjectPtr<UAudioComponent> CombatMusicComponent;
+
+	bool bCombatMusicPlaybackRequested = false;
 
 	FTimerHandle AutoStartTimer;
 	FTimerHandle RetryTimer;
