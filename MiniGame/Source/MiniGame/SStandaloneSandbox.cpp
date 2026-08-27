@@ -297,6 +297,9 @@ void USChefGameInstance::ShowSceneLoadingScreen()
 		UE_LOG(LogSSandbox, Warning, TEXT("[SceneLoading] Failed to create Loading widget class=%s."), *GetNameSafe(WidgetClass));
 		return;
 	}
+	// Keep the loading layer attached to the complete viewport on every aspect ratio.
+	SceneLoadingWidget->SetAnchorsInViewport(FAnchors(0.f, 0.f, 1.f, 1.f));
+	SceneLoadingWidget->SetPositionInViewport(FVector2D::ZeroVector, false);
 	if (USceneLoadingScreenWidget* FallbackWidget = Cast<USceneLoadingScreenWidget>(SceneLoadingWidget))
 	{
 		FallbackWidget->SetLoadingTexture(Texture);

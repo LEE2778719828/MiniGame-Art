@@ -350,6 +350,9 @@ ANightCourseHost::ANightCourseHost()
 	CombatMusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("CombatMusic"));
 	CombatMusicComponent->bAutoActivate = false;
 	CombatMusicComponent->bAllowSpatialization = false;
+	// Combat music is non-spatial background audio; keep it audible on mobile mixes.
+	CombatMusicComponent->SetUISound(true);
+	CombatMusicComponent->bAutoDestroy = false;
 	CombatMusicComponent->SetVolumeMultiplier(CombatMusicVolumeMultiplier);
 	CombatMusicComponent->OnAudioFinished.AddDynamic(
 		this,
@@ -842,36 +845,94 @@ void ANightCourseHost::BuildPlayableStage()
 
 void ANightCourseHost::PlayCombatMusic()
 {
-	bCombatMusicPlaybackRequested = bPlayCombatMusic;
-	if (!bCombatMusicPlaybackRequested || !CombatMusicComponent)
+	if (!bPlayCombatMusic)
 	{
+		bCombatMusicPlaybackRequested = false;
+		UE_LOG(LogTemp, Verbose, TEXT("[NightCourse][Audio] Combat music disabled by Host configuration."));
 		return;
+	}
+
+	bCombatMusicPlaybackRequested = true;
+	if (!CombatMusicComponent)
+	{
+		bCombatMusicPlaybackRequested = false;
+		UE_LOG(LogTemp, Error, TEXT("[NightCourse][Audio] Combat music component is null."));
+		return;
+	}
+	if (!CombatMusicComponent->IsRegistered())
+	{
+		CombatMusicComponent->RegisterComponent();
+	}
+	CombatMusicComponent->SetUISound(true);
+
+	// A placed Blueprint Host can retain an empty/old soft reference after this
+	// property was added. Always recover to the temporary restaurant BGM.
+	const TCHAR* DefaultMusicPath = TEXT("/Game/Day/Music/canting_bgm.canting_bgm");
+	const TCHAR* CueMusicPath = TEXT("/Game/Day/Music/CUE_canting_bgm.CUE_canting_bgm");
+	if (CombatMusic.IsNull())
+	{
+		CombatMusic = TSoftObjectPtr<USoundBase>(FSoftObjectPath(DefaultMusicPath));
 	}
 
 	USoundBase* Sound = CombatMusic.LoadSynchronous();
 	if (!Sound)
 	{
+		Sound = LoadObject<USoundBase>(nullptr, DefaultMusicPath);
+		if (Sound)
+		{
+			CombatMusic = TSoftObjectPtr<USoundBase>(FSoftObjectPath(DefaultMusicPath));
+		}
+	}
+	if (!Sound)
+	{
+		Sound = LoadObject<USoundBase>(nullptr, CueMusicPath);
+		if (Sound)
+		{
+			CombatMusic = TSoftObjectPtr<USoundBase>(FSoftObjectPath(CueMusicPath));
+		}
+	}
+	if (!Sound)
+	{
+		bCombatMusicPlaybackRequested = false;
 		UE_LOG(
 			LogTemp,
-			Warning,
-			TEXT("[NightCourse][Audio] CombatMusic is not configured or could not be loaded."));
-		bCombatMusicPlaybackRequested = false;
+			Error,
+			TEXT("[NightCourse][Audio] Combat music could not load. Configured='%s', fallback='%s'/'%s'."),
+			*CombatMusic.ToSoftObjectPath().ToString(),
+			DefaultMusicPath,
+			CueMusicPath);
 		return;
 	}
 
+	if (CombatMusicComponent->IsPlaying())
+	{
+		if (CombatMusicComponent->Sound == Sound)
+		{
+			return;
+		}
+		CombatMusicComponent->Stop();
+	}
 	CombatMusicComponent->SetSound(Sound);
 	CombatMusicComponent->SetVolumeMultiplier(FMath::Max(0.f, CombatMusicVolumeMultiplier));
+	CombatMusicComponent->Play(0.f);
 	if (!CombatMusicComponent->IsPlaying())
 	{
-		CombatMusicComponent->Play();
 		UE_LOG(
 			LogTemp,
-			Display,
-			TEXT("[NightCourse][Audio] Combat music started: %s."),
-			*Sound->GetPathName());
+			Error,
+			TEXT("[NightCourse][Audio] Play() returned but CombatMusic is not playing. Sound='%s' registered=%d."),
+			*Sound->GetPathName(),
+			CombatMusicComponent->IsRegistered() ? 1 : 0);
+		return;
 	}
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Audio] Combat music started: %s volume=%.2f registered=%d."),
+		*Sound->GetPathName(),
+		CombatMusicVolumeMultiplier,
+		CombatMusicComponent->IsRegistered() ? 1 : 0);
 }
-
 void ANightCourseHost::StopCombatMusic()
 {
 	bCombatMusicPlaybackRequested = false;
