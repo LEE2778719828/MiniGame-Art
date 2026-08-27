@@ -1003,6 +1003,7 @@ void ANightCourseHost::WireFeelFromPlayer()
 		{
 			CoursePawn->FeelStub->Soul = Config->StartingSoul;
 			CoursePawn->FeelStub->Combo = 0; //add by K2
+			CoursePawn->FeelStub->MaxCombo = 0; //add by K2
 		}
 		UE_LOG(
 			LogTemp,

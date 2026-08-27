@@ -16,6 +16,9 @@
 #include "Components/Widget.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Engine/Font.h"
+#include "Fonts/SlateFontInfo.h"
+#include "UObject/ConstructorHelpers.h"
 #include "GameFramework/PlayerController.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
@@ -66,6 +69,14 @@ bool ANightCourseHUD::HitTestActionButtons(
 
 ANightCourseHUD::ANightCourseHUD()
 {
+#pragma region K2 moonyfli
+	static ConstructorHelpers::FObjectFinder<UFont> ComboFontFinder(
+		TEXT("/Game/Day/UI/Font/Didot系列/Didot系列/Didot-Bold_Font.Didot-Bold_Font"));
+	if (ComboFontFinder.Succeeded())
+	{
+		ComboCountFont = ComboFontFinder.Object;
+	}
+#pragma endregion K2 moonyfli
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F01_LingGu, TEXT("1"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F02_YinShanJun, TEXT("2"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F03_ChiYanJiao, TEXT("3"));
@@ -162,6 +173,7 @@ void ANightCourseHUD::EnsureMainHUD()
 	if (ComboWidget)
 	{
 		ComboCountText = Cast<UTextBlock>(ComboWidget->GetWidgetFromName(TEXT("Txt_ComboCount")));
+		ApplyComboCountFont();
 	}
 	else
 	{
@@ -322,6 +334,50 @@ void ANightCourseHUD::ApplySuccessIngredientCounts(const FNightResult& Result)
 	}
 }
 
+void ANightCourseHUD::ApplyResultMaxCombo(UUserWidget* ResultWidget, const int32 MaxCombo)
+{
+	if (!ResultWidget || ResultComboTextWidgetName.IsNone())
+	{
+		return;
+	}
+
+	UWidget* Target = ResultWidget->GetWidgetFromName(ResultComboTextWidgetName);
+	if (!Target)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightHUD] Result widget '%s' is missing combo text '%s'."),
+			*ResultWidget->GetName(),
+			*ResultComboTextWidgetName.ToString());
+		return;
+	}
+
+	const FText ComboText = FText::AsNumber(FMath::Max(0, MaxCombo));
+	if (UTextBlock* TextBlock = Cast<UTextBlock>(Target))
+	{
+		TextBlock->SetText(ComboText);
+	}
+	else if (URichTextBlock* RichTextBlock = Cast<URichTextBlock>(Target))
+	{
+		RichTextBlock->SetText(ComboText);
+	}
+	else if (UEditableTextBox* EditableTextBox = Cast<UEditableTextBox>(Target))
+	{
+		EditableTextBox->SetIsReadOnly(true);
+		EditableTextBox->SetText(ComboText);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightHUD] Combo widget '%s' has unsupported class '%s'."),
+			*ResultComboTextWidgetName.ToString(),
+			*Target->GetClass()->GetName());
+	}
+}
+
 void ANightCourseHUD::SetResultInputMode(UUserWidget* ActiveResultWidget)
 {
 	APlayerController* PC = GetOwningPlayerController();
@@ -354,6 +410,7 @@ bool ANightCourseHUD::PresentNightResult(const FNightResult& Result)
 	{
 		ApplySuccessIngredientCounts(Result);
 	}
+	ApplyResultMaxCombo(bSucceeded ? SuccessResultWidget.Get() : FailureResultWidget.Get(), Result.MaxCombo);
 	UpdateMainHUDPlacement();
 
 	if (SuccessResultWidget)
@@ -549,8 +606,22 @@ void ANightCourseHUD::PushComboToHUD(int32 Combo)
 	ComboWidget->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	if (bShow && ComboCountText)
 	{
+		ApplyComboCountFont();
 		ComboCountText->SetText(FText::AsNumber(Combo));
 	}
+}
+
+void ANightCourseHUD::ApplyComboCountFont()
+{
+	if (!ComboCountText || !ComboCountFont)
+	{
+		return;
+	}
+
+	FSlateFontInfo FontInfo = ComboCountText->GetFont();
+	FontInfo.FontObject = ComboCountFont;
+	FontInfo.Size = ComboCountFontSize;
+	ComboCountText->SetFont(FontInfo);
 }
 #pragma endregion K2 moonyfli
 

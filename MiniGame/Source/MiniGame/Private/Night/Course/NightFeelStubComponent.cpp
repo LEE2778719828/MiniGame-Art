@@ -434,7 +434,11 @@ void UNightFeelStubComponent::RestoreSoul_Implementation(float Amount, float Max
 void UNightFeelStubComponent::PlaySuccessFeedback_Implementation(ENightNodeKind Kind)
 {
 	const bool bAttack = (Kind == ENightNodeKind::Enemy);
-	++Combo; //add by K2
+	if (bAttack)
+	{
+		++Combo; //add by K2
+		MaxCombo = FMath::Max(MaxCombo, Combo);
+	}
 	PushHudLine(9912, 1.2f, FColor::Green, bAttack ? TEXT("HIT OK") : TEXT("JUMP OK"));
 
 	// add by K2 (R1): 判定成功即起表现时钟，动作与随后的石间位移同时开始

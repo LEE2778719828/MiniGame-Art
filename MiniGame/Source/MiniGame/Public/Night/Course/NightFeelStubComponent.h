@@ -62,9 +62,13 @@ public:
 	float Soul = 100.f;
 
 #pragma region K2 moonyfli
-	/** Successful jump or slash +1; miss / wrong button clears. 0 hides the combo HUD. */
+	/** Successful slash +1; miss / wrong button clears. Jump success does not change Combo. */
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
 	int32 Combo = 0;
+
+	/** Highest Combo this Night. Survives a miss; reset when the Night binds the player. */
+	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")
+	int32 MaxCombo = 0;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel")

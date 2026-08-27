@@ -9,6 +9,7 @@
 #include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightCourseRoadsideActor.h"
 #include "Night/Course/NightFeelBridge.h"
+#include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "DrawDebugHelpers.h"
 #include "HAL/PlatformTime.h"
@@ -5963,6 +5964,12 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 		{
 			Result.SoulLeft = Config->StartingSoul;
 		}
+#pragma region K2 moonyfli
+		if (const UNightFeelStubComponent* FeelStub = Cast<UNightFeelStubComponent>(FeelBridgeObject))
+		{
+			Result.MaxCombo = FeelStub->MaxCombo;
+		}
+#pragma endregion K2 moonyfli
 		FinishNight(Result);
 	}
 }
@@ -6155,6 +6162,12 @@ void UNightCourseDirector::BeginFailure(const FString& Reason)
 	{
 		Result.SoulLeft = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
 	}
+#pragma region K2 moonyfli
+	if (const UNightFeelStubComponent* FeelStub = Cast<UNightFeelStubComponent>(FeelBridgeObject))
+	{
+		Result.MaxCombo = FeelStub->MaxCombo;
+	}
+#pragma endregion K2 moonyfli
 	FinishNight(Result);
 }
 
@@ -6242,6 +6255,12 @@ void UNightCourseDirector::DebugForceFinish(bool bSuccess)
 	{
 		Result.SoulLeft = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
 	}
+#pragma region K2 moonyfli
+	if (const UNightFeelStubComponent* FeelStub = Cast<UNightFeelStubComponent>(FeelBridgeObject))
+	{
+		Result.MaxCombo = FeelStub->MaxCombo;
+	}
+#pragma endregion K2 moonyfli
 	FinishNight(Result);
 }
 

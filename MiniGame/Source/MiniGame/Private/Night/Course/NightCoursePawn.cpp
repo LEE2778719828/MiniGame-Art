@@ -98,17 +98,40 @@ ANightCoursePawn::ANightCoursePawn()
 		KnifeMesh->SetStaticMesh(KnifeDao.Object);
 	}
 
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder(
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder1(
 		TEXT("/Game/Night/Course/VFX/ns/DG1.DG1"));
-	if (SlashTrailFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder2(
+		TEXT("/Game/Night/Course/VFX/ns/DG2.DG2"));
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder3(
+		TEXT("/Game/Night/Course/VFX/ns/DG3.DG3"));
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SlashTrailFinder4(
+		TEXT("/Game/Night/Course/VFX/ns/DG4.DG4"));
+	SlashTrailByTier = {
+		SlashTrailFinder1.Object,
+		SlashTrailFinder2.Object,
+		SlashTrailFinder3.Object,
+		SlashTrailFinder4.Object};
+	if (SlashTrailFinder1.Succeeded())
 	{
-		SlashTrailFX = SlashTrailFinder.Object;
+		SlashTrailFX = SlashTrailFinder1.Object;
 	}
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder(
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder1(
 		TEXT("/Game/Night/Course/VFX/ns/phase1-shouji1.phase1-shouji1"));
-	if (HitImpactFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder2(
+		TEXT("/Game/Night/Course/VFX/ns/phase2-shouji2.phase2-shouji2"));
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder3(
+		TEXT("/Game/Night/Course/VFX/ns/phase3-shouji3.phase3-shouji3"));
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HitImpactFinder4(
+		TEXT("/Game/Night/Course/VFX/ns/phase4-shouji4.phase4-shouji4"));
+	HitImpactByTier = {
+		HitImpactFinder1.Object,
+		HitImpactFinder2.Object,
+		HitImpactFinder3.Object,
+		HitImpactFinder4.Object};
+	if (HitImpactFinder1.Succeeded())
 	{
-		HitImpactFX = HitImpactFinder.Object;
+		HitImpactFX = HitImpactFinder1.Object;
 	}
 #pragma endregion K2 moonyfli
 
@@ -332,14 +355,52 @@ void ANightCoursePawn::AttachKnifeToHand()
 }
 
 #pragma region K2 moonyfli
+int32 ANightCoursePawn::ResolveAttackVFXTier() const
+{
+	const int32 Combo = FeelStub ? FeelStub->Combo : 0;
+	if (Combo >= SimulatedVFXTier4Combo)
+	{
+		return 3;
+	}
+	if (Combo >= SimulatedVFXTier3Combo)
+	{
+		return 2;
+	}
+	if (Combo >= SimulatedVFXTier2Combo)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+UNiagaraSystem* ANightCoursePawn::ResolveSlashTrailFX() const
+{
+	const int32 Tier = ResolveAttackVFXTier();
+	if (SlashTrailByTier.IsValidIndex(Tier) && SlashTrailByTier[Tier])
+	{
+		return SlashTrailByTier[Tier];
+	}
+	return SlashTrailFX;
+}
+
+UNiagaraSystem* ANightCoursePawn::ResolveHitImpactFX() const
+{
+	const int32 Tier = ResolveAttackVFXTier();
+	if (HitImpactByTier.IsValidIndex(Tier) && HitImpactByTier[Tier])
+	{
+		return HitImpactByTier[Tier];
+	}
+	return HitImpactFX;
+}
+
 void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 {
-	if (SlashTrailFX)
+	if (UNiagaraSystem* TrailFX = ResolveSlashTrailFX())
 	{
 		if (KnifeMesh)
 		{
 			UNiagaraFunctionLibrary::SpawnSystemAttached(
-				SlashTrailFX,
+				TrailFX,
 				KnifeMesh,
 				NAME_None,
 				FVector::ZeroVector,
@@ -351,19 +412,19 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 		{
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
-				SlashTrailFX,
+				TrailFX,
 				GetActorLocation(),
 				SlashTrailRotation);
 		}
 	}
 
-	if (HitImpactFX)
+	if (UNiagaraSystem* ImpactFX = ResolveHitImpactFX())
 	{
 		if (UWorld* World = GetWorld())
 		{
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
-				HitImpactFX,
+				ImpactFX,
 				HitWorldLocation);
 		}
 	}

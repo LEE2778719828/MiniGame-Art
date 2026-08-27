@@ -73,17 +73,35 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<UStaticMeshComponent> KnifeMesh;
 
-	/** First-tier slash trail. Swap later when combo picks DG2–4. */
+	/** Fallback / tier-1 slash trail. Tiers 1–4 prefer SlashTrailByTier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TObjectPtr<UNiagaraSystem> SlashTrailFX;
+
+	/** DG1–DG4. Index 0 is combo 1 under the simulated thresholds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	TArray<TObjectPtr<UNiagaraSystem>> SlashTrailByTier;
 
 	/** Spawn offset on the knife. Yaw 180 flips a trail that plays opposite the swing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	FRotator SlashTrailRotation = FRotator(0.f, 180.f, 0.f);
 
-	/** First-tier hit burst at the foe. Swap later when combo picks phase2–4. */
+	/** Fallback / tier-1 hit burst. Tiers 1–4 prefer HitImpactByTier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TObjectPtr<UNiagaraSystem> HitImpactFX;
+
+	/** phase1–4 shouji. Same index as SlashTrailByTier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	TArray<TObjectPtr<UNiagaraSystem>> HitImpactByTier;
+
+	/** Slash-combo gates. Bands widen so tier 4 is hard but still under 100. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	int32 SimulatedVFXTier2Combo = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	int32 SimulatedVFXTier3Combo = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	int32 SimulatedVFXTier4Combo = 75;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
@@ -300,9 +318,13 @@ public:
 	/** Rebind the knife after the skeletal mesh exists so KnifeSocket can resolve. */
 	void AttachKnifeToHand();
 
-	/** Spawn DG1 on the knife and the hit burst at HitWorldLocation. Combo tiers come later. */
+	/** Spawn the current-tier slash trail on the knife and the hit burst at HitWorldLocation. */
 	UFUNCTION(BlueprintCallable, Category = "Night|VFX")
 	void PlayAttackVFX(const FVector& HitWorldLocation);
+
+	int32 ResolveAttackVFXTier() const;
+	UNiagaraSystem* ResolveSlashTrailFX() const;
+	UNiagaraSystem* ResolveHitImpactFX() const;
 #pragma endregion K2 moonyfli
 
 protected:

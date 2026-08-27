@@ -9,6 +9,7 @@
 class UUserWidget;
 class UTextBlock;
 class UWidget;
+class UFont;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnNightHUDResultReady,
@@ -107,6 +108,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
 	FString SuccessIngredientCountFormat = TEXT("{0}");
 
+#pragma region K2 moonyfli
+	/** WBP_Success / WBP_Failed widget that shows peak slash combo. Art still has a placeholder 60. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
+	FName ResultComboTextWidgetName = TEXT("EditableTextBox_1");
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result", meta = (ClampMin = "0"))
 	int32 ResultWidgetZOrder = 100;
 
@@ -158,6 +165,15 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Night|HUD")
 	FVector2D HealthBarDesignSize = FVector2D(800.f, 240.f);
 
+#pragma region K2 moonyfli
+	/** Day Didot Bold — display face that still has clear digits for combo. */
+	UPROPERTY(EditAnywhere, Category = "Night|HUD|Combo")
+	TObjectPtr<UFont> ComboCountFont;
+
+	UPROPERTY(EditAnywhere, Category = "Night|HUD|Combo", meta = (ClampMin = "8"))
+	int32 ComboCountFontSize = 140;
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> MainHUDWidget;
 
@@ -188,10 +204,12 @@ private:
 	void EnsureResultWidgets();
 	void ConfigureResultWidget(UUserWidget* ResultWidget, FName ContinueButtonName);
 	void ApplySuccessIngredientCounts(const FNightResult& Result);
+	void ApplyResultMaxCombo(UUserWidget* ResultWidget, int32 MaxCombo); //add by K2
 	void SetResultInputMode(UUserWidget* ActiveResultWidget);
 	void UpdateMainHUDPlacement();
 	void PushSoulToHealthBar(float Soul);
 	void SetHealthBarNumeric(FName PropertyName, double Value);
 	void PushComboToHUD(int32 Combo); //add by K2
+	void ApplyComboCountFont(); //add by K2
 };
 #pragma endregion K2 moonyfli

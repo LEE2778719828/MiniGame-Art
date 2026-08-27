@@ -176,6 +176,12 @@ struct FNightResult
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
 	float SoulLeft = 0.f;
+
+#pragma region K2 moonyfli
+	/** Highest slash combo this Night. Shown on the result page. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night")
+	int32 MaxCombo = 0;
+#pragma endregion K2 moonyfli
 };
 
 USTRUCT(BlueprintType)
