@@ -175,9 +175,10 @@ struct FNightRoadsideBlueprintEntry
  * Generation settings shared by one roadside category.
  *
  * SpacingCm is the gap after a segment's End marker. A zero value makes a
- * house row continuous when the adjacent markers are aligned. House rows use
- * the fixed world X axis and the first path node's fixed world Z; poles use
- * the composed road direction and sampled height.
+ * house row continuous when the adjacent markers are aligned. All roadside
+ * placement samples the Bounds-translated composed path. Houses retain fixed
+ * world-X orientation and world-Y side offsets; poles use sampled direction
+ * and height. Houses near a fork are excluded by the configured tolerance.
  */
 USTRUCT(BlueprintType)
 struct FNightRoadsideGenerationSettings
@@ -194,8 +195,8 @@ struct FNightRoadsideGenerationSettings
 	float SpacingCm = 0.f;
 
 	/**
-	 * Positive lateral magnitudes. Houses use the first path node's world Y as
-	 * their fixed row baseline; poles use the sampled bridge/track centerline.
+	 * Positive lateral magnitudes. Houses and poles use the sampled
+	 * Bounds-translated bridge/track centerline as their lateral baseline.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Roadside|Offset", meta = (DisplayName = "左侧道路偏移", ToolTip = "左侧装饰相对道路/桥基准线的距离，单位 cm。", ClampMin = "0.0"))
 	float LeftBridgeOffsetCm = 350.f;

@@ -358,10 +358,9 @@ ANightCourseHost::ANightCourseHost()
 		this,
 		&ANightCourseHost::HandleCombatMusicFinished);
 
-	// Temporary default. Replace the soft reference in BP_NightCourseHost after
-	// the dedicated Night-combat BGM is imported.
+	// Formal default for Night-course combat. BP_NightCourseHost uses the same asset.
 	CombatMusic = TSoftObjectPtr<USoundBase>(
-		FSoftObjectPath(TEXT("/Game/Day/Music/canting_bgm.canting_bgm")));
+		FSoftObjectPath(TEXT("/Game/Night/Course/Audio/SW_NightCombat_Run.SW_NightCombat_Run")));
 	NightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("NightFog"));
 	NightFog->FogDensity = 0.003f;
 	NightFog->FogHeightFalloff = 0.18f;
@@ -865,10 +864,9 @@ void ANightCourseHost::PlayCombatMusic()
 	}
 	CombatMusicComponent->SetUISound(true);
 
-	// A placed Blueprint Host can retain an empty/old soft reference after this
-	// property was added. Always recover to the temporary restaurant BGM.
-	const TCHAR* DefaultMusicPath = TEXT("/Game/Day/Music/canting_bgm.canting_bgm");
-	const TCHAR* CueMusicPath = TEXT("/Game/Day/Music/CUE_canting_bgm.CUE_canting_bgm");
+	// Empty or stale placed Hosts recover to the formal Night combat BGM.
+	const TCHAR* DefaultMusicPath = TEXT("/Game/Night/Course/Audio/SW_NightCombat_Run.SW_NightCombat_Run");
+	const TCHAR* CueMusicPath = DefaultMusicPath;
 	if (CombatMusic.IsNull())
 	{
 		CombatMusic = TSoftObjectPtr<USoundBase>(FSoftObjectPath(DefaultMusicPath));

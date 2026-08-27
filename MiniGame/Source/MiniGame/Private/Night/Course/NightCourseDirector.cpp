@@ -93,8 +93,7 @@ void UNightCourseDirector::EmitDebugMessage(const FString& Message, bool bIsErro
 FVector UNightCourseDirector::GetTrackLocation(float Distance) const
 {
 	const FVector Origin = Config ? Config->TrackOrigin : FVector::ZeroVector;
-	const FVector Forward = Config ? Config->TrackForward.GetSafeNormal() : FVector::ForwardVector;
-	return Origin + CourseWorldOffset + Forward * Distance;
+	return Origin + CourseWorldOffset + FVector(Distance, 0.f, 0.f);
 }
 
 FVector UNightCourseDirector::GetStoneWorldLocation(int32 StoneIndex) const
@@ -336,10 +335,9 @@ namespace NightCourseAtom_Private
 
 	static float GetTrackDistance(
 		const FVector& WorldLocation,
-		const FVector& TrackOrigin,
-		const FVector& TrackForward)
+		const FVector& TrackOrigin)
 	{
-		return FVector::DotProduct(WorldLocation - TrackOrigin, TrackForward);
+		return WorldLocation.X - TrackOrigin.X;
 	}
 
 	static EFoeId PickFoeId(
@@ -503,14 +501,8 @@ namespace NightCourseRoadside_Private
 		{
 			return Stone.WorldLocation;
 		}
-		const FVector Forward = Config
-			? Config->TrackForward.GetSafeNormal()
-			: FVector::ForwardVector;
-		const FVector SafeForward = Forward.IsNearlyZero()
-			? FVector::ForwardVector
-			: Forward;
 		return (Config ? Config->TrackOrigin : FVector::ZeroVector)
-			+ SafeForward * Stone.TrackDistance;
+			+ FVector(Stone.TrackDistance, 0.f, 0.f);
 	}
 
 	static bool BuildPath(
@@ -818,15 +810,10 @@ namespace NightCourseRoadside_Private
 				FVector PlacementRight = Sample.Right;
 				if (bUseFixedWorldXAxis)
 				{
-					// Houses form a continuous row on the fixed world X axis.
-					// Their lateral position is anchored to the first path
-					// node, and every house uses the first path node's fixed Z.
-					PlacementLocation.X =
-						FirstPathLocation.X + Distance * FixedXAxisDirection;
-					PlacementLocation.Y = FirstPathLocation.Y;
-					PlacementLocation.Z =
-						FirstPathLocation.Z
-						+ (Config ? Config->HouseInitialZOffsetCm : 0.f);
+					// Houses use the translated road centerline location while retaining
+					// their existing fixed world-X orientation and world-Y side offset.
+					PlacementLocation += FVector::UpVector
+						* (Config ? Config->HouseInitialZOffsetCm : 0.f);
 					PlacementTangent =
 						FVector(FixedXAxisDirection, 0.f, 0.f);
 					PlacementRight = FVector::CrossProduct(
@@ -1074,22 +1061,15 @@ bool UNightCourseDirector::BuildRoadsideSpecs(
 		&& InForkAtoms.Num() > 0)
 	{
 		const UNightG1CourseConfig* CourseConfig = Config;
-		const FVector TrackForward =
-			CourseConfig->TrackForward.GetSafeNormal().IsNearlyZero()
-			? FVector::ForwardVector
-			: CourseConfig->TrackForward.GetSafeNormal();
 		float MinForkDistance = TNumericLimits<float>::Max();
 		float MaxForkDistance = -TNumericLimits<float>::Max();
 		auto IncludeForkPoint = [
 			&MinForkDistance,
 			&MaxForkDistance,
-			CourseConfig,
-			TrackForward](
+			CourseConfig](
 			const FVector& Point)
 		{
-			const float Distance = FVector::DotProduct(
-				Point - CourseConfig->TrackOrigin,
-				TrackForward);
+			const float Distance = Point.X - CourseConfig->TrackOrigin.X;
 			MinForkDistance = FMath::Min(MinForkDistance, Distance);
 			MaxForkDistance = FMath::Max(MaxForkDistance, Distance);
 		};
@@ -1148,16 +1128,16 @@ bool UNightCourseDirector::BuildRoadsideSpecs(
 			MinForkDistance -= ToleranceCm;
 			MaxForkDistance += ToleranceCm;
 			const int32 RemovedHouseCount = OutSpecs.RemoveAll(
-				[CourseConfig, TrackForward, MinForkDistance, MaxForkDistance](
+				[CourseConfig, MinForkDistance, MaxForkDistance](
 					const FNightRoadsidePropSpec& Spec)
 				{
 					if (Spec.Kind != ENightRoadsideKind::House)
 					{
 						return false;
 					}
-					const float Distance = FVector::DotProduct(
-						Spec.WorldTransform.GetLocation() - CourseConfig->TrackOrigin,
-						TrackForward);
+					const float Distance =
+						Spec.WorldTransform.GetLocation().X
+						- CourseConfig->TrackOrigin.X;
 					return Distance >= MinForkDistance
 						&& Distance <= MaxForkDistance;
 				});
@@ -1240,6 +1220,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			TEXT("[NightCourse][Stage=Compose] Canonical CourseRuleData is missing or disabled."));
 		return false;
 	}
+	const float CourseStartZ = Config->TrackOrigin.Z;
 	const bool bRuntimeBuildContext = bBuildingRuntimeCourse || bRunning;
 	const ENightRouteId BuildRoute = CurrentRoute != ENightRouteId::None
 		? CurrentRoute
@@ -1257,6 +1238,8 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			static_cast<int32>(BuildDefaultRoute));
 		return false;
 	}
+	const bool bGenerateAllAtomsForTesting =
+		Rule->bGenerateAllAtomsForTesting;
 	TArray<FNightRuleAtomEntry> PlannerEntries;
 	TArray<ENightRouteId> PlannerForkConnectorRoutes;
 	UE_LOG(
@@ -1268,9 +1251,11 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		static_cast<int32>(BuildDefaultRoute),
 		static_cast<int32>(BuildRoute),
 		DefaultRouteQueue->Atoms.Num(),
-		DefaultRouteQueue->TargetAtomCount > 0
-			? DefaultRouteQueue->TargetAtomCount
-			: DefaultRouteQueue->Atoms.Num(),
+		bGenerateAllAtomsForTesting
+			? DefaultRouteQueue->Atoms.Num()
+			: (DefaultRouteQueue->TargetAtomCount > 0
+				? DefaultRouteQueue->TargetAtomCount
+				: DefaultRouteQueue->Atoms.Num()),
 		Rule->BranchRoutes.Num(),
 		Route->TransitionJumpGapCm);
 
@@ -1287,14 +1272,18 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		return false;
 	}
 
-	const int32 AuthoredBaseAtomCount = DefaultRouteQueue->TargetAtomCount > 0
-		? DefaultRouteQueue->TargetAtomCount
-		: DefaultRouteQueue->Atoms.Num();
+	const int32 AuthoredBaseAtomCount = bGenerateAllAtomsForTesting
+		? DefaultRouteQueue->Atoms.Num()
+		: (DefaultRouteQueue->TargetAtomCount > 0
+			? DefaultRouteQueue->TargetAtomCount
+			: DefaultRouteQueue->Atoms.Num());
 	// RouteModes is the authoritative source for the selected pre-fork route
 	// length. Keep the CourseConfig override only as a legacy level fallback.
-	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
-		? Config->ForkAfterBaseAtomIndex
-		: AuthoredBaseAtomCount;
+	const int32 ForkIndex = bGenerateAllAtomsForTesting
+		? AuthoredBaseAtomCount
+		: (Config->ForkAfterBaseAtomIndex != INDEX_NONE
+			? Config->ForkAfterBaseAtomIndex
+			: AuthoredBaseAtomCount);
 	const bool bUsesForkBase =
 		BuildRoute != ENightRouteId::None
 		|| (Config->bEnableFork && ForkIndex != INDEX_NONE);
@@ -1374,13 +1363,57 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		}
 		return true;
 	};
+	auto AppendAllTemplates =
+		[&PlannerEntries, &PlannerForkConnectorRoutes](
+			const TArray<FNightRuleAtomEntry>& Templates,
+			const FString& QueueLabel,
+			const int32 StartIndex) -> bool
+	{
+		if (Templates.Num() == 0
+			|| StartIndex < 0
+			|| StartIndex >= Templates.Num())
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Stage=AtomTemplateSelect] %s has no templates for all-Atom test mode."),
+				*QueueLabel);
+			return false;
+		}
 
-	if (!AppendWeightedTemplates(
+		PlannerEntries.Reserve(
+			PlannerEntries.Num() + Templates.Num() - StartIndex);
+		for (int32 TemplateIndex = StartIndex;
+			TemplateIndex < Templates.Num();
+			++TemplateIndex)
+		{
+			PlannerEntries.Add(Templates[TemplateIndex]);
+			PlannerForkConnectorRoutes.Add(ENightRouteId::None);
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("[NightCourse][Stage=AtomTemplateSelect] %s test slot=%d template=%d key='%s'."),
+				*QueueLabel,
+				TemplateIndex,
+				TemplateIndex,
+				*PlannerEntries.Last().AtomKey);
+		}
+		return true;
+	};
+
+	if (!(bGenerateAllAtomsForTesting
+			? AppendAllTemplates(
+				DefaultRouteQueue->Atoms,
+				FString::Printf(
+					TEXT("RouteModes[%d]"),
+					static_cast<int32>(BuildDefaultRoute)),
+				0)
+			: AppendWeightedTemplates(
 		DefaultRouteQueue->Atoms,
 		GeneratedBaseAtomCount,
 		FString::Printf(
 			TEXT("RouteModes[%d]"),
-			static_cast<int32>(BuildDefaultRoute))))
+			static_cast<int32>(BuildDefaultRoute)))))
 	{
 		return false;
 	}
@@ -1397,9 +1430,11 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				static_cast<int32>(BuildRoute));
 			return false;
 		}
-		const int32 BranchAtomCount = BranchQueue->TargetAtomCount > 0
-			? BranchQueue->TargetAtomCount
-			: BranchQueue->Atoms.Num();
+		const int32 BranchAtomCount = bGenerateAllAtomsForTesting
+			? BranchQueue->Atoms.Num()
+			: (BranchQueue->TargetAtomCount > 0
+				? BranchQueue->TargetAtomCount
+				: BranchQueue->Atoms.Num());
 		if (BranchAtomCount <= 0)
 		{
 			UE_LOG(
@@ -1411,24 +1446,33 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		}
 
 		// Keep the first branch Atom deterministic and reuse the same Atom as
-		// the pre-choice connector shown at this route's fork exit.
+		// the pre-choice connector shown at this route's fork exit. In inspection
+		// mode, authored order is used so every template is visible exactly once.
 		FNightRuleAtomEntry FirstBranchEntry;
-		FRandomStream FirstBranchStream(
-			(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed)
-			^ (0x464F524B + static_cast<int32>(BuildRoute) * 7919));
 		int32 ResolvedFirstBranchTemplateIndex = INDEX_NONE;
-		if (!NightCourseAtom_Private::SelectWeightedTemplate(
-			BranchQueue->Atoms,
-			FirstBranchStream,
-			FirstBranchEntry,
-			ResolvedFirstBranchTemplateIndex))
+		if (bGenerateAllAtomsForTesting)
 		{
-			UE_LOG(
-				LogTemp,
-				Error,
-				TEXT("[NightCourse][Stage=AtomTemplateSelect] BranchRoutes[%d] has no positive-weight first connector Atom."),
-				static_cast<int32>(BuildRoute));
-			return false;
+			FirstBranchEntry = BranchQueue->Atoms[0];
+			ResolvedFirstBranchTemplateIndex = 0;
+		}
+		else
+		{
+			FRandomStream FirstBranchStream(
+				(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed)
+				^ (0x464F524B + static_cast<int32>(BuildRoute) * 7919));
+			if (!NightCourseAtom_Private::SelectWeightedTemplate(
+				BranchQueue->Atoms,
+				FirstBranchStream,
+				FirstBranchEntry,
+				ResolvedFirstBranchTemplateIndex))
+			{
+				UE_LOG(
+					LogTemp,
+					Error,
+					TEXT("[NightCourse][Stage=AtomTemplateSelect] BranchRoutes[%d] has no positive-weight first connector Atom."),
+					static_cast<int32>(BuildRoute));
+				return false;
+			}
 		}
 		PlannerEntries.Add(MoveTemp(FirstBranchEntry));
 		PlannerForkConnectorRoutes.Add(ENightRouteId::None);
@@ -1439,15 +1483,25 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			static_cast<int32>(BuildRoute),
 			ResolvedFirstBranchTemplateIndex);
 
-		if (BranchAtomCount > 1
-			&& !AppendWeightedTemplates(
-				BranchQueue->Atoms,
-				BranchAtomCount - 1,
-				FString::Printf(
-					TEXT("BranchRoutes[%d]"),
-					static_cast<int32>(BuildRoute))))
+		if (BranchAtomCount > 1)
 		{
-			return false;
+			const bool bAppendedBranchTemplates = bGenerateAllAtomsForTesting
+				? AppendAllTemplates(
+					BranchQueue->Atoms,
+					FString::Printf(
+						TEXT("BranchRoutes[%d]"),
+						static_cast<int32>(BuildRoute)),
+					1)
+				: AppendWeightedTemplates(
+					BranchQueue->Atoms,
+					BranchAtomCount - 1,
+					FString::Printf(
+						TEXT("BranchRoutes[%d]"),
+						static_cast<int32>(BuildRoute)));
+			if (!bAppendedBranchTemplates)
+			{
+				return false;
+			}
 		}
 	}
 
@@ -1916,6 +1970,13 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 					}
 					return false;
 				}
+				const FVector ExitForward =
+					TargetEntry.GetRotation().GetForwardVector().GetSafeNormal();
+				const FVector SafeExitForward = ExitForward.IsNearlyZero()
+					? TrackForward
+					: ExitForward;
+				TargetEntry.AddToTranslation(
+					SafeExitForward * FMath::Max(0.f, Config->BranchEntryGapCm));
 			}
 			else if (bUseForkExitForNextAtom)
 			{
@@ -1949,23 +2010,12 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 
 		FTransform LocalEntry = AtomSource->GetEntryAnchorTransform();
 		const FTransform LocalExit = AtomSource->GetExitAnchorTransform();
-		if (bIsForkBranchConnection && LocalStones.Num() > 0)
+		if (BuildRoute != ENightRouteId::None
+			&& AtomSlotIndex >= GeneratedBaseAtomCount)
 		{
-			LocalEntry.SetLocation(
-				NightCourseAtom_Private::GetLocalStoneLocation(LocalStones[0]));
-			LocalEntry.SetRotation(
-				FRotator(0.f, LocalStones[0].YawDeg, 0.f).Quaternion());
-			UE_LOG(
-				LogTemp,
-				Display,
-				TEXT("[NightCourse][Stage=ForkLink] route=%d slot=%d aligned first LandingPoint to the fork hand-off at %s (entryGap=%.1fcm)."),
-				static_cast<int32>(
-					bIsForkConnector ? ForkConnectorRoute : BuildRoute),
-				AtomSlotIndex,
-				*TargetEntry.GetLocation().ToCompactString(),
-				bIsSelectedBranchEntry
-					? FMath::Max(0.f, Config->BranchEntryGapCm)
-					: 0.f);
+			FVector BranchEntryLocation = TargetEntry.GetLocation();
+			BranchEntryLocation.Z = CourseStartZ;
+			TargetEntry.SetLocation(BranchEntryLocation);
 		}
 		const FTransform BaseAtomWorld = NightCourseAtom_Private::MakeAtomWorldTransform(
 			TargetEntry,
@@ -2025,27 +2075,6 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				AtomSlotIndex,
 				*AtomKey);
 		}
-		if (!bFoundValidTransform
-			&& (bIsSelectedBranchEntry || BuildRoute != ENightRouteId::None))
-		{
-			FTransform ForwardFallbackAtomWorld = FallbackAtomWorld;
-			if (TryTranslateAtomAlongDirectionIntoLayoutBounds(
-				AtomSource,
-				TargetEntry.GetRotation().GetForwardVector(),
-				ForwardFallbackAtomWorld))
-			{
-				AtomWorld = ForwardFallbackAtomWorld;
-				bFoundValidTransform = true;
-				UE_LOG(
-					LogTemp,
-					Warning,
-					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' zero-yaw branch Atom shifted along its entry direction by %.2fcm to fit LayoutBounds."),
-					AtomSlotIndex,
-					*AtomKey,
-					(FallbackAtomWorld.GetLocation()
-						- ForwardFallbackAtomWorld.GetLocation()).Size());
-			}
-		}
 		if (!bFoundValidTransform)
 		{
 			if (TryTranslateAtomYIntoLayoutBounds(
@@ -2061,20 +2090,6 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 					AtomSlotIndex,
 					*AtomKey,
 					FallbackAtomWorld.GetLocation().Y - BaseAtomWorld.GetLocation().Y);
-			}
-			else if (BuildRoute != ENightRouteId::None
-				&& TryTranslateAtomIntoLayoutBounds(
-					AtomSource,
-					FallbackAtomWorld))
-			{
-				AtomWorld = FallbackAtomWorld;
-				bFoundValidTransform = true;
-				UE_LOG(
-					LogTemp,
-					Warning,
-					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' zero-yaw branch Atom translated on all axes to fit LayoutBounds."),
-					AtomSlotIndex,
-					*AtomKey);
 			}
 			else
 			{
@@ -2092,6 +2107,81 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			}
 		}
 
+		if (!bIsForkConnector && LocalStones.Num() > 0)
+		{
+			const float PreviousRouteStoneX =
+				!bFirstAtom && OutStones.IsValidIndex(PreviousLastStoneIndex)
+				? OutStones[PreviousLastStoneIndex].WorldLocation.X
+				: PreviousExit.GetLocation().X;
+			const float RequiredFirstX = bFirstAtom
+				? Config->TrackOrigin.X
+				: FMath::Max(
+					PreviousExit.GetLocation().X,
+					PreviousRouteStoneX)
+					+ FMath::Max(
+						1.f,
+						bIsSelectedBranchEntry
+							? Config->BranchEntryGapCm
+							: Route->TransitionJumpGapCm);
+			const float FirstLandingX = AtomWorld.TransformPosition(
+				NightCourseAtom_Private::GetLocalStoneLocation(LocalStones[0])).X;
+			const float XTranslation = FMath::Max(
+				0.f,
+				RequiredFirstX - FirstLandingX);
+			if (XTranslation > KINDA_SMALL_NUMBER)
+			{
+				AtomWorld.AddToTranslation(FVector(XTranslation, 0.f, 0.f));
+				if (!IsAtomTransformInsideLayoutBounds(AtomSource, AtomWorld))
+				{
+					UE_LOG(
+						LogTemp,
+						Error,
+						TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' cannot move Atom forward on world X without leaving LayoutBounds."),
+						AtomSlotIndex,
+						*AtomKey);
+					if (AtomInstance)
+					{
+						AtomInstance->Destroy();
+					}
+					return false;
+				}
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' shifted forward on world X by %.2fcm."),
+					AtomSlotIndex,
+					*AtomKey,
+					XTranslation);
+			}
+
+			float PreviousLandingX = bFirstAtom
+				? -TNumericLimits<float>::Max()
+				: FMath::Max(
+					PreviousExit.GetLocation().X,
+					PreviousRouteStoneX);
+			for (const FNightStoneSpec& LocalStone : LocalStones)
+			{
+				const float LandingX = AtomWorld.TransformPosition(
+					NightCourseAtom_Private::GetLocalStoneLocation(LocalStone)).X;
+				if (LandingX <= PreviousLandingX + KINDA_SMALL_NUMBER)
+				{
+					UE_LOG(
+						LogTemp,
+						Error,
+						TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' LandingPoint X regressed (%.2f <= %.2f)."),
+						AtomSlotIndex,
+						*AtomKey,
+						LandingX,
+						PreviousLandingX);
+					if (AtomInstance)
+					{
+						AtomInstance->Destroy();
+					}
+					return false;
+				}
+				PreviousLandingX = LandingX;
+			}
+		}
 		const int32 StoneOffset = OutStones.Num();
 		const int32 BridgeOffset = OutBridges.Num();
 		for (const FNightStoneSpec& LocalStone : LocalStones)
@@ -2103,8 +2193,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			WorldStone.WorldLocation = WorldLocation;
 			WorldStone.TrackDistance = NightCourseAtom_Private::GetTrackDistance(
 				WorldLocation,
-				Config->TrackOrigin,
-				TrackForward);
+				Config->TrackOrigin);
 			WorldStone.YawDeg = AtomWorld.TransformRotation(
 				FRotator(0.f, LocalStone.YawDeg, 0.f).Quaternion()).Rotator().Yaw;
 			WorldStone.bForkConnectorVisualOnly = bIsForkConnector;
@@ -2190,12 +2279,21 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				ForkWorld.TransformPosition(ForkLocalEntry.GetLocation()).Y;
 			ForkWorld.AddToTranslation(
 				FVector(0.f, -ForkEntryYBeforeReset, 0.f));
+			FVector ForkLocation = ForkWorld.GetLocation();
+			ForkLocation.Z = CourseStartZ;
+			ForkWorld.SetLocation(ForkLocation);
 			UE_LOG(
 				LogTemp,
 				Display,
 				TEXT("[NightCourse][Stage=ForkAtom] pair=%d forced entry Y reset from %.2fcm to 0.00cm."),
 				static_cast<int32>(BuildForkPair),
 				ForkEntryYBeforeReset);
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=ForkAtom] pair=%d forced world Z to course start %.2fcm."),
+				static_cast<int32>(BuildForkPair),
+				CourseStartZ);
 			UE_LOG(
 				LogTemp,
 				Display,
@@ -2263,8 +2361,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				WorldStone.WorldLocation = WorldLocation;
 				WorldStone.TrackDistance = NightCourseAtom_Private::GetTrackDistance(
 					WorldLocation,
-					Config->TrackOrigin,
-					TrackForward);
+					Config->TrackOrigin);
 				WorldStone.YawDeg = ForkWorld.TransformRotation(
 					FRotator(0.f, LocalForkStone.YawDeg, 0.f).Quaternion())
 					.Rotator()
@@ -2351,10 +2448,17 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 					ForkWorld.TransformPosition(LocalAnchor.GetLocation()),
 					FVector::OneVector);
 			};
-			const FTransform WorldLeftExit =
-				MakeWorldAnchor(ForkAtomDefaults->GetLeftExitAnchorTransform());
-			const FTransform WorldRightExit =
-				MakeWorldAnchor(ForkAtomDefaults->GetRightExitAnchorTransform());
+			auto NormalizeForkExitZ = [CourseStartZ](FTransform Exit)
+			{
+				FVector ExitLocation = Exit.GetLocation();
+				ExitLocation.Z = CourseStartZ;
+				Exit.SetLocation(ExitLocation);
+				return Exit;
+			};
+			const FTransform WorldLeftExit = NormalizeForkExitZ(
+				MakeWorldAnchor(ForkAtomDefaults->GetLeftExitAnchorTransform()));
+			const FTransform WorldRightExit = NormalizeForkExitZ(
+				MakeWorldAnchor(ForkAtomDefaults->GetRightExitAnchorTransform()));
 			ForkLeftExitForConnector = WorldLeftExit;
 			ForkRightExitForConnector = WorldRightExit;
 			bForkExitTransformsReady = true;
@@ -2869,6 +2973,89 @@ bool UNightCourseDirector::TryTranslateLocalArtBoundsYIntoLayoutBounds(
 		InOutWorldTransform);
 }
 
+AActor* UNightCourseDirector::AcquireRuntimeActor(UClass* ActorClass, const FTransform& Transform)
+{
+	if (!ActorClass)
+	{
+		return nullptr;
+	}
+
+	for (int32 Index = RuntimeActorPool.Num() - 1; Index >= 0; --Index)
+	{
+		AActor* Actor = RuntimeActorPool[Index];
+		if (!IsValid(Actor))
+		{
+			RuntimeActorPool.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+			continue;
+		}
+		if (Actor->GetClass() == ActorClass)
+		{
+			RuntimeActorPool.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+			Actor->SetActorTransform(Transform);
+			Actor->SetActorHiddenInGame(false);
+			Actor->SetActorEnableCollision(true);
+			Actor->SetActorTickEnabled(true);
+			return Actor;
+		}
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	return World->SpawnActor<AActor>(ActorClass, Transform, Params);
+}
+
+void UNightCourseDirector::ReleaseRuntimeActor(AActor* Actor)
+{
+	if (!IsValid(Actor))
+	{
+		return;
+	}
+	// Blueprint runtime actors can initialize art in Construction Script/BeginPlay.
+	// Those lifecycle events do not run when an Actor is reused, so pool only the
+	// two native classes whose complete visible state is reapplied by SetupStone/
+	// SetupBridge on every acquire.
+	const bool bPoolableNativeActor =
+		Actor->GetClass() == ANightCourseStoneActor::StaticClass()
+		|| Actor->GetClass() == ANightBridgeSegmentActor::StaticClass();
+	if (!bPoolableNativeActor)
+	{
+		Actor->Destroy();
+		return;
+	}
+	if (!IsValid(Actor) || RuntimeActorPool.Contains(Actor))
+	{
+		return;
+	}
+	if (ANightCourseStoneActor* Stone = Cast<ANightCourseStoneActor>(Actor))
+	{
+		Stone->ClearFoe(false);
+	}
+	Actor->SetActorHiddenInGame(true);
+	Actor->SetActorEnableCollision(false);
+	Actor->SetActorTickEnabled(false);
+	RuntimeActorPool.Add(Actor);
+}
+
+void UNightCourseDirector::ResetRuntimeSpawnBudget()
+{
+	RuntimeSpawnBudgetRemaining = IsRuntimeActorStreamingEnabled() ? 4 : MAX_int32;
+}
+
+bool UNightCourseDirector::TryConsumeRuntimeSpawnBudget()
+{
+	if (RuntimeSpawnBudgetRemaining <= 0)
+	{
+		return false;
+	}
+	--RuntimeSpawnBudgetRemaining;
+	return true;
+}
+
 void UNightCourseDirector::SpawnForkAtom(int32 Index)
 {
 	UWorld* World = GetWorld();
@@ -2900,14 +3087,11 @@ void UNightCourseDirector::SpawnForkAtom(int32 Index)
 		return;
 	}
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ANightCourseForkAtomActor* Actor =
-		World->SpawnActor<ANightCourseForkAtomActor>(
-			Spec.ActorClass,
-			Spec.WorldTransform,
-			Params);
+	if (!TryConsumeRuntimeSpawnBudget())
+	{
+		return;
+	}
+	ANightCourseForkAtomActor* Actor = Cast<ANightCourseForkAtomActor>(AcquireRuntimeActor(Spec.ActorClass, Spec.WorldTransform));
 	if (!Actor)
 	{
 		UE_LOG(
@@ -2981,13 +3165,11 @@ void UNightCourseDirector::SpawnVisualBinding(int32 BindingIndex)
 		return;
 	}
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AActor* VisualActor = World->SpawnActor<AActor>(
-		VisualClass.Get(),
-		Binding.LocalTransform.GetLocation(),
-		Binding.LocalTransform.GetRotation().Rotator(),
-		Params);
+	if (!TryConsumeRuntimeSpawnBudget())
+	{
+		return;
+	}
+	AActor* VisualActor = AcquireRuntimeActor(VisualClass.Get(), Binding.LocalTransform);
 	if (!VisualActor)
 	{
 		UE_LOG(
@@ -3097,14 +3279,13 @@ void UNightCourseDirector::SpawnStoneActor(int32 Index)
 			*GetNameSafe(SpawnClass));
 	}
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	const FRotator Facing = Config ? Config->TrackForward.Rotation() : FRotator::ZeroRotator;
-	ANightCourseStoneActor* Stone = World->SpawnActor<ANightCourseStoneActor>(
-		SpawnClass,
-		GetStoneWorldLocation(Index),
-		Facing,
-		Params);
+	if (!TryConsumeRuntimeSpawnBudget())
+	{
+		return;
+	}
+	ANightCourseStoneActor* Stone = Cast<ANightCourseStoneActor>(
+		AcquireRuntimeActor(SpawnClass, FTransform(Facing, GetStoneWorldLocation(Index))));
 	if (!Stone)
 	{
 		UE_LOG(
@@ -3148,14 +3329,7 @@ bool UNightCourseDirector::SpawnRoadsideActors()
 	const float RoadsideVisibleDistance = Config
 		? FMath::Max(1.f, Config->RuntimeRoadsideVisibleDistanceCm)
 		: TNumericLimits<float>::Max();
-	const float UnloadBehindDistance = Config
-		? FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm)
-		: 0.f;
-	const FVector TrackForward = Config
-		&& !Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? Config->TrackForward.GetSafeNormal()
-		: FVector::ForwardVector;
-	const FVector TrackOrigin = Config ? Config->TrackOrigin : FVector::ZeroVector;
+	const float TrackOriginX = Config ? Config->TrackOrigin.X : 0.f;
 
 	for (int32 Index = 0; Index < RoadsideSpecs.Num(); ++Index)
 	{
@@ -3168,10 +3342,8 @@ bool UNightCourseDirector::SpawnRoadsideActors()
 		{
 			const float TrackDistance = StoneSpecs.IsValidIndex(Spec.ToStoneIndex)
 				? StoneSpecs[Spec.ToStoneIndex].TrackDistance
-				: FVector::DotProduct(
-					Spec.WorldTransform.GetLocation() - TrackOrigin,
-					TrackForward);
-			if (TrackDistance < ProgressDistance - UnloadBehindDistance
+				: Spec.WorldTransform.GetLocation().X - TrackOriginX;
+			if (TrackDistance < ProgressDistance - KINDA_SMALL_NUMBER
 				|| FMath::Abs(TrackDistance - ProgressDistance) > RoadsideVisibleDistance)
 			{
 				continue;
@@ -3195,14 +3367,12 @@ bool UNightCourseDirector::SpawnRoadsideActors()
 			return false;
 		}
 
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		ANightRoadsideSegmentActor* Actor =
-			World->SpawnActor<ANightRoadsideSegmentActor>(
-				Spec.PropClass,
-				Spec.WorldTransform,
-				Params);
+		if (!TryConsumeRuntimeSpawnBudget())
+		{
+			break;
+		}
+		ANightRoadsideSegmentActor* Actor = Cast<ANightRoadsideSegmentActor>(
+			AcquireRuntimeActor(Spec.PropClass, Spec.WorldTransform));
 		if (!Actor)
 		{
 			UE_LOG(
@@ -3272,17 +3442,16 @@ void UNightCourseDirector::SpawnBridgeActor(int32 Index)
 		}
 	}
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	// A BridgeVisual component owns its own actor. If an authored visual is
 	// absent, keep a native compatibility actor instead of consulting removed
 	// Config bridge-class fallbacks.
 	UClass* BridgeClass = ANightBridgeSegmentActor::StaticClass();
-	ANightBridgeSegmentActor* Bridge = World->SpawnActor<ANightBridgeSegmentActor>(
-		BridgeClass,
-		BridgeSpecs[Index].WorldLocation,
-		FRotator(0.f, BridgeSpecs[Index].YawDeg, 0.f),
-		Params);
+	if (!TryConsumeRuntimeSpawnBudget())
+	{
+		return;
+	}
+	ANightBridgeSegmentActor* Bridge = Cast<ANightBridgeSegmentActor>(AcquireRuntimeActor(
+		BridgeClass, FTransform(FRotator(0.f, BridgeSpecs[Index].YawDeg, 0.f), BridgeSpecs[Index].WorldLocation)));
 	if (!Bridge)
 	{
 		UE_LOG(
@@ -3310,35 +3479,35 @@ void UNightCourseDirector::ClearSpawnedCourseActors()
 	{
 		if (Roadside)
 		{
-			Roadside->Destroy();
+			ReleaseRuntimeActor(Roadside);
 		}
 	}
 	for (AActor* Actor : SpawnedVisualActors)
 	{
 		if (Actor)
 		{
-			Actor->Destroy();
+			ReleaseRuntimeActor(Actor);
 		}
 	}
 	for (ANightCourseForkAtomActor* ForkAtom : SpawnedForkAtoms)
 	{
 		if (ForkAtom)
 		{
-			ForkAtom->Destroy();
+			ReleaseRuntimeActor(ForkAtom);
 		}
 	}
 	for (ANightBridgeSegmentActor* Bridge : SpawnedBridges)
 	{
 		if (Bridge)
 		{
-			Bridge->Destroy();
+			ReleaseRuntimeActor(Bridge);
 		}
 	}
 	for (ANightCourseStoneActor* Stone : SpawnedStones)
 	{
 		if (Stone)
 		{
-			Stone->Destroy();
+			ReleaseRuntimeActor(Stone);
 		}
 	}
 	SpawnedRoadsideActors.Reset();
@@ -3357,7 +3526,7 @@ void UNightCourseDirector::QueueSpawnedCourseActorsForDeferredDestroy()
 		{
 			return;
 		}
-		DeferredRuntimeActors.Add(Actor);
+		ReleaseRuntimeActor(Actor);
 		++QueuedCount;
 	};
 	for (ANightRoadsideSegmentActor* Actor : SpawnedRoadsideActors)
@@ -3388,9 +3557,9 @@ void UNightCourseDirector::QueueSpawnedCourseActorsForDeferredDestroy()
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Stage=Streaming] queued %d old runtime actors for deferred destroy; pending=%d."),
+		TEXT("[NightCourse][Stage=Streaming] returned %d old runtime actors to pool; pool=%d."),
 		QueuedCount,
-		DeferredRuntimeActors.Num());
+		RuntimeActorPool.Num());
 }
 
 void UNightCourseDirector::HideDeferredRuntimeActors()
@@ -3463,6 +3632,8 @@ bool UNightCourseDirector::SpawnCourseActors()
 	}
 
 	const bool bStreaming = IsRuntimeActorStreamingEnabled();
+	// Initial course materialization must be complete before the pawn is placed.
+	RuntimeSpawnBudgetRemaining = MAX_int32;
 	const int32 FirstKeepStone = bStreaming
 		? GetRuntimeKeepFromStone()
 		: 0;
@@ -4444,9 +4615,11 @@ bool UNightCourseDirector::InstallPreparedBranchRoute(
 		PreviousStoneIndex,
 		0,
 		FMath::Max(0, StoneSpecs.Num() - 1));
-	ProgressDistance = StoneSpecs.IsValidIndex(PreviousStoneIndex)
-		? StoneSpecs[PreviousStoneIndex].TrackDistance
-		: PreviousProgressDistance;
+	ProgressDistance = FMath::Max(
+		PreviousProgressDistance,
+		StoneSpecs.IsValidIndex(PreviousStoneIndex)
+			? StoneSpecs[PreviousStoneIndex].TrackDistance
+			: PreviousProgressDistance);
 	ActiveBeatIndex = INDEX_NONE;
 	bWindowOpen = false;
 	bAdvancing = false;
@@ -4834,9 +5007,11 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		PreviousStoneIndex,
 		0,
 		FMath::Max(0, StoneSpecs.Num() - 1));
-	ProgressDistance = StoneSpecs.IsValidIndex(PreviousStoneIndex)
-		? StoneSpecs[PreviousStoneIndex].TrackDistance
-		: PreviousProgressDistance;
+	ProgressDistance = FMath::Max(
+		PreviousProgressDistance,
+		StoneSpecs.IsValidIndex(PreviousStoneIndex)
+			? StoneSpecs[PreviousStoneIndex].TrackDistance
+			: PreviousProgressDistance);
 	ActiveBeatIndex = INDEX_NONE;
 	bWindowOpen = false;
 	bAdvancing = false;
@@ -5162,9 +5337,22 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 		return;
 	}
 
+	const float TargetDistance = StoneSpecs[StoneIndex].TrackDistance;
+	if (TargetDistance < ProgressDistance - KINDA_SMALL_NUMBER)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Stage=Advance] rejected backward X movement: stone=%d targetX=%.2f progressX=%.2f."),
+			StoneIndex,
+			TargetDistance,
+			ProgressDistance);
+		BeginFailure(TEXT("Route X regressed; backward movement was blocked."));
+		return;
+	}
 	bAdvancing = true;
 	CurrentStoneIndex = StoneIndex;
-	AdvanceTargetDistance = StoneSpecs[StoneIndex].TrackDistance;
+	AdvanceTargetDistance = TargetDistance;
 	if (RunnerPawn)
 	{
 		// 镜头调度：把"真实行进方向"从仅岔路过渡推广到整条路线。
@@ -5193,7 +5381,7 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 	else
 	{
 		bAdvancing = false;
-		ProgressDistance = AdvanceTargetDistance;
+		ProgressDistance = FMath::Max(ProgressDistance, AdvanceTargetDistance);
 		if (bBranchSelected
 			&& bBranchTransitionConsumed
 			&& Phase == ENightCoursePhase::BranchEnterBuffer)
@@ -5207,7 +5395,7 @@ void UNightCourseDirector::BeginAdvanceToStone(int32 StoneIndex)
 void UNightCourseDirector::OnAdvanceArrived()
 {
 	bAdvancing = false;
-	ProgressDistance = AdvanceTargetDistance;
+	ProgressDistance = FMath::Max(ProgressDistance, AdvanceTargetDistance);
 	SyncPawnToProgress(true);
 	if (bBranchSelected
 		&& bBranchTransitionConsumed
@@ -5332,10 +5520,12 @@ int32 UNightCourseDirector::GetRuntimeSpawnThroughStone() const
 			StoneIndex < StoneSpecs.Num();
 			++StoneIndex)
 		{
-			// Branch atoms can be rebased or authored with a non-monotonic
-			// TrackDistance sequence. Do not stop at the first distant stone:
-			// a later gameplay stone may still be inside the streaming window.
-			if (StoneSpecs[StoneIndex].TrackDistance <= MaxVisibleDistance)
+			// Branch atoms use the monotonic world-X progress axis. Never include
+			// a candidate that is already behind the player, even if a later
+			// array element is still inside the streaming window.
+			if (StoneSpecs[StoneIndex].TrackDistance
+				>= ProgressDistance - KINDA_SMALL_NUMBER
+				&& StoneSpecs[StoneIndex].TrackDistance <= MaxVisibleDistance)
 			{
 				LastStone = StoneIndex;
 			}
@@ -5392,12 +5582,9 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 
 	const float UnloadBeforeDistance = ProgressDistance
 		- FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm);
-	const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? FVector::ForwardVector
-		: Config->TrackForward.GetSafeNormal();
-	const auto GetWorldDistance = [this, TrackForward](const FVector& Location)
+	const auto GetWorldDistance = [this](const FVector& Location)
 	{
-		return FVector::DotProduct(Location - Config->TrackOrigin, TrackForward);
+		return Location.X - Config->TrackOrigin.X;
 	};
 	const auto IsPassedStoneBehind = [this, UnloadBeforeDistance](const int32 StoneIndex)
 	{
@@ -5410,7 +5597,7 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 	{
 		if (SpawnedStones[StoneIndex] && IsPassedStoneBehind(StoneIndex))
 		{
-			SpawnedStones[StoneIndex]->Destroy();
+			ReleaseRuntimeActor(SpawnedStones[StoneIndex]);
 			SpawnedStones[StoneIndex] = nullptr;
 		}
 	}
@@ -5429,7 +5616,7 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 			: Distance < ProgressDistance;
 		if (bPassed && Distance < UnloadBeforeDistance)
 		{
-			SpawnedBridges[BridgeIndex]->Destroy();
+			ReleaseRuntimeActor(SpawnedBridges[BridgeIndex]);
 			SpawnedBridges[BridgeIndex] = nullptr;
 		}
 	}
@@ -5453,7 +5640,7 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 			: Distance < ProgressDistance;
 		if (bPassed && Distance < UnloadBeforeDistance)
 		{
-			SpawnedVisualActors[BindingIndex]->Destroy();
+			ReleaseRuntimeActor(SpawnedVisualActors[BindingIndex]);
 			SpawnedVisualActors[BindingIndex] = nullptr;
 		}
 	}
@@ -5472,7 +5659,7 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 			: Distance < ProgressDistance;
 		if (bPassed && Distance < UnloadBeforeDistance)
 		{
-			SpawnedRoadsideActors[RoadsideIndex]->Destroy();
+			ReleaseRuntimeActor(SpawnedRoadsideActors[RoadsideIndex]);
 			SpawnedRoadsideActors[RoadsideIndex] = nullptr;
 		}
 	}
@@ -5500,7 +5687,7 @@ void UNightCourseDirector::DestroyRuntimeActorsBehindPlayer()
 		{
 			continue;
 		}
-		SpawnedForkAtoms[ForkIndex]->Destroy();
+		ReleaseRuntimeActor(SpawnedForkAtoms[ForkIndex]);
 		SpawnedForkAtoms[ForkIndex] = nullptr;
 	}
 }
@@ -5510,30 +5697,32 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 	{
 		return;
 	}
+	ResetRuntimeSpawnBudget();
 
 	const int32 FirstKeepStone = GetRuntimeKeepFromStone();
 	const int32 LastSpawnStone = GetRuntimeSpawnThroughStone();
 	const float UnloadBeforeDistance = ProgressDistance
 		- FMath::Max(0.f, Config->RuntimeUnloadBehindDistanceCm);
-	const FVector TrackForward = Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? FVector::ForwardVector
-		: Config->TrackForward.GetSafeNormal();
 	const auto IsPassedStoneBehind = [this, UnloadBeforeDistance](const int32 StoneIndex)
 	{
 		return StoneSpecs.IsValidIndex(StoneIndex)
 			&& StoneIndex < CurrentStoneIndex
 			&& StoneSpecs[StoneIndex].TrackDistance < UnloadBeforeDistance;
 	};
-	const auto IsWorldLocationBehind = [this, TrackForward, UnloadBeforeDistance](const FVector& Location)
+	const auto IsWorldLocationBehind = [this, UnloadBeforeDistance](const FVector& Location)
 	{
-		return FVector::DotProduct(Location - Config->TrackOrigin, TrackForward)
-			< UnloadBeforeDistance;
+		return Location.X - Config->TrackOrigin.X < UnloadBeforeDistance;
+	};
+	const auto IsAtOrAheadOfProgress = [this](const float Distance)
+	{
+		return Distance >= ProgressDistance - KINDA_SMALL_NUMBER;
 	};
 	for (int32 StoneIndex = FirstKeepStone;
 		StoneIndex < StoneSpecs.Num() && StoneIndex <= LastSpawnStone;
 		++StoneIndex)
 	{
-		if (!IsPassedStoneBehind(StoneIndex))
+		if (!IsPassedStoneBehind(StoneIndex)
+			&& IsAtOrAheadOfProgress(StoneSpecs[StoneIndex].TrackDistance))
 		{
 			SpawnStoneActor(StoneIndex);
 		}
@@ -5541,10 +5730,14 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 	for (int32 BridgeIndex = 0; BridgeIndex < BridgeSpecs.Num(); ++BridgeIndex)
 	{
 		const FNightBridgeSpec& Bridge = BridgeSpecs[BridgeIndex];
+		const float BridgeDistance = StoneSpecs.IsValidIndex(Bridge.ToStoneIndex)
+			? StoneSpecs[Bridge.ToStoneIndex].TrackDistance
+			: Bridge.WorldLocation.X - Config->TrackOrigin.X;
 		const bool bBehindUnloadBoundary = Bridge.ToStoneIndex != INDEX_NONE
 			? IsPassedStoneBehind(Bridge.ToStoneIndex)
 			: IsWorldLocationBehind(Bridge.WorldLocation);
 		if (!bBehindUnloadBoundary
+			&& IsAtOrAheadOfProgress(BridgeDistance)
 			&& (Bridge.bForkConnectorVisualOnly
 				|| (Bridge.ToStoneIndex >= FirstKeepStone
 					&& Bridge.ToStoneIndex <= LastSpawnStone)))
@@ -5575,7 +5768,12 @@ void UNightCourseDirector::StreamRuntimeCourseActors()
 		const bool bBehindUnloadBoundary = OwnerStoneIndex != INDEX_NONE
 			? IsPassedStoneBehind(OwnerStoneIndex)
 			: IsWorldLocationBehind(Binding.LocalTransform.GetLocation());
-		if (bShouldSpawn && !bBehindUnloadBoundary)
+		const float OwnerDistance = StoneSpecs.IsValidIndex(OwnerStoneIndex)
+			? StoneSpecs[OwnerStoneIndex].TrackDistance
+			: Binding.LocalTransform.GetLocation().X - Config->TrackOrigin.X;
+		if (bShouldSpawn
+			&& IsAtOrAheadOfProgress(OwnerDistance)
+			&& !bBehindUnloadBoundary)
 		{
 			SpawnVisualBinding(BindingIndex);
 		}
@@ -5607,19 +5805,11 @@ void UNightCourseDirector::UpdateRouteVisibility()
 	const float VisibleDistanceCm = FMath::Max(
 		1.f,
 		ActiveRouteRule.VisibleDistanceCm);
-	const FVector TrackForward = Config
-		&& !Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? Config->TrackForward.GetSafeNormal()
-		: FVector::ForwardVector;
-	const FVector TrackOrigin = Config
-		? Config->TrackOrigin
-		: FVector::ZeroVector;
-	const auto GetWorldTrackDistance = [TrackOrigin, TrackForward](
+	const float TrackOriginX = Config ? Config->TrackOrigin.X : 0.f;
+	const auto GetWorldTrackDistance = [TrackOriginX](
 		const FVector& WorldLocation)
 	{
-		return FVector::DotProduct(
-			WorldLocation - TrackOrigin,
-			TrackForward);
+		return WorldLocation.X - TrackOriginX;
 	};
 	const auto IsWithinBranchDistance = [RunnerDistance, VisibleDistanceCm](
 		const float TrackDistance)
@@ -5758,13 +5948,7 @@ void UNightCourseDirector::UpdateRoadsideVisibility(
 	const float RunnerDistance,
 	const float VisibleDistanceCm)
 {
-	const FVector TrackForward = Config
-		&& !Config->TrackForward.GetSafeNormal().IsNearlyZero()
-		? Config->TrackForward.GetSafeNormal()
-		: FVector::ForwardVector;
-	const FVector TrackOrigin = Config
-		? Config->TrackOrigin
-		: FVector::ZeroVector;
+	const float TrackOriginX = Config ? Config->TrackOrigin.X : 0.f;
 	for (int32 Index = 0; Index < RoadsideSpecs.Num(); ++Index)
 	{
 		if (!SpawnedRoadsideActors.IsValidIndex(Index)
@@ -5775,9 +5959,7 @@ void UNightCourseDirector::UpdateRoadsideVisibility(
 		const FNightRoadsidePropSpec& Spec = RoadsideSpecs[Index];
 		const float TrackDistance = StoneSpecs.IsValidIndex(Spec.ToStoneIndex)
 			? StoneSpecs[Spec.ToStoneIndex].TrackDistance
-			: FVector::DotProduct(
-				Spec.WorldTransform.GetLocation() - TrackOrigin,
-				TrackForward);
+			: Spec.WorldTransform.GetLocation().X - TrackOriginX;
 		const bool bVisible = FMath::Abs(TrackDistance - RunnerDistance)
 			<= FMath::Max(1.f, VisibleDistanceCm);
 		SpawnedRoadsideActors[Index]->SetActorHiddenInGame(!bVisible);

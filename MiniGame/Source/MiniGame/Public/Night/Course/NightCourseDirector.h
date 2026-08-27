@@ -380,6 +380,9 @@ protected:
 	ENightRouteId PendingBranchRoute = ENightRouteId::None;
 	UPROPERTY()
 	TArray<TObjectPtr<AActor>> DeferredRuntimeActors;
+	UPROPERTY()
+	TArray<TObjectPtr<AActor>> RuntimeActorPool;
+	int32 RuntimeSpawnBudgetRemaining = 0;
 	TWeakObjectPtr<APostProcessVolume> ManagedPostProcessVolume;
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> ActiveCoursePostProcessMaterial;
@@ -460,6 +463,10 @@ protected:
 	void SpawnVisualBinding(int32 BindingIndex);
 	void SpawnForkAtom(int32 Index);
 	void SetStoneFoeVisibility(int32 StoneIndex, bool bVisible);
+	AActor* AcquireRuntimeActor(UClass* ActorClass, const FTransform& Transform);
+	void ReleaseRuntimeActor(AActor* Actor);
+	void ResetRuntimeSpawnBudget();
+	bool TryConsumeRuntimeSpawnBudget();
 	bool IsAtomTransformInsideLayoutBounds(
 		const ANightCourseAtomActor* AtomDefaults,
 		const FTransform& AtomWorld) const;
