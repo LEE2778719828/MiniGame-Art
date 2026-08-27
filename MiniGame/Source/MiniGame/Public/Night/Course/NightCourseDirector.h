@@ -484,6 +484,9 @@ protected:
 		const ANightCourseAtomActor* AtomDefaults,
 		const FVector& WorldDirection,
 		FTransform& InOutAtomWorld) const;
+	bool TryTranslateAtomIntoLayoutBounds(
+		const ANightCourseAtomActor* AtomDefaults,
+		FTransform& InOutAtomWorld) const;
 	bool TryTranslateAtomYIntoLayoutBounds(
 		const ANightCourseAtomActor* AtomDefaults,
 		FTransform& InOutAtomWorld) const;

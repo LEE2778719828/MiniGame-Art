@@ -557,9 +557,13 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 		return false;
 	}
 
-	double JsonForkAfterBaseAtomIndex = INDEX_NONE;
-	const bool bHasForkAfterBaseAtomIndex =
-		Root->TryGetNumberField(TEXT("forkAfterBaseAtomIndex"), JsonForkAfterBaseAtomIndex);
+	// Legacy JSON may still contain this field. It is intentionally ignored:
+	// the selected RouteModes TargetAtomCount is now authoritative, while the
+	// CourseConfig override remains the only legacy fallback.
+	if (Root->HasField(TEXT("forkAfterBaseAtomIndex")))
+	{
+		UE_LOG(LogNightCourseRule, Warning, TEXT("Ignoring legacy JSON field 'forkAfterBaseAtomIndex'; use RouteModes targetAtomCount."));
+	}
 	bool ImportedAutoSelectAtomKeys = true;
 	Root->TryGetBoolField(TEXT("autoSelectAtomKeys"), ImportedAutoSelectAtomKeys);
 
@@ -567,16 +571,12 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 	const int32 PreviousSeed = MutableThis->Seed;
 	const TMap<ENightRouteId, FNightRuleAtomQueue> PreviousRouteModes = MutableThis->RouteModes;
 	const TMap<ENightRouteId, FNightRuleAtomQueue> PreviousBranchRoutes = MutableThis->BranchRoutes;
-	const int32 PreviousForkAfterBaseAtomIndex = MutableThis->ForkAfterBaseAtomIndex;
 	const bool PreviousAutoSelectAtomKeys = MutableThis->bAutoSelectAtomKeys;
 	const FString PreviousEditorJson = MutableThis->EditorJson;
 	MutableThis->Modify();
 	MutableThis->Seed = static_cast<int32>(JsonSeed);
 	MutableThis->RouteModes = MoveTemp(ImportedRouteModes);
 	MutableThis->BranchRoutes = MoveTemp(ImportedBranchRoutes);
-	MutableThis->ForkAfterBaseAtomIndex = bHasForkAfterBaseAtomIndex
-		? static_cast<int32>(JsonForkAfterBaseAtomIndex)
-		: INDEX_NONE;
 	MutableThis->bAutoSelectAtomKeys = ImportedAutoSelectAtomKeys;
 	MutableThis->EditorJson = JsonText;
 
@@ -585,7 +585,6 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 		MutableThis->Seed = PreviousSeed;
 		MutableThis->RouteModes = PreviousRouteModes;
 		MutableThis->BranchRoutes = PreviousBranchRoutes;
-		MutableThis->ForkAfterBaseAtomIndex = PreviousForkAfterBaseAtomIndex;
 		MutableThis->bAutoSelectAtomKeys = PreviousAutoSelectAtomKeys;
 		MutableThis->EditorJson = PreviousEditorJson;
 		return false;
@@ -639,10 +638,6 @@ bool UNightCourseRuleData::ExportJson(FString& OutJson, FString& OutError) const
 				JsonQueue);
 		}
 		Root->SetObjectField(TEXT("branchRoutes"), JsonBranches);
-	}
-	if (ForkAfterBaseAtomIndex != INDEX_NONE)
-	{
-		Root->SetNumberField(TEXT("forkAfterBaseAtomIndex"), ForkAfterBaseAtomIndex);
 	}
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);

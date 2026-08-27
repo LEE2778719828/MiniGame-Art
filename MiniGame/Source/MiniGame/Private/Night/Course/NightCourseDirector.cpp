@@ -1291,14 +1291,14 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		return false;
 	}
 
-	const int32 ConfigForkIndex = Config->ForkAfterBaseAtomIndex;
-	const int32 RuleForkIndex = Rule->ForkAfterBaseAtomIndex;
-	const int32 ForkIndex = ConfigForkIndex != INDEX_NONE
-		? ConfigForkIndex
-		: RuleForkIndex;
 	const int32 AuthoredBaseAtomCount = DefaultRouteQueue->TargetAtomCount > 0
 		? DefaultRouteQueue->TargetAtomCount
 		: DefaultRouteQueue->Atoms.Num();
+	// RouteModes is the authoritative source for the selected pre-fork route
+	// length. Keep the CourseConfig override only as a legacy level fallback.
+	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
+		? Config->ForkAfterBaseAtomIndex
+		: AuthoredBaseAtomCount;
 	const bool bUsesForkBase =
 		BuildRoute != ENightRouteId::None
 		|| (Config->bEnableFork && ForkIndex != INDEX_NONE);
@@ -1877,6 +1877,8 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		const bool bIsSelectedBranchEntry = bUseForkExitForNextAtom;
 		const bool bIsForkBranchConnection =
 			bIsSelectedBranchEntry || bIsForkConnector;
+		// Only unselected visual fork connectors may bypass; playable branch
+		// Atoms always go through the strict LayoutBounds path below.
 		const bool bBypassLayoutBoundsForBranch =
 			bIsForkConnector;
 		FTransform TargetEntry = InitialEntry;
@@ -1974,11 +1976,11 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			LocalEntry);
 
 		TArray<float> CandidateYaws;
-		if (bIsForkBranchConnection)
+		if (BuildRoute != ENightRouteId::None || bIsForkBranchConnection)
 		{
-			// Preserve the authored left/right exit direction for the
-			// connector Atom. Random yaw is still available for later branch
-			// Atoms after the hand-off.
+			// Keep every selected branch Atom at zero authored yaw offset so the
+			// bounds solver has the full translation budget and no random turn
+			// can push the branch outside the LayoutBounds.
 			CandidateYaws.Add(0.f);
 		}
 		else if (AtomSource->bAllowDeterministicRandomYaw)
@@ -2023,11 +2025,12 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			UE_LOG(
 				LogTemp,
 				Warning,
-				TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' temporarily bypassed LayoutBounds only for the Atom connected to the fork exit."),
+				TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' bypassed LayoutBounds for an unselected visual fork connector."),
 				AtomSlotIndex,
 				*AtomKey);
 		}
-		if (!bFoundValidTransform && bIsSelectedBranchEntry)
+		if (!bFoundValidTransform
+			&& (bIsSelectedBranchEntry || BuildRoute != ENightRouteId::None))
 		{
 			FTransform ForwardFallbackAtomWorld = FallbackAtomWorld;
 			if (TryTranslateAtomAlongDirectionIntoLayoutBounds(
@@ -2040,7 +2043,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				UE_LOG(
 					LogTemp,
 					Warning,
-					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' exceeded bounds at the fork hand-off; moved first branch Atom forward by %.2fcm."),
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' zero-yaw branch Atom shifted along its entry direction by %.2fcm to fit LayoutBounds."),
 					AtomSlotIndex,
 					*AtomKey,
 					(FallbackAtomWorld.GetLocation()
@@ -2058,10 +2061,24 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				UE_LOG(
 					LogTemp,
 					Warning,
-					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' exceeded scene bounds for every yaw; translated Atom on Y by %.2fcm as fallback."),
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' zero-yaw Atom translated on Y by %.2fcm to fit LayoutBounds."),
 					AtomSlotIndex,
 					*AtomKey,
 					FallbackAtomWorld.GetLocation().Y - BaseAtomWorld.GetLocation().Y);
+			}
+			else if (BuildRoute != ENightRouteId::None
+				&& TryTranslateAtomIntoLayoutBounds(
+					AtomSource,
+					FallbackAtomWorld))
+			{
+				AtomWorld = FallbackAtomWorld;
+				bFoundValidTransform = true;
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightCourse][Stage=AtomTransform] slot=%d key='%s' zero-yaw branch Atom translated on all axes to fit LayoutBounds."),
+					AtomSlotIndex,
+					*AtomKey);
 			}
 			else
 			{
@@ -2645,6 +2662,84 @@ bool UNightCourseDirector::TryTranslateAtomYIntoLayoutBounds(
 		MinWorldYTranslation,
 		MaxWorldYTranslation);
 	InOutAtomWorld.AddToTranslation(FVector(0.f, WorldYTranslation, 0.f));
+	return IsAtomTransformInsideLayoutBounds(AtomDefaults, InOutAtomWorld);
+}
+
+bool UNightCourseDirector::TryTranslateAtomIntoLayoutBounds(
+	const ANightCourseAtomActor* AtomDefaults,
+	FTransform& InOutAtomWorld) const
+{
+	if (!bEnforceLayoutBounds || !LayoutBoundsComponent || !AtomDefaults)
+	{
+		return false;
+	}
+
+	const FTransform BoundsTransform =
+		LayoutBoundsComponent->GetComponentTransform();
+	const FVector BoundsExtent =
+		LayoutBoundsComponent->GetScaledBoxExtent();
+	if (BoundsExtent.IsNearlyZero())
+	{
+		return false;
+	}
+
+	FVector LocalMin;
+	FVector LocalMax;
+	AtomDefaults->GetLocalArtBounds(LocalMin, LocalMax);
+	const FVector Corners[8] =
+	{
+		FVector(LocalMin.X, LocalMin.Y, LocalMin.Z),
+		FVector(LocalMin.X, LocalMin.Y, LocalMax.Z),
+		FVector(LocalMin.X, LocalMax.Y, LocalMin.Z),
+		FVector(LocalMin.X, LocalMax.Y, LocalMax.Z),
+		FVector(LocalMax.X, LocalMin.Y, LocalMin.Z),
+		FVector(LocalMax.X, LocalMin.Y, LocalMax.Z),
+		FVector(LocalMax.X, LocalMax.Y, LocalMin.Z),
+		FVector(LocalMax.X, LocalMax.Y, LocalMax.Z)
+	};
+
+	FVector BoundsLocalMin(
+		TNumericLimits<float>::Max(),
+		TNumericLimits<float>::Max(),
+		TNumericLimits<float>::Max());
+	FVector BoundsLocalMax(
+		-TNumericLimits<float>::Max(),
+		-TNumericLimits<float>::Max(),
+		-TNumericLimits<float>::Max());
+	for (const FVector& LocalCorner : Corners)
+	{
+		const FVector BoundsLocal = BoundsTransform.InverseTransformPosition(
+			InOutAtomWorld.TransformPosition(LocalCorner));
+		BoundsLocalMin.X = FMath::Min(BoundsLocalMin.X, BoundsLocal.X);
+		BoundsLocalMin.Y = FMath::Min(BoundsLocalMin.Y, BoundsLocal.Y);
+		BoundsLocalMin.Z = FMath::Min(BoundsLocalMin.Z, BoundsLocal.Z);
+		BoundsLocalMax.X = FMath::Max(BoundsLocalMax.X, BoundsLocal.X);
+		BoundsLocalMax.Y = FMath::Max(BoundsLocalMax.Y, BoundsLocal.Y);
+		BoundsLocalMax.Z = FMath::Max(BoundsLocalMax.Z, BoundsLocal.Z);
+	}
+
+	FVector BoundsLocalTranslation = FVector::ZeroVector;
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		const float LowerTranslation =
+			-BoundsExtent[Axis] - BoundsLocalMin[Axis];
+		const float UpperTranslation =
+			BoundsExtent[Axis] - BoundsLocalMax[Axis];
+		if (LowerTranslation > UpperTranslation + KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		const float DesiredTranslation =
+			-(BoundsLocalMin[Axis] + BoundsLocalMax[Axis]) * 0.5f;
+		BoundsLocalTranslation[Axis] = FMath::Clamp(
+			DesiredTranslation,
+			LowerTranslation,
+			UpperTranslation);
+	}
+
+	InOutAtomWorld.AddToTranslation(
+		BoundsTransform.TransformVector(BoundsLocalTranslation));
 	return IsAtomTransformInsideLayoutBounds(AtomDefaults, InOutAtomWorld);
 }
 
@@ -3682,9 +3777,6 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 		}
 	}
 
-	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
-		? Config->ForkAfterBaseAtomIndex
-		: Config->CourseRuleData->ForkAfterBaseAtomIndex;
 	const int32 BaseRouteLength =
 		Config->CourseRuleData->GetRouteModeLength(ActiveDefaultRoute);
 	if (BaseRouteLength <= 0)
@@ -3694,6 +3786,11 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 			static_cast<int32>(ActiveDefaultRoute));
 		return FailValidation();
 	}
+	// RouteModes.TargetAtomCount is authoritative. The CourseConfig field is
+	// retained only as a legacy fallback for old level instances.
+	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
+		? Config->ForkAfterBaseAtomIndex
+		: BaseRouteLength;
 	if (ForkIndex != INDEX_NONE
 		&& (ForkIndex <= 0 || ForkIndex > BaseRouteLength))
 	{
@@ -4434,7 +4531,9 @@ void UNightCourseDirector::BeginForkChoice()
 		ActiveForkPair,
 		FMath::Max(0.01f, Config->ForkTimeoutSeconds),
 		Config->bForkTimeoutPickLeft);
-	BeginBranchRoutePreparation();
+	// Build only the route selected by the player. Pre-generating both branch
+	// routes here allowed an unchosen route's LayoutBounds failure to abort the
+	// whole course before the fork choice was even resolved.
 }
 
 void UNightCourseDirector::HandleForkResolved(

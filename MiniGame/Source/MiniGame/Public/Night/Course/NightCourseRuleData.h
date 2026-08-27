@@ -72,10 +72,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Rule|Queues", meta = (DisplayName = "岔路后队列", ToolTip = "按 A/B/C 配置选路后的分支模板池；当前 ForkPair 对应的两条路线必须有有效队列。"))
 	TMap<ENightRouteId, FNightRuleAtomQueue> BranchRoutes;
 
-	/** Number of generated main-route atoms before the fork. INDEX_NONE uses the full selected mode target. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Rule|Queues", meta = (DisplayName = "岔路前生成数量", ToolTip = "启用岔路时，岔路前实际生成的 Atom 数量；填 -1 使用 DefaultRoute 对应队列的完整数量。"))
-	int32 ForkAfterBaseAtomIndex = INDEX_NONE;
-
 	/** Optional text buffer used by the CallInEditor import/export helpers. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Rule|JSON", meta = (DisplayName = "规则JSON缓存", ToolTip = "可粘贴 routeModes/branchRoutes 新格式 JSON；导入时兼容旧 baseRoute，但导出只生成新格式。", MultiLine = true))
 	FString EditorJson;
