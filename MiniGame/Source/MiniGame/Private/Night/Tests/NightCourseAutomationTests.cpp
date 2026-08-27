@@ -104,7 +104,6 @@ namespace NightCourseAutomation_Private
 		Rule->RouteModes.Add(ENightRouteId::C, MainQueue);
 		if (bEnableFork)
 		{
-			Rule->ForkAfterBaseAtomIndex = 2;
 			AddBranchQueue(
 				Rule,
 				ENightRouteId::A,

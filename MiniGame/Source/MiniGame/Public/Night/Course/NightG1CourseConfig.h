@@ -127,7 +127,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Roadside|Pole", meta = (DisplayName = "杆子生成设置", ToolTip = "杆子独立生成设置，可配置多个 Blueprint、间距、左右偏移和随机性；杆子跟随道路/桥方向。"))
 	FNightRoadsideGenerationSettings PoleRoadside;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5", meta = (DisplayName = "启用岔路", ToolTip = "开启后在 ForkAfterBaseAtomIndex 处生成特殊岔路并等待玩家选择。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G3.5", meta = (DisplayName = "启用岔路", ToolTip = "开启后在所选 A/B/C 主路线队列末端生成特殊岔路并等待玩家选择。"))
 	bool bEnableFork = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Fork", meta = (DisplayName = "岔路选择超时", ToolTip = "玩家未选择时等待的秒数；超时后按 bForkTimeoutPickLeft 自动选边。"))
