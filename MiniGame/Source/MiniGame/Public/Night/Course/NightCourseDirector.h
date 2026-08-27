@@ -28,6 +28,17 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNightCourseNodeEvent, int32, N
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNightCourseDebugTick, float, ElapsedSeconds);
 
 #pragma region K2 moonyfli
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FOnNightCourseIngredientDropped,
+	EIngredientId,
+	DropId,
+	int32,
+	Count,
+	FVector,
+	WorldLocation);
+#pragma endregion K2 moonyfli
+
+#pragma region K2 moonyfli
 /**
  * 刃心 stone-chain director: stand on stone, Jump/Attack to next stone.
  * Idle = frozen; action advances runner to ToStone.
@@ -76,6 +87,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Night|Course|Debug")
 	FOnNightCourseDebugMessage OnDebugMessage;
+
+#pragma region K2 moonyfli
+	/** Fires once per awarded drop, at the killed foe's world location. HUD flies the icon to the bag. */
+	UPROPERTY(BlueprintAssignable, Category = "Night|Course")
+	FOnNightCourseIngredientDropped OnIngredientDropped;
+#pragma endregion K2 moonyfli
 
 	UFUNCTION(BlueprintCallable, Category = "Night|Course")
 	void StartNight(const FNightBootstrap& Bootstrap);

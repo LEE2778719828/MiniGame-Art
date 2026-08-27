@@ -9,7 +9,9 @@
 class UUserWidget;
 class UTextBlock;
 class UWidget;
-class UFont;
+class UDataTable; //add by K2
+class UTexture2D; //add by K2
+class UNightCourseDirector; //add by K2
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnNightHUDResultReady,
@@ -17,6 +19,29 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnNightHUDResultContinueRequested);
+
+#pragma region K2 moonyfli
+/** One food icon in flight from a killed foe to the bag mouth. */
+USTRUCT()
+struct FNightDropFlyIcon
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> Icon = nullptr;
+
+	/** Kill point. The screen start is sampled from it on the first drawn frame. */
+	FVector WorldStart = FVector::ZeroVector;
+
+	FVector2D CanvasStart = FVector2D::ZeroVector;
+
+	float Elapsed = 0.f;
+
+	float Delay = 0.f;
+
+	bool bCanvasStartValid = false;
+};
+#pragma endregion K2 moonyfli
 
 #pragma region K2 moonyfli
 /** G1 parkour HUD host: composite UMG, soul updates, window prompt and key hints. */
@@ -108,12 +133,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
 	FString SuccessIngredientCountFormat = TEXT("{0}");
 
-#pragma region K2 moonyfli
-	/** WBP_Success / WBP_Failed widget that shows peak slash combo. Art still has a placeholder 60. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
-	FName ResultComboTextWidgetName = TEXT("EditableTextBox_1");
-#pragma endregion K2 moonyfli
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result", meta = (ClampMin = "0"))
 	int32 ResultWidgetZOrder = 100;
 
@@ -149,6 +168,55 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Night|HUD|Result", meta = (DisplayName = "On Night Result Ready"))
 	void BP_OnNightResultReady(const FNightResult& Result);
 
+#pragma region K2 moonyfli
+	/** Master switch for the food-into-bag flight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	bool bEnableDropFlyIcons = true;
+
+	/** DT_Ingredients: the Icon column supplies the flown texture per ingredient. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	TSoftObjectPtr<UDataTable> IngredientIconTable;
+
+	/** Nested bag widget inside WBP_NightHUD_Multi. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	FName BagPackWidgetName = TEXT("WBP_BagPack");
+
+	/** Empty box inside WBP_BagPack marking the fish mouth; the flight ends at its center. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	FName BagFlyTargetWidgetName = TEXT("SB_FlyTarget");
+
+	/** Used only when the bag widget cannot be resolved. Design units inside HUDDesignSize. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	FVector2D BagFlyTargetFallback = FVector2D(210.f, 150.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "0.05"))
+	float DropFlySeconds = 0.7f;
+
+	/** Extra delay per icon when one kill awards several units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "0.0"))
+	float DropFlyStaggerSeconds = 0.09f;
+
+	/** Icon edge length in design units at the start of the flight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "1.0"))
+	float DropFlyIconSize = 200.f;
+
+	/** Icon shrinks to this fraction as it reaches the mouth. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "0.05", ClampMax = "2.0"))
+	float DropFlyEndScale = 0.35f;
+
+	/** Sideways bulge of the arc in design units. Positive bows the path away from the straight line. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	float DropFlyArcHeight = 300.f;
+
+	/** Lifts the kill point so the icon starts around the foe's chest instead of its pivot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop")
+	float DropFlyWorldZOffset = 60.f;
+
+	/** Hard cap so a long combo cannot flood the screen. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "1"))
+	int32 MaxDropFlyIcons = 12;
+#pragma endregion K2 moonyfli
+
 	/** Blueprint layout hook. Use Offset/Size on the inner Canvas/SizeBox authored at HUDDesignSize. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Night|HUD|Layout", meta = (DisplayName = "On Night HUD Camera Frame Changed"))
 	void BP_OnHUDCameraFrameChanged(
@@ -165,15 +233,6 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Night|HUD")
 	FVector2D HealthBarDesignSize = FVector2D(800.f, 240.f);
 
-#pragma region K2 moonyfli
-	/** Day Didot Bold — display face that still has clear digits for combo. */
-	UPROPERTY(EditAnywhere, Category = "Night|HUD|Combo")
-	TObjectPtr<UFont> ComboCountFont;
-
-	UPROPERTY(EditAnywhere, Category = "Night|HUD|Combo", meta = (ClampMin = "8"))
-	int32 ComboCountFontSize = 140;
-#pragma endregion K2 moonyfli
-
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> MainHUDWidget;
 
@@ -188,6 +247,18 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ComboCountText;
+
+	/** Nested WBP_BagPack instance owned by MainHUDWidget. */
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> BagPackWidget;
+
+	UPROPERTY(Transient)
+	TArray<FNightDropFlyIcon> DropFlyIcons;
+
+	UPROPERTY(Transient)
+	TMap<EIngredientId, TObjectPtr<UTexture2D>> ResolvedIngredientIcons;
+
+	TWeakObjectPtr<UNightCourseDirector> BoundDropDirector;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(Transient)
@@ -204,12 +275,22 @@ private:
 	void EnsureResultWidgets();
 	void ConfigureResultWidget(UUserWidget* ResultWidget, FName ContinueButtonName);
 	void ApplySuccessIngredientCounts(const FNightResult& Result);
-	void ApplyResultMaxCombo(UUserWidget* ResultWidget, int32 MaxCombo); //add by K2
 	void SetResultInputMode(UUserWidget* ActiveResultWidget);
 	void UpdateMainHUDPlacement();
 	void PushSoulToHealthBar(float Soul);
 	void SetHealthBarNumeric(FName PropertyName, double Value);
 	void PushComboToHUD(int32 Combo); //add by K2
-	void ApplyComboCountFont(); //add by K2
+
+#pragma region K2 moonyfli
+	UFUNCTION()
+	void HandleIngredientDropped(EIngredientId DropId, int32 Count, FVector WorldLocation);
+
+	void EnsureDropDirectorBinding(UNightCourseDirector* Director);
+	UTexture2D* ResolveIngredientIcon(EIngredientId DropId);
+	/** Canvas-space pixel offset of the game view inside the window letterbox. */
+	FVector2D GetCanvasLetterboxPixelOffset() const;
+	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
+	void DrawDropFlyIcons(float DeltaSeconds);
+#pragma endregion K2 moonyfli
 };
 #pragma endregion K2 moonyfli

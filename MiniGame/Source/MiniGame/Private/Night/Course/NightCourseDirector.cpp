@@ -19,6 +19,8 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "Components/BoxComponent.h"
+#include "Components/SkeletalMeshComponent.h" //add by K2
+#include "Components/StaticMeshComponent.h" //add by K2
 #include "Math/RotationMatrix.h"
 #include "Misc/PackageName.h"
 
@@ -5018,10 +5020,31 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		AddDrop(DropId, DropCount);
 		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
 		{
+#pragma region K2 moonyfli
+			// Read the foe visual before ClearFoe hides it: the HUD flight starts at the kill point.
+			ANightCourseStoneActor* DropStone = SpawnedStones[Beat.ToStoneIndex];
+			FVector DropWorldLocation = DropStone->GetActorLocation();
+			if (DropStone->FoeSkeletalMeshComponent
+				&& DropStone->FoeSkeletalMeshComponent->IsVisible())
+			{
+				DropWorldLocation =
+					DropStone->FoeSkeletalMeshComponent->GetComponentLocation();
+			}
+			else if (DropStone->FoeCapsule && DropStone->FoeCapsule->IsVisible())
+			{
+				DropWorldLocation = DropStone->FoeCapsule->GetComponentLocation();
+			}
+#pragma endregion K2 moonyfli
 			SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
 			SpawnedStones[Beat.ToStoneIndex]->PlayDropBurst(
 				DropId,
 				DropCount);
+#pragma region K2 moonyfli
+			if (DropId != EIngredientId::None && DropCount > 0)
+			{
+				OnIngredientDropped.Broadcast(DropId, DropCount, DropWorldLocation);
+			}
+#pragma endregion K2 moonyfli
 		}
 		StoneSpecs[Beat.ToStoneIndex].bHasFoe = false;
 		SetStoneFoeVisibility(Beat.ToStoneIndex, false);
