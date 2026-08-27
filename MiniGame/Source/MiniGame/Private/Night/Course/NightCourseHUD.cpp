@@ -21,6 +21,8 @@
 #include "Engine/Engine.h"
 #include "Engine/Texture2D.h" //add by K2
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h" //add by K2
+#include "Sound/SoundBase.h" //add by K2
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
@@ -77,6 +79,39 @@ ANightCourseHUD::ANightCourseHUD()
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F05_XuanYuQin, TEXT("5"));
 	IngredientIconTable = TSoftObjectPtr<UDataTable>(
 		FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Ingredients.DT_Ingredients"))); //add by K2
+
+#pragma region K2 moonyfli
+	auto MakeSfx = [](const TCHAR* Path)
+	{
+		return TSoftObjectPtr<USoundBase>(FSoftObjectPath(Path));
+	};
+	SlashSound = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Slash.SW_Slash"));
+	IngredientDropSound = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_IngredientDrop.SW_IngredientDrop"));
+
+	FNightFoeHitSfx FishHit;
+	FishHit.Voice = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Hit_Fish_Voice.SW_Hit_Fish_Voice"));
+	FishHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Fish_Material.SW_Hit_Fish_Material"));
+	FoeHitSounds.Add(EFoeId::M01, FishHit);
+
+	FNightFoeHitSfx BatHit;
+	BatHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Bat_Material.SW_Hit_Bat_Material"));
+	FoeHitSounds.Add(EFoeId::M02, BatHit);
+
+	FNightFoeHitSfx AquaticHit;
+	AquaticHit.Voice = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Aquatic_Voice.SW_Hit_Aquatic_Voice"));
+	FoeHitSounds.Add(EFoeId::M03, AquaticHit);
+	FoeHitSounds.Add(EFoeId::M04, AquaticHit);
+
+	FNightFoeHitSfx RiceHit;
+	RiceHit.Voice = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Hit_Rice_Voice.SW_Hit_Rice_Voice"));
+	RiceHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Rice_Material.SW_Hit_Rice_Material"));
+	FoeHitSounds.Add(EFoeId::M05, RiceHit);
+#pragma endregion K2 moonyfli
 }
 void ANightCourseHUD::BeginPlay()
 {
@@ -1009,5 +1044,40 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 		Tile.BlendMode = SE_BLEND_Translucent;
 		Canvas->DrawItem(Tile);
 	}
+}
+
+void ANightCourseHUD::NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop)
+{
+	if (!bEnableNightSfx)
+	{
+		return;
+	}
+
+	PlaySfx(SlashSound, SlashVolume);
+
+	if (const FNightFoeHitSfx* Hit = FoeHitSounds.Find(FoeId))
+	{
+		PlaySfx(Hit->Voice, FoeHitVolume);
+		PlaySfx(Hit->Material, FoeHitVolume);
+	}
+
+	if (bPlayDrop)
+	{
+		PlaySfx(IngredientDropSound, IngredientDropVolume);
+	}
+}
+
+void ANightCourseHUD::PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float Volume)
+{
+	if (SoftSound.IsNull() || Volume <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	USoundBase* Sound = SoftSound.LoadSynchronous();
+	if (!Sound)
+	{
+		return;
+	}
+	UGameplayStatics::PlaySound2D(this, Sound, Volume);
 }
 #pragma endregion K2 moonyfli

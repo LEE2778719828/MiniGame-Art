@@ -12,6 +12,7 @@ class UWidget;
 class UDataTable; //add by K2
 class UTexture2D; //add by K2
 class UNightCourseDirector; //add by K2
+class USoundBase; //add by K2
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnNightHUDResultReady,
@@ -40,6 +41,19 @@ struct FNightDropFlyIcon
 	float Delay = 0.f;
 
 	bool bCanvasStartValid = false;
+};
+
+/** Per-foe hit layers: a vocal bark and/or a material crunch. Either slot may be empty. */
+USTRUCT(BlueprintType)
+struct FNightFoeHitSfx
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	TSoftObjectPtr<USoundBase> Voice;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	TSoftObjectPtr<USoundBase> Material;
 };
 #pragma endregion K2 moonyfli
 
@@ -215,6 +229,34 @@ public:
 	/** Hard cap so a long combo cannot flood the screen. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Drop", meta = (ClampMin = "1"))
 	int32 MaxDropFlyIcons = 12;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	bool bEnableNightSfx = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	TSoftObjectPtr<USoundBase> SlashSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	TSoftObjectPtr<USoundBase> IngredientDropSound;
+
+	/**
+	 * Default mapping follows current DA_Course art:
+	 * M01 fish, M02 bat, M03 aquatic, M04 aquatic fallback, M05 rice/cantingguai.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
+	TMap<EFoeId, FNightFoeHitSfx> FoeHitSounds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.0"))
+	float SlashVolume = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.0"))
+	float FoeHitVolume = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.0"))
+	float IngredientDropVolume = 1.f;
+
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|SFX")
+	void NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop);
 #pragma endregion K2 moonyfli
 
 	/** Blueprint layout hook. Use Offset/Size on the inner Canvas/SizeBox authored at HUDDesignSize. */
@@ -291,6 +333,7 @@ private:
 	FVector2D GetCanvasLetterboxPixelOffset() const;
 	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
 	void DrawDropFlyIcons(float DeltaSeconds);
+	void PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float Volume);
 #pragma endregion K2 moonyfli
 };
 #pragma endregion K2 moonyfli

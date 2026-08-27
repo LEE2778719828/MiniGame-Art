@@ -11,6 +11,8 @@
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightCourseHUD.h" //add by K2
+#include "GameFramework/PlayerController.h" //add by K2
 #include "DrawDebugHelpers.h"
 #include "HAL/PlatformTime.h"
 #include "Engine/World.h"
@@ -5018,6 +5020,20 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 			DropCount *= FMath::Max(1, ActiveRouteRule.BranchDropCountMul);
 		}
 		AddDrop(DropId, DropCount);
+#pragma region K2 moonyfli
+		if (RunnerPawn)
+		{
+			if (APlayerController* PC = Cast<APlayerController>(RunnerPawn->GetController()))
+			{
+				if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+				{
+					NightHUD->NotifyFoeKilled(
+						StoneSpecs[Beat.ToStoneIndex].FoeId,
+						DropId != EIngredientId::None && DropCount > 0);
+				}
+			}
+		}
+#pragma endregion K2 moonyfli
 		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
 		{
 #pragma region K2 moonyfli
