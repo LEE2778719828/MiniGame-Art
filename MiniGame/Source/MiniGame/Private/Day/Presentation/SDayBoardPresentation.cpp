@@ -25,6 +25,8 @@
 #include "Components/TextBlock.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/Font.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/LocalPlayer.h"
 #include "Curves/CurveFloat.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -41,6 +43,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "SceneView.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
@@ -1459,6 +1462,12 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 	Portrait->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Portrait->SetVisibility(false);
 
+	// Keep this independent of Portrait's per-texture scale and transparent-canvas offset. It still
+	// follows authored entry/wobble motion, and delivery captures it before the eat timeline starts.
+	RevenueFlyAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("RevenueFlyAnchor"));
+	RevenueFlyAnchor->SetupAttachment(PortraitMotionRoot);
+	RevenueFlyAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, 180.0f));
+
 	EatEffectAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("EatEffectAnchor"));
 	EatEffectAnchor->SetupAttachment(VisualRoot);
 	EatEffectAnchor->SetRelativeLocation(FVector(0.0f, 0.0f, 180.0f));
@@ -2523,8 +2532,8 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 				: 0;
 			// The seat actor sits on the plate/collision proxy. Revenue feedback should visibly
 			// originate from the customer artwork instead of that gameplay origin.
-			const FVector RevenueSource = Character->Portrait && Character->Portrait->IsVisible()
-				? Character->Portrait->GetComponentLocation()
+			const FVector RevenueSource = Character->RevenueFlyAnchor
+				? Character->RevenueFlyAnchor->GetComponentLocation()
 				: Character->GetActorLocation();
 			Character->BeginServeAttempt();
 			const bool bDelivered = Director->TryDeliverFromCellToCustomer(
@@ -2557,8 +2566,8 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 		const int32 RevenueBefore = GetGameInstance<USChefGameInstance>()
 			? GetGameInstance<USChefGameInstance>()->Revenue
 			: 0;
-		const FVector RevenueSource = Character->Portrait && Character->Portrait->IsVisible()
-			? Character->Portrait->GetComponentLocation()
+		const FVector RevenueSource = Character->RevenueFlyAnchor
+			? Character->RevenueFlyAnchor->GetComponentLocation()
 			: Character->GetActorLocation();
 		Character->BeginServeAttempt();
 		const bool bDelivered = Director->TryDeliverToNpc(Character->NpcId);
@@ -3718,9 +3727,9 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	}
 
 	FVector2D StartPosition;
-	// Flying items are positioned in the owning player's viewport, so request coordinates in that
-	// same coordinate space. Absolute desktop coordinates are offset in PIE and in a non-maximized window.
-	if (!PlayerController->ProjectWorldLocationToScreen(SourceWorldLocation, StartPosition, true))
+	// AddToViewport expects coordinates in the complete game viewport. Passing true here removes the
+	// constrained camera-view origin, which shifts the coin whenever aspect-ratio bars are present.
+	if (!PlayerController->ProjectWorldLocationToScreen(SourceWorldLocation, StartPosition, false))
 	{
 		return;
 	}
@@ -3733,23 +3742,41 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 		return;
 	}
 
-	// Keep the whole effect in owning-player screen space. The foreground readout is a world-space
-	// WidgetComponent, so its cached Slate geometry belongs to a different virtual window and must
-	// not be mixed with ProjectWorldLocationToScreen coordinates (especially in embedded PIE).
+	// Resolve the actual camera image rectangle inside the viewport. This honors aspect-ratio bars
+	// without changing the camera, and keeps "top-left" tied to the rendered image rather than PIE chrome.
+	FIntRect CameraViewRect(FIntPoint::ZeroValue, FIntPoint(ViewportWidth, ViewportHeight));
+	if (const ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+	{
+		if (LocalPlayer->ViewportClient && LocalPlayer->ViewportClient->Viewport)
+		{
+			FSceneViewProjectionData ProjectionData;
+			if (LocalPlayer->GetProjectionData(LocalPlayer->ViewportClient->Viewport, ProjectionData)
+				&& ProjectionData.GetConstrainedViewRect().Width() > 0
+				&& ProjectionData.GetConstrainedViewRect().Height() > 0)
+			{
+				CameraViewRect = ProjectionData.GetConstrainedViewRect();
+			}
+		}
+	}
+
 	StartPosition += RevenueFlySourceScreenOffset;
 	const FVector2D ClampedTargetRatio(
 		FMath::Clamp(RevenueFlyTargetViewportRatio.X, 0.0f, 1.0f),
 		FMath::Clamp(RevenueFlyTargetViewportRatio.Y, 0.0f, 1.0f));
 	FVector2D EndPosition(
-		ViewportWidth * ClampedTargetRatio.X,
-		ViewportHeight * ClampedTargetRatio.Y);
+		CameraViewRect.Min.X + CameraViewRect.Width() * ClampedTargetRatio.X,
+		CameraViewRect.Min.Y + CameraViewRect.Height() * ClampedTargetRatio.Y);
 	EndPosition += RevenueFlyTargetScreenOffset;
 	if (bClampRevenueFlyToViewport)
 	{
-		StartPosition.X = FMath::Clamp(StartPosition.X, 0.0f, static_cast<float>(ViewportWidth));
-		StartPosition.Y = FMath::Clamp(StartPosition.Y, 0.0f, static_cast<float>(ViewportHeight));
-		EndPosition.X = FMath::Clamp(EndPosition.X, 0.0f, static_cast<float>(ViewportWidth));
-		EndPosition.Y = FMath::Clamp(EndPosition.Y, 0.0f, static_cast<float>(ViewportHeight));
+		const float CameraMinX = static_cast<float>(CameraViewRect.Min.X);
+		const float CameraMinY = static_cast<float>(CameraViewRect.Min.Y);
+		const float CameraMaxX = static_cast<float>(CameraViewRect.Max.X);
+		const float CameraMaxY = static_cast<float>(CameraViewRect.Max.Y);
+		StartPosition.X = FMath::Clamp(StartPosition.X, CameraMinX, CameraMaxX);
+		StartPosition.Y = FMath::Clamp(StartPosition.Y, CameraMinY, CameraMaxY);
+		EndPosition.X = FMath::Clamp(EndPosition.X, CameraMinX, CameraMaxX);
+		EndPosition.Y = FMath::Clamp(EndPosition.Y, CameraMinY, CameraMaxY);
 	}
 
 	auto SetVectorProperty = [](UObject* Object, const FName Name, const FVector& Value)
@@ -3784,7 +3811,7 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	const int32 ItemCount = FMath::Clamp(MinItemCount + RevenueAmount / 20, MinItemCount, MaxItemCount);
 	const FVector2D ControlPosition(
 		(StartPosition.X + EndPosition.X) * 0.5f,
-		FMath::Min(StartPosition.Y, EndPosition.Y) - ViewportHeight * FMath::Clamp(RevenueFlyArcHeightRatio, 0.0f, 1.0f));
+		FMath::Min(StartPosition.Y, EndPosition.Y) - CameraViewRect.Height() * FMath::Clamp(RevenueFlyArcHeightRatio, 0.0f, 1.0f));
 	for (int32 ItemIndex = 0; ItemIndex < ItemCount; ++ItemIndex)
 	{
 		UUserWidget* FlyingItem = CreateWidget<UUserWidget>(PlayerController, RevenueFlyingItemClass);
@@ -3804,9 +3831,8 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 		SetObjectProperty(FlyingItem, TEXT("PathCurve"), RevenueFlyPathCurve);
 		SetObjectProperty(FlyingItem, TEXT("ScaleCurve"), RevenueFlyScaleCurve);
 
-		// AddToPlayerScreen matches the owning-player coordinate space requested above. Center the
-		// widget so the projected portrait point refers to the middle of the coin, not its top-left.
-		FlyingItem->AddToPlayerScreen(150);
+		// Projection and placement now both use complete game-viewport coordinates.
+		FlyingItem->AddToViewport(150);
 		FlyingItem->SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
 		FlyingItem->SetPositionInViewport(ItemStart, true);
 		if (UImage* Icon = Cast<UImage>(FlyingItem->GetWidgetFromName(TEXT("Img_Icon"))))

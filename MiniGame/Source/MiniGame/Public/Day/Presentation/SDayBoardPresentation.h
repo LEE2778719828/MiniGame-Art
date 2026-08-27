@@ -409,6 +409,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
 	TObjectPtr<USceneComponent> PortraitMotionRoot;
 
+	/** Artist-positioned world-space origin for revenue coins; projected by the HUD on delivery. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Revenue")
+	TObjectPtr<USceneComponent> RevenueFlyAnchor;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
 	TObjectPtr<USceneComponent> EatEffectAnchor;
 
