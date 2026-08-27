@@ -12,6 +12,7 @@ class UBillboardComponent;
 class UBorder;
 class UButton;
 class UCheckBox; //add by K2
+class UCurveFloat;
 class UCanvasPanelSlot;
 class USDaySettlementWidget;
 class UCameraComponent;
@@ -318,6 +319,16 @@ public:
 		FName GiftId);
 	void NotifySeatVacated();
 	void NotifyServeSucceeded(bool bSpecialNpc);
+	void BeginServeAttempt();
+	void CancelServeAttempt();
+
+	/**
+	 * Called by the seat Blueprint when its authored departure animation is finished.
+	 * Gameplay vacates the logical seat immediately; the portrait is retained until this handshake
+	 * (or the fallback timeout) so eat/exit animation remains visible.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "S Day Board|Seat")
+	void CompletePresentationDeparture();
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
 	void OnSeatOccupied(
@@ -332,6 +343,17 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
 	void OnServeSucceeded(bool bSpecialNpc);
+
+	/**
+	 * Unified animation trigger. Served customers normally play eat then exit; timeout/closure
+	 * departures skip eating. Call CompletePresentationDeparture from the final timeline Finished pin.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Seat")
+	void OnDepartureRequested(bool bServed, bool bSpecialNpc);
+
+	/** Safety net for Blueprints that do not complete the departure handshake. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat", meta = (ClampMin = "0.1"))
+	float DepartureFallbackSeconds = 6.0f;
 
 	/** Scene-authored seats are discovered instead of spawned and never repositioned at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Seat")
@@ -383,6 +405,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
 	TObjectPtr<USceneComponent> VisualRoot;
 
+	/** Blueprint timelines animate this node without moving the authored seat or its hit target. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
+	TObjectPtr<USceneComponent> PortraitMotionRoot;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board|Seat")
 	TObjectPtr<USceneComponent> EatEffectAnchor;
 
@@ -398,6 +424,22 @@ public:
 
 	UPROPERTY(Transient)
 	FString PresentedOccupantKey;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "S Day Board|Seat", meta = (AllowPrivateAccess = "true"))
+	bool bPresentationDepartureInProgress = false;
+
+	UPROPERTY(Transient)
+	bool bHoldPresentationForServeAttempt = false;
+
+	UPROPERTY(Transient)
+	bool bPresentedSpecialNpc = false;
+
+	FTimerHandle PresentationDepartureFallbackHandle;
+
+	/** Repairs stale Blueprint attachment overrides so authored timelines always drive the portrait. */
+	void EnsurePortraitMotionAttachment();
+
+	void BeginPresentationDeparture(bool bServed, bool bSpecialNpc);
 #pragma endregion K2 moonyfli
 };
 
@@ -581,6 +623,10 @@ class MINIGAME_API USDayHUD : public UUserWidget
 {
 	GENERATED_BODY()
 
+public:
+	/** Spawn the authored coin-flight feedback from a served customer to the top-left revenue readout. */
+	void PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, int32 RevenueAmount);
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -685,6 +731,60 @@ private:
 	TWeakObjectPtr<UTextBlock> CoinAmountText;
 	TWeakObjectPtr<UTextBlock> RevenueCurrentText;
 	TWeakObjectPtr<UTextBlock> RevenueTargetText;
+
+	/** Single flying item authored in UMG; one sale creates a short staggered burst of instances. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
+	TSubclassOf<UUserWidget> RevenueFlyingItemClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
+	TObjectPtr<UCurveFloat> RevenueFlyPathCurve;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
+	TObjectPtr<UCurveFloat> RevenueFlyScaleCurve;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
+	TObjectPtr<UMaterialInterface> RevenueFlyingItemMaterial;
+
+	/** Pixel offset applied after projecting the served customer's portrait into player-screen space. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
+	FVector2D RevenueFlySourceScreenOffset = FVector2D::ZeroVector;
+
+	/** Normalized player-viewport destination. (0,0) is top-left and (1,1) is bottom-right. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	FVector2D RevenueFlyTargetViewportRatio = FVector2D(0.08f, 0.07f);
+
+	/** Fine adjustment in pixels after applying RevenueFlyTargetViewportRatio. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
+	FVector2D RevenueFlyTargetScreenOffset = FVector2D::ZeroVector;
+
+	/** Keep configured source and destination positions inside the owning player's viewport. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
+	bool bClampRevenueFlyToViewport = true;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "1", UIMin = "1"))
+	int32 RevenueFlyMinItemCount = 6;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "1", UIMin = "1"))
+	int32 RevenueFlyMaxItemCount = 10;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.01", UIMin = "0.1", Units = "s"))
+	float RevenueFlyMinDuration = 0.58f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.01", UIMin = "0.1", Units = "s"))
+	float RevenueFlyMaxDuration = 0.74f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float RevenueFlyItemInterval = 0.055f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float RevenueFlyMinScale = 0.82f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float RevenueFlyMaxScale = 1.08f;
+
+	/** Arc height as a fraction of viewport height; 0.10 means ten percent. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.3"))
+	float RevenueFlyArcHeightRatio = 0.10f;
 #pragma endregion K2 moonyfli
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */

@@ -3,6 +3,7 @@
 #include "../../../SStandaloneSandbox.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "EngineUtils.h" //add by K2
 #include "Components/Border.h"
@@ -24,6 +25,7 @@
 #include "Components/TextBlock.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/Font.h"
+#include "Curves/CurveFloat.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WrapBox.h"
@@ -39,8 +41,11 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/UnrealType.h"
 
+// Revenue feedback is viewport-only; the restaurant camera and world composition remain untouched.
 namespace DayBoardPresentationPrivate
 {
 	// The authored box order stays fixed so changing an output never changes a hit zone.
@@ -539,7 +544,16 @@ namespace DayBoardPresentationPrivate
 		const UTexture2D* Texture,
 		const float WorldHeight = DayArtPortraitSpriteHeight)
 	{
-		const float TextureHeight = Texture ? static_cast<float>(Texture->GetSizeY()) : 0.0f;
+		float TextureHeight = Texture ? static_cast<float>(Texture->GetSizeY()) : 0.0f;
+#if WITH_EDITORONLY_DATA
+		// In editor/PIE, async texture compilation can temporarily expose the engine's 32x32
+		// default resource through GetSizeY(). The imported source stays authoritative and avoids
+		// permanently baking that transient size into the portrait component scale.
+		if (Texture && Texture->Source.IsValid() && Texture->Source.GetSizeY() > 0)
+		{
+			TextureHeight = static_cast<float>(Texture->Source.GetSizeY());
+		}
+#endif
 		if (TextureHeight <= 0.0f)
 		{
 			return 1.0f;
@@ -1427,6 +1441,9 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 	VisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VisualRoot"));
 	VisualRoot->SetupAttachment(Root);
 
+	PortraitMotionRoot = CreateDefaultSubobject<USceneComponent>(TEXT("PortraitMotionRoot"));
+	PortraitMotionRoot->SetupAttachment(VisualRoot);
+
 	CharacterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CharacterMesh"));
 	CharacterMesh->SetupAttachment(VisualRoot);
 	CharacterMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -1435,7 +1452,7 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 
 #pragma region K2 moonyfli
 	Portrait = CreateDefaultSubobject<UBillboardComponent>(TEXT("Portrait"));
-	Portrait->SetupAttachment(VisualRoot);
+	Portrait->SetupAttachment(PortraitMotionRoot);
 	Portrait->SetRelativeLocation(FVector(0.0f, 0.0f, 92.0f));
 	Portrait->bIsScreenSizeScaled = false;
 	Portrait->SetHiddenInGame(false);
@@ -1463,9 +1480,24 @@ ASDayCharacterStandIn::ASDayCharacterStandIn()
 }
 
 #pragma region K2 moonyfli
+void ASDayCharacterStandIn::EnsurePortraitMotionAttachment()
+{
+	if (Portrait
+		&& PortraitMotionRoot
+		&& Portrait->GetAttachParent() != PortraitMotionRoot)
+	{
+		// Derived seat Blueprints created before PortraitMotionRoot existed can retain VisualRoot as
+		// the serialized parent. Keep the authored portrait offset while repairing that stale link.
+		Portrait->AttachToComponent(
+			PortraitMotionRoot,
+			FAttachmentTransformRules::KeepRelativeTransform);
+	}
+}
+
 void ASDayCharacterStandIn::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	EnsurePortraitMotionAttachment();
 
 	if (!bSceneAuthoredSeat)
 	{
@@ -1485,6 +1517,9 @@ void ASDayCharacterStandIn::OnConstruction(const FTransform& Transform)
 void ASDayCharacterStandIn::BeginPlay()
 {
 	Super::BeginPlay();
+	// Construction normally fixes the hierarchy, but enforce it once more after Blueprint
+	// component instancing so runtime re-instancing cannot bypass the motion root.
+	EnsurePortraitMotionAttachment();
 	if (bSceneAuthoredSeat)
 	{
 		SetPortrait(nullptr);
@@ -1549,27 +1584,99 @@ void ASDayCharacterStandIn::NotifySeatOccupied(
 	const int32 Level,
 	const FName GiftId)
 {
-	if (PresentedOccupantKey == OccupantKey)
+	if (PresentedOccupantKey == OccupantKey && !bPresentationDepartureInProgress)
 	{
 		return;
 	}
+
+	if (!PresentedOccupantKey.IsEmpty())
+	{
+		CompletePresentationDeparture();
+	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PresentationDepartureFallbackHandle);
+	}
+	bHoldPresentationForServeAttempt = false;
+	bPresentationDepartureInProgress = false;
+	bPresentedSpecialNpc = bSpecialNpc;
 	PresentedOccupantKey = OccupantKey;
 	OnSeatOccupied(OccupantKey, bSpecialNpc, IngredientId, Level, GiftId);
 }
 
 void ASDayCharacterStandIn::NotifySeatVacated()
 {
-	if (PresentedOccupantKey.IsEmpty())
+	if (PresentedOccupantKey.IsEmpty()
+		|| bHoldPresentationForServeAttempt
+		|| bPresentationDepartureInProgress)
 	{
 		return;
 	}
-	PresentedOccupantKey.Reset();
-	OnSeatVacated();
+	BeginPresentationDeparture(false, bPresentedSpecialNpc);
 }
 
 void ASDayCharacterStandIn::NotifyServeSucceeded(const bool bSpecialNpc)
 {
+	bHoldPresentationForServeAttempt = false;
+	if (PresentedOccupantKey.IsEmpty())
+	{
+		return;
+	}
 	OnServeSucceeded(bSpecialNpc);
+	BeginPresentationDeparture(true, bSpecialNpc);
+}
+
+void ASDayCharacterStandIn::BeginServeAttempt()
+{
+	if (!PresentedOccupantKey.IsEmpty() && !bPresentationDepartureInProgress)
+	{
+		bHoldPresentationForServeAttempt = true;
+	}
+}
+
+void ASDayCharacterStandIn::CancelServeAttempt()
+{
+	bHoldPresentationForServeAttempt = false;
+}
+
+void ASDayCharacterStandIn::BeginPresentationDeparture(
+	const bool bServed,
+	const bool bSpecialNpc)
+{
+	if (PresentedOccupantKey.IsEmpty() || bPresentationDepartureInProgress)
+	{
+		return;
+	}
+
+	bHoldPresentationForServeAttempt = false;
+	bPresentationDepartureInProgress = true;
+
+	// Keep legacy cleanup behavior (dish/gift icons) separate from the new authored motion event.
+	OnSeatVacated();
+	OnDepartureRequested(bServed, bSpecialNpc);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			PresentationDepartureFallbackHandle,
+			this,
+			&ASDayCharacterStandIn::CompletePresentationDeparture,
+			FMath::Max(0.1f, DepartureFallbackSeconds),
+			false);
+	}
+}
+
+void ASDayCharacterStandIn::CompletePresentationDeparture()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PresentationDepartureFallbackHandle);
+	}
+	bHoldPresentationForServeAttempt = false;
+	bPresentationDepartureInProgress = false;
+	bPresentedSpecialNpc = false;
+	PresentedOccupantKey.Reset();
+	SetPortrait(nullptr);
 }
 #pragma endregion K2 moonyfli
 
@@ -2296,7 +2403,6 @@ void ASDayBoardPresenter::RefreshCharacters()
 		Seat->NpcId = NAME_None;
 		Seat->CustomerId.Reset();
 		Seat->bOccupied = false;
-		Seat->SetPortrait(nullptr); //add by K2
 
 #pragma region K2 moonyfli
 		FSCustomerState Customer;
@@ -2304,7 +2410,14 @@ void ASDayBoardPresenter::RefreshCharacters()
 		{
 			Seat->CustomerId = Customer.CustomerId;
 			Seat->bOccupied = true;
-			Seat->SetPortrait(ResolveCustomerPortrait(Customer.DisplayName));
+			if (Seat->PresentedOccupantKey != Customer.CustomerId)
+			{
+				if (!Seat->PresentedOccupantKey.IsEmpty())
+				{
+					Seat->CompletePresentationDeparture();
+				}
+				Seat->SetPortrait(ResolveCustomerPortrait(Customer.DisplayName));
+			}
 			Seat->NotifySeatOccupied(
 				Customer.CustomerId,
 				false,
@@ -2341,9 +2454,17 @@ void ASDayBoardPresenter::RefreshCharacters()
 		{
 			Seat->NpcId = SeatedNpc.NpcId;
 			Seat->bOccupied = true;
-			Seat->SetPortrait(ResolveSpecialNpcPortrait(SeatedNpc.NpcId));
+			const FString NpcOccupantKey = SeatedNpc.NpcId.ToString();
+			if (Seat->PresentedOccupantKey != NpcOccupantKey)
+			{
+				if (!Seat->PresentedOccupantKey.IsEmpty())
+				{
+					Seat->CompletePresentationDeparture();
+				}
+				Seat->SetPortrait(ResolveSpecialNpcPortrait(SeatedNpc.NpcId));
+			}
 			Seat->NotifySeatOccupied(
-				SeatedNpc.NpcId.ToString(),
+				NpcOccupantKey,
 				true,
 				SeatedNpc.Order.IngredientId,
 				SeatedNpc.Order.Level,
@@ -2397,12 +2518,34 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 	{
 		if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
 		{
+			const int32 RevenueBefore = GetGameInstance<USChefGameInstance>()
+				? GetGameInstance<USChefGameInstance>()->Revenue
+				: 0;
+			// The seat actor sits on the plate/collision proxy. Revenue feedback should visibly
+			// originate from the customer artwork instead of that gameplay origin.
+			const FVector RevenueSource = Character->Portrait && Character->Portrait->IsVisible()
+				? Character->Portrait->GetComponentLocation()
+				: Character->GetActorLocation();
+			Character->BeginServeAttempt();
 			const bool bDelivered = Director->TryDeliverFromCellToCustomer(
 				Board->GetActiveDragCellIndex(),
 				Character->CustomerId);
 			if (bDelivered)
 			{
+				const USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+				TArray<UUserWidget*> DayHudWidgets;
+				UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, DayHudWidgets, USDayHUD::StaticClass(), true);
+				if (DayHudWidgets.Num() > 0)
+				{
+					CastChecked<USDayHUD>(DayHudWidgets[0])->PlayRevenueFlyFromWorld(
+						RevenueSource,
+						GameInstance ? GameInstance->Revenue - RevenueBefore : 0);
+				}
 				Character->NotifyServeSucceeded(false);
+			}
+			else
+			{
+				Character->CancelServeAttempt();
 			}
 			return bDelivered;
 		}
@@ -2411,10 +2554,30 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 
 	if (ASSpecialNpcDirector* Director = ASSpecialNpcDirector::FindDirector(this))
 	{
+		const int32 RevenueBefore = GetGameInstance<USChefGameInstance>()
+			? GetGameInstance<USChefGameInstance>()->Revenue
+			: 0;
+		const FVector RevenueSource = Character->Portrait && Character->Portrait->IsVisible()
+			? Character->Portrait->GetComponentLocation()
+			: Character->GetActorLocation();
+		Character->BeginServeAttempt();
 		const bool bDelivered = Director->TryDeliverToNpc(Character->NpcId);
 		if (bDelivered)
 		{
+			const USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>();
+			TArray<UUserWidget*> DayHudWidgets;
+			UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, DayHudWidgets, USDayHUD::StaticClass(), true);
+			if (DayHudWidgets.Num() > 0)
+			{
+				CastChecked<USDayHUD>(DayHudWidgets[0])->PlayRevenueFlyFromWorld(
+					RevenueSource,
+					GameInstance ? GameInstance->Revenue - RevenueBefore : 0);
+			}
 			Character->NotifyServeSucceeded(true);
+		}
+		else
+		{
+			Character->CancelServeAttempt();
 		}
 		return bDelivered;
 	}
@@ -3097,7 +3260,11 @@ void USDayHUD::BuildWidgetTree()
 	UHorizontalBox* ToggleRow = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(),
 		TEXT("DayHudChromeRow"));
+#if UE_BUILD_SHIPPING
+	ToggleRow->SetVisibility(ESlateVisibility::Collapsed);
+#else
 	ToggleRow->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+#endif
 	Root->AddChildToVerticalBox(ToggleRow)->SetPadding(FMargin(8.0f, 6.0f, 8.0f, 0.0f));
 
 	USizeBox* ToggleSpacer = WidgetTree->ConstructWidget<USizeBox>(
@@ -3133,7 +3300,13 @@ void USDayHUD::BuildWidgetTree()
 	ChromeToggle->OnCheckStateChanged.AddDynamic(this, &USDayHUD::HandleChromeVisibilityChanged);
 
 	ControlsHost = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DayHUDControls"));
+#if UE_BUILD_SHIPPING
+	// The generated HUD chrome is a runtime debug/control surface. Keep the HUD alive for
+	// settlement presentation and foreground readouts, but never expose this surface in release builds.
+	ControlsHost->SetVisibility(ESlateVisibility::Collapsed);
+#else
 	ControlsHost->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+#endif
 	UVerticalBoxSlot* ControlsSlot = Root->AddChildToVerticalBox(ControlsHost);
 	ControlsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 #pragma endregion K2 moonyfli
@@ -3504,6 +3677,146 @@ void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 	if (UTextBlock* Target = RevenueTargetText.Get())
 	{
 		Target->SetText(FText::AsNumber(GameInstance.RevenueTarget, &FNumberFormattingOptions::DefaultNoGrouping()));
+	}
+}
+
+void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const int32 RevenueAmount)
+{
+	APlayerController* PlayerController = GetOwningPlayer();
+	if (!PlayerController || RevenueAmount <= 0)
+	{
+		return;
+	}
+
+	if (!RevenueFlyingItemClass)
+	{
+		RevenueFlyingItemClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Day/UI/WBP_FlyingItem.WBP_FlyingItem_C"));
+	}
+	if (!RevenueFlyPathCurve)
+	{
+		RevenueFlyPathCurve = LoadObject<UCurveFloat>(
+			nullptr,
+			TEXT("/Game/Day/UI/C_RevenueFlyPath.C_RevenueFlyPath"));
+	}
+	if (!RevenueFlyScaleCurve)
+	{
+		RevenueFlyScaleCurve = LoadObject<UCurveFloat>(
+			nullptr,
+			TEXT("/Game/Day/UI/C_RevenueFlyScale.C_RevenueFlyScale"));
+	}
+	if (!RevenueFlyingItemMaterial)
+	{
+		RevenueFlyingItemMaterial = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Game/Day/Art/cookingUI/MI_CookingFG_01_Coins.MI_CookingFG_01_Coins"));
+	}
+	if (!RevenueFlyingItemClass || !RevenueFlyPathCurve || !RevenueFlyScaleCurve)
+	{
+		return;
+	}
+
+	FVector2D StartPosition;
+	// Flying items are positioned in the owning player's viewport, so request coordinates in that
+	// same coordinate space. Absolute desktop coordinates are offset in PIE and in a non-maximized window.
+	if (!PlayerController->ProjectWorldLocationToScreen(SourceWorldLocation, StartPosition, true))
+	{
+		return;
+	}
+
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
+	if (ViewportWidth <= 0 || ViewportHeight <= 0)
+	{
+		return;
+	}
+
+	// Keep the whole effect in owning-player screen space. The foreground readout is a world-space
+	// WidgetComponent, so its cached Slate geometry belongs to a different virtual window and must
+	// not be mixed with ProjectWorldLocationToScreen coordinates (especially in embedded PIE).
+	StartPosition += RevenueFlySourceScreenOffset;
+	const FVector2D ClampedTargetRatio(
+		FMath::Clamp(RevenueFlyTargetViewportRatio.X, 0.0f, 1.0f),
+		FMath::Clamp(RevenueFlyTargetViewportRatio.Y, 0.0f, 1.0f));
+	FVector2D EndPosition(
+		ViewportWidth * ClampedTargetRatio.X,
+		ViewportHeight * ClampedTargetRatio.Y);
+	EndPosition += RevenueFlyTargetScreenOffset;
+	if (bClampRevenueFlyToViewport)
+	{
+		StartPosition.X = FMath::Clamp(StartPosition.X, 0.0f, static_cast<float>(ViewportWidth));
+		StartPosition.Y = FMath::Clamp(StartPosition.Y, 0.0f, static_cast<float>(ViewportHeight));
+		EndPosition.X = FMath::Clamp(EndPosition.X, 0.0f, static_cast<float>(ViewportWidth));
+		EndPosition.Y = FMath::Clamp(EndPosition.Y, 0.0f, static_cast<float>(ViewportHeight));
+	}
+
+	auto SetVectorProperty = [](UObject* Object, const FName Name, const FVector& Value)
+	{
+		if (FStructProperty* Property = FindFProperty<FStructProperty>(Object->GetClass(), Name))
+		{
+			Property->CopyCompleteValue_InContainer(Object, &Value);
+		}
+	};
+	auto SetNumberProperty = [](UObject* Object, const FName Name, const double Value)
+	{
+		if (FNumericProperty* Property = FindFProperty<FNumericProperty>(Object->GetClass(), Name))
+		{
+			void* Storage = Property->ContainerPtrToValuePtr<void>(Object);
+			Property->SetFloatingPointPropertyValue(Storage, Value);
+		}
+	};
+	auto SetObjectProperty = [](UObject* Object, const FName Name, UObject* Value)
+	{
+		if (FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(Object->GetClass(), Name))
+		{
+			Property->SetObjectPropertyValue_InContainer(Object, Value);
+		}
+	};
+
+	const int32 MinItemCount = FMath::Max(1, FMath::Min(RevenueFlyMinItemCount, RevenueFlyMaxItemCount));
+	const int32 MaxItemCount = FMath::Max(MinItemCount, FMath::Max(RevenueFlyMinItemCount, RevenueFlyMaxItemCount));
+	const float MinDuration = FMath::Max(0.01f, FMath::Min(RevenueFlyMinDuration, RevenueFlyMaxDuration));
+	const float MaxDuration = FMath::Max(MinDuration, FMath::Max(RevenueFlyMinDuration, RevenueFlyMaxDuration));
+	const float MinScale = FMath::Max(0.0f, FMath::Min(RevenueFlyMinScale, RevenueFlyMaxScale));
+	const float MaxScale = FMath::Max(MinScale, FMath::Max(RevenueFlyMinScale, RevenueFlyMaxScale));
+	const int32 ItemCount = FMath::Clamp(MinItemCount + RevenueAmount / 20, MinItemCount, MaxItemCount);
+	const FVector2D ControlPosition(
+		(StartPosition.X + EndPosition.X) * 0.5f,
+		FMath::Min(StartPosition.Y, EndPosition.Y) - ViewportHeight * FMath::Clamp(RevenueFlyArcHeightRatio, 0.0f, 1.0f));
+	for (int32 ItemIndex = 0; ItemIndex < ItemCount; ++ItemIndex)
+	{
+		UUserWidget* FlyingItem = CreateWidget<UUserWidget>(PlayerController, RevenueFlyingItemClass);
+		if (!FlyingItem)
+		{
+			continue;
+		}
+
+		const FVector2D Jitter(FMath::FRandRange(-22.0f, 22.0f), FMath::FRandRange(-14.0f, 14.0f));
+		const FVector2D ItemStart = StartPosition + Jitter;
+		SetVectorProperty(FlyingItem, TEXT("StartPos"), FVector(ItemStart, 0.0f));
+		SetVectorProperty(FlyingItem, TEXT("EndPos"), FVector(EndPosition, 0.0f));
+		SetVectorProperty(FlyingItem, TEXT("CtrlPos"), FVector(ControlPosition + Jitter * 0.35f, 0.0f));
+		SetNumberProperty(FlyingItem, TEXT("Duration"), FMath::FRandRange(MinDuration, MaxDuration));
+		SetNumberProperty(FlyingItem, TEXT("StartDelay"), ItemIndex * FMath::Max(0.0f, RevenueFlyItemInterval));
+		SetNumberProperty(FlyingItem, TEXT("MaxScale"), FMath::FRandRange(MinScale, MaxScale));
+		SetObjectProperty(FlyingItem, TEXT("PathCurve"), RevenueFlyPathCurve);
+		SetObjectProperty(FlyingItem, TEXT("ScaleCurve"), RevenueFlyScaleCurve);
+
+		// AddToPlayerScreen matches the owning-player coordinate space requested above. Center the
+		// widget so the projected portrait point refers to the middle of the coin, not its top-left.
+		FlyingItem->AddToPlayerScreen(150);
+		FlyingItem->SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
+		FlyingItem->SetPositionInViewport(ItemStart, true);
+		if (UImage* Icon = Cast<UImage>(FlyingItem->GetWidgetFromName(TEXT("Img_Icon"))))
+		{
+			if (RevenueFlyingItemMaterial)
+			{
+				Icon->SetBrushFromMaterial(RevenueFlyingItemMaterial);
+			}
+			Icon->SetDesiredSizeOverride(FVector2D(54.0f, 54.0f));
+		}
 	}
 }
 #pragma endregion K2 moonyfli
