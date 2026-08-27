@@ -14,12 +14,15 @@
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h" //add by K2
 #include "Components/Widget.h"
+#include "Blueprint/SlateBlueprintLibrary.h" //add by K2
+#include "CanvasItem.h" //add by K2
 #include "Engine/Canvas.h"
+#include "Engine/DataTable.h" //add by K2
 #include "Engine/Engine.h"
-#include "Engine/Font.h"
-#include "Fonts/SlateFontInfo.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Engine/Texture2D.h" //add by K2
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h" //add by K2
+#include "Sound/SoundBase.h" //add by K2
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
@@ -69,19 +72,46 @@ bool ANightCourseHUD::HitTestActionButtons(
 
 ANightCourseHUD::ANightCourseHUD()
 {
-#pragma region K2 moonyfli
-	static ConstructorHelpers::FObjectFinder<UFont> ComboFontFinder(
-		TEXT("/Game/Day/UI/Font/Didot系列/Didot系列/Didot-Bold_Font.Didot-Bold_Font"));
-	if (ComboFontFinder.Succeeded())
-	{
-		ComboCountFont = ComboFontFinder.Object;
-	}
-#pragma endregion K2 moonyfli
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F01_LingGu, TEXT("1"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F02_YinShanJun, TEXT("2"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F03_ChiYanJiao, TEXT("3"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F04_YueLinYu, TEXT("4"));
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F05_XuanYuQin, TEXT("5"));
+	IngredientIconTable = TSoftObjectPtr<UDataTable>(
+		FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Ingredients.DT_Ingredients"))); //add by K2
+
+#pragma region K2 moonyfli
+	auto MakeSfx = [](const TCHAR* Path)
+	{
+		return TSoftObjectPtr<USoundBase>(FSoftObjectPath(Path));
+	};
+	SlashSound = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Slash.SW_Slash"));
+	IngredientDropSound = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_IngredientDrop.SW_IngredientDrop"));
+
+	FNightFoeHitSfx FishHit;
+	FishHit.Voice = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Hit_Fish_Voice.SW_Hit_Fish_Voice"));
+	FishHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Fish_Material.SW_Hit_Fish_Material"));
+	FoeHitSounds.Add(EFoeId::M01, FishHit);
+
+	FNightFoeHitSfx BatHit;
+	BatHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Bat_Material.SW_Hit_Bat_Material"));
+	FoeHitSounds.Add(EFoeId::M02, BatHit);
+
+	FNightFoeHitSfx AquaticHit;
+	AquaticHit.Voice = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Aquatic_Voice.SW_Hit_Aquatic_Voice"));
+	FoeHitSounds.Add(EFoeId::M03, AquaticHit);
+	FoeHitSounds.Add(EFoeId::M04, AquaticHit);
+
+	FNightFoeHitSfx RiceHit;
+	RiceHit.Voice = MakeSfx(TEXT("/Game/Night/Course/Audio/SW_Hit_Rice_Voice.SW_Hit_Rice_Voice"));
+	RiceHit.Material = MakeSfx(
+		TEXT("/Game/Night/Course/Audio/SW_Hit_Rice_Material.SW_Hit_Rice_Material"));
+	FoeHitSounds.Add(EFoeId::M05, RiceHit);
+#pragma endregion K2 moonyfli
 }
 void ANightCourseHUD::BeginPlay()
 {
@@ -101,6 +131,18 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	HealthBarWidget = nullptr;
 	ComboWidget = nullptr;
 	ComboCountText = nullptr;
+#pragma region K2 moonyfli
+	BagPackWidget = nullptr;
+	DropFlyIcons.Reset();
+	ResolvedIngredientIcons.Reset();
+	if (UNightCourseDirector* Director = BoundDropDirector.Get())
+	{
+		Director->OnIngredientDropped.RemoveDynamic(
+			this,
+			&ANightCourseHUD::HandleIngredientDropped);
+	}
+	BoundDropDirector = nullptr;
+#pragma endregion K2 moonyfli
 	if (SuccessResultWidget)
 	{
 		SuccessResultWidget->RemoveFromParent();
@@ -173,7 +215,6 @@ void ANightCourseHUD::EnsureMainHUD()
 	if (ComboWidget)
 	{
 		ComboCountText = Cast<UTextBlock>(ComboWidget->GetWidgetFromName(TEXT("Txt_ComboCount")));
-		ApplyComboCountFont();
 	}
 	else
 	{
@@ -181,6 +222,17 @@ void ANightCourseHUD::EnsureMainHUD()
 			LogTemp,
 			Warning,
 			TEXT("[NightHUD] WBP_NightHUD_Multi is missing nested WBP_Combo; combo count will stay hidden."));
+	}
+
+	BagPackWidget = Cast<UUserWidget>(
+		MainHUDWidget->GetWidgetFromName(BagPackWidgetName));
+	if (!BagPackWidget)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightHUD] WBP_NightHUD_Multi is missing nested '%s'; drop icons fly to BagFlyTargetFallback."),
+			*BagPackWidgetName.ToString());
 	}
 #pragma endregion K2 moonyfli
 }
@@ -334,50 +386,6 @@ void ANightCourseHUD::ApplySuccessIngredientCounts(const FNightResult& Result)
 	}
 }
 
-void ANightCourseHUD::ApplyResultMaxCombo(UUserWidget* ResultWidget, const int32 MaxCombo)
-{
-	if (!ResultWidget || ResultComboTextWidgetName.IsNone())
-	{
-		return;
-	}
-
-	UWidget* Target = ResultWidget->GetWidgetFromName(ResultComboTextWidgetName);
-	if (!Target)
-	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("[NightHUD] Result widget '%s' is missing combo text '%s'."),
-			*ResultWidget->GetName(),
-			*ResultComboTextWidgetName.ToString());
-		return;
-	}
-
-	const FText ComboText = FText::AsNumber(FMath::Max(0, MaxCombo));
-	if (UTextBlock* TextBlock = Cast<UTextBlock>(Target))
-	{
-		TextBlock->SetText(ComboText);
-	}
-	else if (URichTextBlock* RichTextBlock = Cast<URichTextBlock>(Target))
-	{
-		RichTextBlock->SetText(ComboText);
-	}
-	else if (UEditableTextBox* EditableTextBox = Cast<UEditableTextBox>(Target))
-	{
-		EditableTextBox->SetIsReadOnly(true);
-		EditableTextBox->SetText(ComboText);
-	}
-	else
-	{
-		UE_LOG(
-			LogTemp,
-			Error,
-			TEXT("[NightHUD] Combo widget '%s' has unsupported class '%s'."),
-			*ResultComboTextWidgetName.ToString(),
-			*Target->GetClass()->GetName());
-	}
-}
-
 void ANightCourseHUD::SetResultInputMode(UUserWidget* ActiveResultWidget)
 {
 	APlayerController* PC = GetOwningPlayerController();
@@ -410,7 +418,6 @@ bool ANightCourseHUD::PresentNightResult(const FNightResult& Result)
 	{
 		ApplySuccessIngredientCounts(Result);
 	}
-	ApplyResultMaxCombo(bSucceeded ? SuccessResultWidget.Get() : FailureResultWidget.Get(), Result.MaxCombo);
 	UpdateMainHUDPlacement();
 
 	if (SuccessResultWidget)
@@ -606,22 +613,8 @@ void ANightCourseHUD::PushComboToHUD(int32 Combo)
 	ComboWidget->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	if (bShow && ComboCountText)
 	{
-		ApplyComboCountFont();
 		ComboCountText->SetText(FText::AsNumber(Combo));
 	}
-}
-
-void ANightCourseHUD::ApplyComboCountFont()
-{
-	if (!ComboCountText || !ComboCountFont)
-	{
-		return;
-	}
-
-	FSlateFontInfo FontInfo = ComboCountText->GetFont();
-	FontInfo.FontObject = ComboCountFont;
-	FontInfo.Size = ComboCountFontSize;
-	ComboCountText->SetFont(FontInfo);
 }
 #pragma endregion K2 moonyfli
 
@@ -818,5 +811,273 @@ void ANightCourseHUD::DrawHUD()
 		PromptText.Scale = FVector2D(2.0f, 2.0f);
 		Canvas->DrawItem(PromptText);
 	}
+
+	EnsureDropDirectorBinding(Director);
+	DrawDropFlyIcons(GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f);
+}
+
+void ANightCourseHUD::EnsureDropDirectorBinding(UNightCourseDirector* Director)
+{
+	if (BoundDropDirector.Get() == Director)
+	{
+		return;
+	}
+	if (UNightCourseDirector* Previous = BoundDropDirector.Get())
+	{
+		Previous->OnIngredientDropped.RemoveDynamic(
+			this,
+			&ANightCourseHUD::HandleIngredientDropped);
+	}
+	BoundDropDirector = Director;
+	if (Director)
+	{
+		Director->OnIngredientDropped.AddUniqueDynamic(
+			this,
+			&ANightCourseHUD::HandleIngredientDropped);
+	}
+}
+
+void ANightCourseHUD::HandleIngredientDropped(
+	EIngredientId DropId,
+	int32 Count,
+	FVector WorldLocation)
+{
+	if (!bEnableDropFlyIcons || DropId == EIngredientId::None || Count <= 0)
+	{
+		return;
+	}
+	UTexture2D* Icon = ResolveIngredientIcon(DropId);
+	if (!Icon)
+	{
+		return;
+	}
+
+	// One icon per awarded unit, staggered, but never more than the on-screen budget.
+	const int32 Budget = FMath::Max(0, MaxDropFlyIcons - DropFlyIcons.Num());
+	const int32 SpawnCount = FMath::Min(Count, Budget);
+	for (int32 Index = 0; Index < SpawnCount; ++Index)
+	{
+		FNightDropFlyIcon& Entry = DropFlyIcons.AddDefaulted_GetRef();
+		Entry.Icon = Icon;
+		Entry.WorldStart = WorldLocation + FVector(0.f, 0.f, DropFlyWorldZOffset);
+		Entry.Delay = DropFlyStaggerSeconds * static_cast<float>(Index);
+	}
+}
+
+UTexture2D* ANightCourseHUD::ResolveIngredientIcon(EIngredientId DropId)
+{
+	if (const TObjectPtr<UTexture2D>* Cached = ResolvedIngredientIcons.Find(DropId))
+	{
+		return Cached->Get();
+	}
+
+	UDataTable* Table = IngredientIconTable.LoadSynchronous();
+	if (!Table)
+	{
+		return nullptr;
+	}
+
+	// DT_Ingredients row names match the enum DisplayName metadata (F01_LingGu -> LingGu).
+	const UEnum* IdEnum = StaticEnum<EIngredientId>();
+	if (!IdEnum)
+	{
+		return nullptr;
+	}
+	const FName RowName(*IdEnum->GetDisplayNameTextByValue(
+		static_cast<int64>(DropId)).ToString());
+	const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(
+		RowName,
+		TEXT("NightCourseHUD drop icon"),
+		false);
+	if (!Row)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightHUD] DT_Ingredients has no row '%s'; that drop will not fly to the bag."),
+			*RowName.ToString());
+		ResolvedIngredientIcons.Add(DropId, nullptr);
+		return nullptr;
+	}
+
+	UTexture2D* Icon = Row->Icon.LoadSynchronous();
+	ResolvedIngredientIcons.Add(DropId, Icon);
+	return Icon;
+}
+
+FVector2D ANightCourseHUD::GetCanvasLetterboxPixelOffset() const
+{
+	if (!Canvas)
+	{
+		return FVector2D::ZeroVector;
+	}
+	int32 FullX = 0;
+	int32 FullY = 0;
+	if (APlayerController* PC = GetOwningPlayerController())
+	{
+		PC->GetViewportSize(FullX, FullY);
+	}
+	return FVector2D(
+		FMath::Max(0.f, (static_cast<float>(FullX) - Canvas->SizeX) * 0.5f),
+		FMath::Max(0.f, (static_cast<float>(FullY) - Canvas->SizeY) * 0.5f));
+}
+
+bool ANightCourseHUD::GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const
+{
+	UWidget* Target = nullptr;
+	if (BagPackWidget)
+	{
+		Target = BagPackWidget->GetWidgetFromName(BagFlyTargetWidgetName);
+		if (!Target)
+		{
+			Target = BagPackWidget;
+		}
+	}
+
+	if (Target)
+	{
+		const FGeometry& Geometry = Target->GetCachedGeometry();
+		const FVector2D LocalSize = Geometry.GetLocalSize();
+		if (LocalSize.X > 0.f || LocalSize.Y > 0.f)
+		{
+			// Widget geometry is window-absolute; Canvas excludes the letterbox bars.
+			FVector2D PixelPosition = FVector2D::ZeroVector;
+			FVector2D ViewportPosition = FVector2D::ZeroVector;
+			USlateBlueprintLibrary::LocalToViewport(
+				this,
+				Geometry,
+				LocalSize * 0.5f,
+				PixelPosition,
+				ViewportPosition);
+			OutCanvasPosition = PixelPosition - GetCanvasLetterboxPixelOffset();
+			return true;
+		}
+	}
+
+	if (HUDCameraFitScale <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	// Fallback: design-space point inside the 9:20 frame, converted to Canvas pixels.
+	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
+	OutCanvasPosition =
+		(HUDCameraFrameOffset + BagFlyTargetFallback * HUDCameraFitScale) * Dpi
+		- GetCanvasLetterboxPixelOffset();
+	return true;
+}
+
+void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
+{
+	if (DropFlyIcons.Num() == 0)
+	{
+		return;
+	}
+	if (!bEnableDropFlyIcons || !Canvas)
+	{
+		DropFlyIcons.Reset();
+		return;
+	}
+
+	FVector2D TargetCanvas = FVector2D::ZeroVector;
+	if (!GetBagFlyTargetCanvasPosition(TargetCanvas))
+	{
+		return;
+	}
+
+	const float FlySeconds = FMath::Max(0.05f, DropFlySeconds);
+	const float Scale = FMath::Max(KINDA_SMALL_NUMBER, HUDCameraFitScale);
+	const float BaseSize = DropFlyIconSize * Scale;
+
+	for (int32 Index = DropFlyIcons.Num() - 1; Index >= 0; --Index)
+	{
+		FNightDropFlyIcon& Entry = DropFlyIcons[Index];
+		if (Entry.Delay > 0.f)
+		{
+			Entry.Delay -= DeltaSeconds;
+			continue;
+		}
+		if (!Entry.bCanvasStartValid)
+		{
+			// Sampled once: the foe is already gone, so the start point must stay fixed
+			// on screen instead of tracking a camera that keeps moving.
+			const FVector Projected = Project(Entry.WorldStart);
+			Entry.CanvasStart = FVector2D(Projected.X, Projected.Y);
+			Entry.bCanvasStartValid = true;
+		}
+
+		Entry.Elapsed += DeltaSeconds;
+		const float Alpha = FMath::Clamp(Entry.Elapsed / FlySeconds, 0.f, 1.f);
+		if (Alpha >= 1.f || !Entry.Icon)
+		{
+			DropFlyIcons.RemoveAtSwap(Index, EAllowShrinking::No);
+			continue;
+		}
+
+		// Ease out so the icon leaves the kill fast and settles into the mouth.
+		const float Eased = 1.f - FMath::Pow(1.f - Alpha, 2.f);
+		FVector2D Position = FMath::Lerp(Entry.CanvasStart, TargetCanvas, Eased);
+
+		// Bow the path perpendicular to the straight line; peaks at the midpoint.
+		const FVector2D Travel = TargetCanvas - Entry.CanvasStart;
+		if (!Travel.IsNearlyZero())
+		{
+			const FVector2D Normal =
+				FVector2D(-Travel.Y, Travel.X).GetSafeNormal();
+			Position += Normal * (DropFlyArcHeight * Scale
+				* FMath::Sin(Eased * PI));
+		}
+
+		const float IconScale = FMath::Lerp(1.f, DropFlyEndScale, Eased);
+		const float Size = BaseSize * IconScale;
+		const float FadeAlpha = Alpha < 0.75f
+			? 1.f
+			: FMath::GetMappedRangeValueClamped(
+				FVector2f(0.75f, 1.f),
+				FVector2f(1.f, 0.f),
+				Alpha);
+
+		FCanvasTileItem Tile(
+			Position - FVector2D(Size * 0.5f, Size * 0.5f),
+			Entry.Icon->GetResource(),
+			FVector2D(Size, Size),
+			FLinearColor(1.f, 1.f, 1.f, FadeAlpha));
+		Tile.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(Tile);
+	}
+}
+
+void ANightCourseHUD::NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop)
+{
+	if (!bEnableNightSfx)
+	{
+		return;
+	}
+
+	PlaySfx(SlashSound, SlashVolume);
+
+	if (const FNightFoeHitSfx* Hit = FoeHitSounds.Find(FoeId))
+	{
+		PlaySfx(Hit->Voice, FoeHitVolume);
+		PlaySfx(Hit->Material, FoeHitVolume);
+	}
+
+	if (bPlayDrop)
+	{
+		PlaySfx(IngredientDropSound, IngredientDropVolume);
+	}
+}
+
+void ANightCourseHUD::PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float Volume)
+{
+	if (SoftSound.IsNull() || Volume <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	USoundBase* Sound = SoftSound.LoadSynchronous();
+	if (!Sound)
+	{
+		return;
+	}
+	UGameplayStatics::PlaySound2D(this, Sound, Volume);
 }
 #pragma endregion K2 moonyfli
