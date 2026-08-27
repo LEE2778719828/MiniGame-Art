@@ -3091,6 +3091,30 @@ AActor* ASDayBoardPresenter::HitTest(const FVector2D& ScreenPosition) const
 	return nullptr;
 }
 
+bool ASDayBoardPresenter::TryDropPieceAndNotify(
+	ASMergeBoard* Board,
+	const int32 FromCellIndex,
+	const int32 ToCellIndex)
+{
+	if (!Board)
+	{
+		return false;
+	}
+
+	FSDishPiece FromPiece;
+	FSDishPiece ToPiece;
+	const bool bMergeCandidate = Board->TryGetPiece(FromCellIndex, FromPiece)
+		&& Board->TryGetPiece(ToCellIndex, ToPiece)
+		&& FromPiece.IngredientId == ToPiece.IngredientId
+		&& FromPiece.Level == ToPiece.Level;
+	const bool bDropSucceeded = Board->TryDropPiece(FromCellIndex, ToCellIndex);
+	if (bDropSucceeded && bMergeCandidate)
+	{
+		BP_OnIngredientMergeCompleted(ToPiece.IngredientId, ToPiece.Level + 1, ToCellIndex);
+	}
+	return bDropSucceeded;
+}
+
 void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 {
 	ASMergeBoard* Board = LogicBoard.Get();
@@ -3126,7 +3150,9 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitTest(ScreenPosition)))
 	{
 #pragma region K2 moonyfli
-		if (Board->TrySpawnFromMotherPiece(Bin->IngredientId))
+		const bool bSpawnSucceeded = Board->TrySpawnFromMotherPiece(Bin->IngredientId);
+		BP_OnIngredientBinClicked(Bin->BinIndex, Bin->IngredientId, bSpawnSucceeded);
+		if (bSpawnSucceeded)
 		{
 			PlayIngredientBinAnimation(Bin->BinIndex);
 		}
@@ -3143,7 +3169,7 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 			if (Cell->CellIndex != FromIndex)
 			{
 				// Second click completes the click-release-click interaction immediately.
-				Board->TryDropPiece(FromIndex, Cell->CellIndex);
+				TryDropPieceAndNotify(Board, FromIndex, Cell->CellIndex);
 				bDropHandledOnPress = true;
 				RefreshFromLogic();
 			}
@@ -3198,7 +3224,7 @@ void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 		if (Cell->CellIndex != FromIndex)
 		{
 			// Holding on A and releasing over B completes the drag interaction.
-			Board->TryDropPiece(FromIndex, Cell->CellIndex);
+			TryDropPieceAndNotify(Board, FromIndex, Cell->CellIndex);
 		}
 	}
 	// Releasing a simple click over A (or outside the board) keeps A selected,

@@ -44,11 +44,18 @@ Desktop.ini
 *.log
 *.tmp
 *.bak
+*.bak_*
 
 # Rider / VS / CLion extras
 .idea/
 *.DotSettings.user
 cmake-build-*/
+
+# AI / assistant local working directories (never commit)
+.agents/
+.codex/
+.workbuddy/
+NexusMCP/
 
 # Encrypted / local credentials (never commit)
 *.p12
