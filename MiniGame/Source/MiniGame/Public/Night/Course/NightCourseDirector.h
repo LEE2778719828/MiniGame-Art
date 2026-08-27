@@ -357,6 +357,10 @@ protected:
 	bool bNearDeathGiftConsumed = false;
 	bool bBranchTransitionConsumed = false;
 	bool bBranchRemainderLoaded = false;
+	// Independent pre-generation flag: opened when the branch course is installed so the
+	// runtime streaming window expands and spawns the branch remainder AHEAD of arrival,
+	// instead of waiting for bBranchRemainderLoaded (which only flips after arrival).
+	bool bBranchRemainderPreGenerated = false;
 	bool bBranchHasExplicitTransitionBeat = true;
 	int32 BaseBeatCount = 0;
 	int32 BranchTransitionBeatIndex = INDEX_NONE;
@@ -427,6 +431,7 @@ protected:
 	void StreamRuntimeCourseActors();
 	void DestroyRuntimeActorsBehindPlayer();
 	void QueueSpawnedCourseActorsForDeferredDestroy();
+	void HideDeferredRuntimeActors();
 	void DestroyDeferredRuntimeActors();
 	void ClearDeferredRuntimeActors();
 	APostProcessVolume* ResolveCoursePostProcessVolume();

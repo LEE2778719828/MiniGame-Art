@@ -44,6 +44,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout", meta = (DisplayName = "前进速度", ToolTip = "角色沿课程前进的速度，单位 cm/s。"))
 	float AdvanceSpeed = 1400.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Fork", meta = (DisplayName = "岔口过渡速度", ToolTip = "分支入口推移（前缀石到分支首石）的速度，单位 cm/s；绕过动画驱动的距离压缩，避免瞬移。"))
+	float ForkTransitionAdvanceSpeed = 1600.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|G1|Layout", meta = (DisplayName = "终点缓冲时间", ToolTip = "完成最后一个节拍后等待多久结算成功，单位秒。"))
 	float ExitBufferSeconds = 1.2f;
 
