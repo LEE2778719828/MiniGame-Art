@@ -16,6 +16,8 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -345,6 +347,18 @@ ANightCourseHost::ANightCourseHost()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	Director = CreateDefaultSubobject<UNightCourseDirector>(TEXT("Director"));
+	CombatMusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("CombatMusic"));
+	CombatMusicComponent->bAutoActivate = false;
+	CombatMusicComponent->bAllowSpatialization = false;
+	CombatMusicComponent->SetVolumeMultiplier(CombatMusicVolumeMultiplier);
+	CombatMusicComponent->OnAudioFinished.AddDynamic(
+		this,
+		&ANightCourseHost::HandleCombatMusicFinished);
+
+	// Temporary default. Replace the soft reference in BP_NightCourseHost after
+	// the dedicated Night-combat BGM is imported.
+	CombatMusic = TSoftObjectPtr<USoundBase>(
+		FSoftObjectPath(TEXT("/Game/Day/Music/canting_bgm.canting_bgm")));
 	NightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("NightFog"));
 	NightFog->FogDensity = 0.003f;
 	NightFog->FogHeightFalloff = 0.18f;
@@ -826,6 +840,61 @@ void ANightCourseHost::BuildPlayableStage()
 	// Stone chain owns all pads (including stone 0 under the runner). No extra road.
 }
 
+void ANightCourseHost::PlayCombatMusic()
+{
+	bCombatMusicPlaybackRequested = bPlayCombatMusic;
+	if (!bCombatMusicPlaybackRequested || !CombatMusicComponent)
+	{
+		return;
+	}
+
+	USoundBase* Sound = CombatMusic.LoadSynchronous();
+	if (!Sound)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Audio] CombatMusic is not configured or could not be loaded."));
+		bCombatMusicPlaybackRequested = false;
+		return;
+	}
+
+	CombatMusicComponent->SetSound(Sound);
+	CombatMusicComponent->SetVolumeMultiplier(FMath::Max(0.f, CombatMusicVolumeMultiplier));
+	if (!CombatMusicComponent->IsPlaying())
+	{
+		CombatMusicComponent->Play();
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Audio] Combat music started: %s."),
+			*Sound->GetPathName());
+	}
+}
+
+void ANightCourseHost::StopCombatMusic()
+{
+	bCombatMusicPlaybackRequested = false;
+	if (CombatMusicComponent && CombatMusicComponent->IsPlaying())
+	{
+		CombatMusicComponent->Stop();
+		UE_LOG(LogTemp, Display, TEXT("[NightCourse][Audio] Combat music stopped."));
+	}
+}
+
+void ANightCourseHost::HandleCombatMusicFinished()
+{
+	if (!bCombatMusicPlaybackRequested
+		|| !bLoopCombatMusic
+		|| !CombatMusicComponent
+		|| !CombatMusicComponent->Sound)
+	{
+		return;
+	}
+
+	CombatMusicComponent->Play();
+	UE_LOG(LogTemp, Verbose, TEXT("[NightCourse][Audio] Combat music loop restarted."));
+}
 void ANightCourseHost::WireFeelFromPlayer()
 {
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
@@ -1039,6 +1108,7 @@ bool ANightCourseHost::StartNight_Implementation(
 	}
 	if (bStarted)
 	{
+		PlayCombatMusic();
 		UE_LOG(
 			LogTemp,
 			Display,
@@ -1062,6 +1132,7 @@ bool ANightCourseHost::StartNight_Implementation(
 
 void ANightCourseHost::ResetCourse()
 {
+	StopCombatMusic();
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RetryTimer);
@@ -1092,6 +1163,7 @@ FNightResult ANightCourseHost::GetNightResult_Implementation() const
 
 void ANightCourseHost::HandleFinished(const FNightResult& Result)
 {
+	StopCombatMusic();
 	LastResult = Result;
 	bHasResult = true;
 	LastFailureReason = Director
