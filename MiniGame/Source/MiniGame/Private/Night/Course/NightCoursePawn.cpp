@@ -343,7 +343,7 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 				KnifeMesh,
 				NAME_None,
 				FVector::ZeroVector,
-				FRotator::ZeroRotator,
+				SlashTrailRotation,
 				EAttachLocation::SnapToTarget,
 				true);
 		}
@@ -352,7 +352,8 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
 				SlashTrailFX,
-				GetActorLocation());
+				GetActorLocation(),
+				SlashTrailRotation);
 		}
 	}
 

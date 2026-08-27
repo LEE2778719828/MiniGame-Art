@@ -77,6 +77,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TObjectPtr<UNiagaraSystem> SlashTrailFX;
 
+	/** Spawn offset on the knife. Yaw 180 flips a trail that plays opposite the swing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	FRotator SlashTrailRotation = FRotator(0.f, 180.f, 0.f);
+
 	/** First-tier hit burst at the foe. Swap later when combo picks phase2–4. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TObjectPtr<UNiagaraSystem> HitImpactFX;
