@@ -66,6 +66,7 @@ namespace NightFeelConsole_Private
 	}
 }
 
+#if !MINIGAME_DEFER_CONSOLE_COMMANDS
 static FAutoConsoleCommandWithWorld GNightFeelStatusCmd(
 	TEXT("Night.Feel.Status"),
 	TEXT("Dump R1 feel state: phase, window, buffer, tuning params"),
@@ -387,4 +388,5 @@ static FAutoConsoleCommandWithWorldAndArgs GNightAnimRateCmd(
 		UE_LOG(LogTemp, Warning, TEXT("[NightAnim] %s rate = %.2f  (%.0fms -> %.0fms)"),
 			bAttack ? TEXT("Attack") : TEXT("Jump"), Rate, RawMs, RawMs / Rate);
 	}));
+#endif
 #pragma endregion K2 (R1)

@@ -45,19 +45,33 @@ const int32 USChefGameInstance::SaveUserIndex = 0;
 
 namespace
 {
-	const FName LingGuId(TEXT("LingGu"));
-	const FName YinShanJunId(TEXT("YinShanJun"));
-	const FName ChiYanJiaoId(TEXT("ChiYanJiao"));
-	const FName YueLinYuId(TEXT("YueLinYu"));
-	const FName XuanYuQinId(TEXT("XuanYuQin"));
+	// Do not construct FName objects at DLL load time. The primary game module is loaded
+	// before the UObject/name subsystem has finished initializing, and global FName
+	// constructors can leave the editor stuck at the splash screen. Keep these values
+	// trivially initialized and materialize the FName on first use instead.
+	struct FLazyName
+	{
+		const TCHAR* Literal = TEXT("");
 
-	const FName GiftGuideKiteId(TEXT("GuideKite"));
-	const FName GiftLifeLampId(TEXT("LifeLamp"));
-	const FName GiftBeatCoinId(TEXT("BeatCoin"));
-	const FName GiftGluttonBoxId(TEXT("GluttonBox"));
+		FORCEINLINE operator FName() const
+		{
+			return FName(Literal);
+		}
+	};
 
-	const FName NpcALingId(TEXT("ALing"));
-	const FName NpcSangPoId(TEXT("SangPo"));
+	constexpr FLazyName LingGuId{TEXT("LingGu")};
+	constexpr FLazyName YinShanJunId{TEXT("YinShanJun")};
+	constexpr FLazyName ChiYanJiaoId{TEXT("ChiYanJiao")};
+	constexpr FLazyName YueLinYuId{TEXT("YueLinYu")};
+	constexpr FLazyName XuanYuQinId{TEXT("XuanYuQin")};
+
+	constexpr FLazyName GiftGuideKiteId{TEXT("GuideKite")};
+	constexpr FLazyName GiftLifeLampId{TEXT("LifeLamp")};
+	constexpr FLazyName GiftBeatCoinId{TEXT("BeatCoin")};
+	constexpr FLazyName GiftGluttonBoxId{TEXT("GluttonBox")};
+
+	constexpr FLazyName NpcALingId{TEXT("ALing")};
+	constexpr FLazyName NpcSangPoId{TEXT("SangPo")};
 
 	constexpr int32 MaxDishLevel = 4;
 
@@ -4964,6 +4978,7 @@ void ASFakeNightGateway::FinishDayWhiteboxSmokeTest()
 	}
 }
 
+#if !MINIGAME_DEFER_CONSOLE_COMMANDS
 static FAutoConsoleCommandWithWorld GSDayOpenDayCmd(
 	TEXT("S.Day.OpenDay"),
 	TEXT("Submit a success night result so the shop opens (manual testing)"),
@@ -5037,6 +5052,7 @@ static FAutoConsoleCommandWithWorld GSDayRunSmokeCmd(
 			*World->GetName(),
 			World->IsPlayInEditor() ? 1 : 0);
 	}));
+#endif
 #pragma endregion K2 moonyfli
 
 FSNightResult ASFakeNightGateway::MakeResult(const bool bSuccess)

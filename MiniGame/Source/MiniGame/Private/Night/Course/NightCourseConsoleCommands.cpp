@@ -11,6 +11,7 @@
 #include "UObject/SoftObjectPath.h"
 
 #pragma region K2 moonyfli
+#if !MINIGAME_DEFER_CONSOLE_COMMANDS
 static FAutoConsoleCommandWithWorld GNightCourseDumpCmd(
 	TEXT("Night.Course.Dump"),
 	TEXT("Dump G1 course host state"),
@@ -327,4 +328,5 @@ static FAutoConsoleCommandWithWorldAndArgs GNightCourseSnapAtomLandingCmd(
 			UE_LOG(LogTemp, Display, TEXT("[NightCourse] Snapped landing points in Atom BP '%s'."), *Args[0]);
 		}
 	}));
+#endif
 #pragma endregion K2 moonyfli

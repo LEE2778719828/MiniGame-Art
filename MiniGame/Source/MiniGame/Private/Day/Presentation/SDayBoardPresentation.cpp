@@ -45,13 +45,36 @@ namespace DayBoardPresentationPrivate
 {
 	// The authored box order stays fixed so changing an output never changes a hit zone.
 	constexpr int32 DayIngredientBinCount = 5;
-	const FName DayLingGuId(TEXT("LingGu"));
-	const FName DayYinShanJunId(TEXT("YinShanJun"));
-	const FName DayChiYanJiaoId(TEXT("ChiYanJiao"));
-	const FName DayYueLinYuId(TEXT("YueLinYu"));
-	const FName DayXuanYuQinId(TEXT("XuanYuQin"));
-	const FName DayNpcALingId(TEXT("ALing"));
-	const FName DayNpcSangPoId(TEXT("SangPo"));
+	// Keep global identifiers trivially initialized. FName construction must wait until
+	// the UObject/name subsystem is ready; otherwise the primary module can stall while
+	// the editor is loading its project DLL.
+	struct FLazyName
+	{
+		const TCHAR* Literal = TEXT("");
+
+		FORCEINLINE operator FName() const
+		{
+			return FName(Literal);
+		}
+	};
+
+	struct FLazyString
+	{
+		const TCHAR* Literal = TEXT("");
+
+		FORCEINLINE operator FString() const
+		{
+			return FString(Literal);
+		}
+	};
+
+	constexpr FLazyName DayLingGuId{TEXT("LingGu")};
+	constexpr FLazyName DayYinShanJunId{TEXT("YinShanJun")};
+	constexpr FLazyName DayChiYanJiaoId{TEXT("ChiYanJiao")};
+	constexpr FLazyName DayYueLinYuId{TEXT("YueLinYu")};
+	constexpr FLazyName DayXuanYuQinId{TEXT("XuanYuQin")};
+	constexpr FLazyName DayNpcALingId{TEXT("ALing")};
+	constexpr FLazyName DayNpcSangPoId{TEXT("SangPo")};
 
 	UStaticMesh* LoadBasicShape(const TCHAR* Path)
 	{
@@ -65,15 +88,15 @@ namespace DayBoardPresentationPrivate
 	 * viewport instead of recompiled, and swapping in another camera Blueprint is a matter of
 	 * moving the tag (see Tools/SwitchDayStageCamera.py). Exactly one camera may carry it.
 	 */
-	const FName DayLevelCameraTag(TEXT("SDayCamera"));
-	const FName DayArtEnvironmentTag(TEXT("SDay.Environment"));
-	const FName DayArtBoardTag(TEXT("SDay.Board"));
+	constexpr FLazyName DayLevelCameraTag{TEXT("SDayCamera")};
+	constexpr FLazyName DayArtEnvironmentTag{TEXT("SDay.Environment")};
+	constexpr FLazyName DayArtBoardTag{TEXT("SDay.Board")};
 	/** Plane that fills the camera frame, so the picture's edge is visible against the letterbox. */
-	const FName DayArtBackdropTag(TEXT("SDay.Backdrop"));
+	constexpr FLazyName DayArtBackdropTag{TEXT("SDay.Backdrop")};
 	/** Dish plate row along the top of frame; customers belong behind it. */
-	const FName DayArtCustomerPlatesTag(TEXT("SDay.CustomerPlates"));
+	constexpr FLazyName DayArtCustomerPlatesTag{TEXT("SDay.CustomerPlates")};
 	/** Marks a cell whose origin already sits at the bottom of an art well. */
-	const FName DayCellSeatedTag(TEXT("SDay.Cell.Seated"));
+	constexpr FLazyName DayCellSeatedTag{TEXT("SDay.Cell.Seated")};
 
 	/** Shipping target is a 1440x3200 portrait phone panel. */
 	constexpr float DayPortraitAspectRatio = 1440.0f / 3200.0f;
@@ -314,11 +337,11 @@ namespace DayBoardPresentationPrivate
 	constexpr float DayArtForegroundMinDepth = 60.0f;
 
 	/** Backdrop layers sit behind the stall; tag "SDay.BackdropOrder.N", 0 = furthest street. */
-	const FString DayArtBackdropOrderPrefix(TEXT("SDay.BackdropOrder."));
+	constexpr FLazyString DayArtBackdropOrderPrefix{TEXT("SDay.BackdropOrder.")};
 
 	/** Overlay layers sit in front of the stall; tag "SDay.ForegroundOrder.N", higher = nearer. */
-	const FName DayArtForegroundTag(TEXT("SDay.Foreground"));
-	const FString DayArtForegroundOrderPrefix(TEXT("SDay.ForegroundOrder."));
+	constexpr FLazyName DayArtForegroundTag{TEXT("SDay.Foreground")};
+	constexpr FLazyString DayArtForegroundOrderPrefix{TEXT("SDay.ForegroundOrder.")};
 
 	int32 DayArtLayerOrder(const TArray<FName>& Tags, const FString& Prefix)
 	{
