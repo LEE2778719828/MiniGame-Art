@@ -876,6 +876,9 @@ public:
 	/** Take the next appearance slot and advance the queue cursor immediately. */
 	UFUNCTION(BlueprintCallable, Category = "S Orders")
 	bool TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder);
+
+	/** A timed-out walk-in did not consume ingredients; put the same request back at the queue tail. */
+	void RequeueGuestOrder(const FSOrderRequest& Order);
 #pragma endregion K2 moonyfli
 
 	/** Reveal leading NPC slots, then return the next guest order without advancing past it. */
@@ -1526,7 +1529,7 @@ private:
 	int32 GetConfiguredSeatCount() const;
 	bool TryFillSeat(int32 SeatIndex);
 	bool IsSeatOccupied(int32 SeatIndex) const;
-	void ClearCustomer(const FString& CustomerId, const FString& Reason);
+	void ClearCustomer(const FString& CustomerId, const FString& Reason, bool bRequeueOrder = false);
 #pragma endregion K2 moonyfli
 };
 

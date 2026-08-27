@@ -498,6 +498,17 @@ class MINIGAME_API ASDayBoardPresenter : public AActor
 
 public:
 	ASDayBoardPresenter();
+
+	/** Button-like Blueprint hook fired whenever an authored ingredient bin is clicked. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Ingredient Bins",
+		meta = (DisplayName = "Ingredient Bin Clicked"))
+	void BP_OnIngredientBinClicked(int32 BinIndex, FName IngredientId, bool bSpawnSucceeded);
+
+	/** Fired after two player-controlled pieces have successfully finished merging. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "S Day Board|Merge",
+		meta = (DisplayName = "Ingredient Merge Completed"))
+	void BP_OnIngredientMergeCompleted(FName IngredientId, int32 ResultLevel, int32 TargetCellIndex);
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -581,6 +592,7 @@ private:
 	void RefreshCharacters();
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+	bool TryDropPieceAndNotify(ASMergeBoard* Board, int32 FromCellIndex, int32 ToCellIndex);
 #pragma region K2 moonyfli
 	void PlayIngredientBinAnimation(int32 BinIndex);
 	void CloseIngredientBinAnimation(int32 BinIndex);
