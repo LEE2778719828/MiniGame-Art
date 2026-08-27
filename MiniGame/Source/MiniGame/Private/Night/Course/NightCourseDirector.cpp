@@ -3910,13 +3910,30 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		static_cast<int32>(ActiveDefaultRoute),
 		static_cast<int32>(ActiveForkPair),
 		Config->LevelRules.Num());
-	if (INightFeelBridge* Feel = GetFeel())
+		if (INightFeelBridge* Feel = GetFeel())
 	{
 		INightFeelBridge::Execute_SetControlScheme(
 			FeelBridgeObject,
 			ENightControlScheme::Normal);
-	}
 
+		// A failed Night is retried in the same map. Refill the transient Feel
+		// state here so a Soul-zero failure does not immediately fail again.
+		const float StartingSoul = FMath::Max(0.f, Config->StartingSoul);
+		const float CurrentSoul = INightFeelBridge::Execute_GetSoul(FeelBridgeObject);
+		if (CurrentSoul < StartingSoul)
+		{
+			INightFeelBridge::Execute_RestoreSoul(
+				FeelBridgeObject,
+				StartingSoul - CurrentSoul,
+				StartingSoul);
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Stage=Start] Restored Soul for a fresh Night: %.1f -> %.1f."),
+				CurrentSoul,
+				INightFeelBridge::Execute_GetSoul(FeelBridgeObject));
+		}
+	}
 	FString ValidationError;
 	if (!ValidateConfiguration(ValidationError))
 	{

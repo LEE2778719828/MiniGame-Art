@@ -1214,14 +1214,36 @@ void ANightCourseHost::ContinueAfterNightResult()
 {
 	if (!bAwaitingResultContinue)
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Stage=Flow] Result continue ignored because no result presentation is pending."));
 		return;
 	}
 
+	const bool bFailed = !LastResult.bSuccess || LastResult.bFailedMidway;
 	const bool bDayFlowAccepted = bPendingDayFlowAccepted;
 	ClearPendingResultPresentation(true);
+
+	// A player explicitly pressing the failure-page button must always retry this
+	// Night. Do not route this through the automatic-flow gate: that gate is only
+	// for unattended retries and can legitimately reject a stale Day-flow state.
+	if (bFailed)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(RetryTimer);
+		}
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightCourse][Stage=Flow] Manual failure retry requested; restarting the Night course directly."));
+		RetryAfterFailure();
+		return;
+	}
+
 	ApplyPostResultFlow(bDayFlowAccepted, /*bManualContinue=*/true);
 }
-
 void ANightCourseHost::ClearPendingResultPresentation(bool bHideHUD)
 {
 	bAwaitingResultContinue = false;
