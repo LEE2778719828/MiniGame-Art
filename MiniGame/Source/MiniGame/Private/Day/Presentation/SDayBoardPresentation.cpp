@@ -43,9 +43,13 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "SceneView.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 
 // Revenue feedback is viewport-only; the restaurant camera and world composition remain untouched.
@@ -1756,6 +1760,12 @@ ASDayBoardPresenter::ASDayBoardPresenter()
 
 	VisualConfig = TSoftObjectPtr<USDayBoardVisualConfig>(
 		FSoftObjectPath(TEXT("/Game/Day/Data/DA_SDayBoardVisualConfig.DA_SDayBoardVisualConfig")));
+	IngredientBinFogSystem = TSoftObjectPtr<UNiagaraSystem>(
+		FSoftObjectPath(TEXT("/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_Fog.Min_BoxOpen_Fog")));
+	IngredientBinFoodBurstSystem = TSoftObjectPtr<UNiagaraSystem>(
+		FSoftObjectPath(TEXT("/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_FoodBurst.Min_BoxOpen_FoodBurst")));
+	IngredientBinTrailSystem = TSoftObjectPtr<UNiagaraSystem>(
+		FSoftObjectPath(TEXT("/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_Trail.Min_BoxOpen_Trail")));
 }
 
 void ASDayBoardPresenter::BeginPlay()
@@ -2604,6 +2614,14 @@ void ASDayBoardPresenter::RefreshFromLogic()
 		if (Visual)
 		{
 			Visual->RefreshVisual();
+			if (PendingIngredientArrivalCounts.Contains(Visual->CellIndex))
+			{
+				// The board piece already exists logically, but its resting art should not
+				// appear underneath the screen-space item that is still flying toward it.
+				Visual->PieceIcon->SetVisibility(false);
+				Visual->PieceMesh->SetVisibility(false);
+				Visual->PieceLabel->SetVisibility(false);
+			}
 		}
 	}
 
@@ -2804,6 +2822,173 @@ USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(cons
 	}
 	return Fallback;
 #pragma endregion K2 moonyfli
+}
+
+void ASDayBoardPresenter::PlayIngredientSpawnFeedback(
+	ASDayIngredientBinVisual* Bin,
+	const FName IngredientId,
+	const int32 SpawnedCellIndex)
+{
+	ASDayCellVisual* TargetCell = GetCellVisual(SpawnedCellIndex);
+	UWorld* World = GetWorld();
+	if (!Bin || !TargetCell || !World)
+	{
+		return;
+	}
+
+	const FVector Start = Bin->GetActorTransform().TransformPosition(IngredientBinVfxStartOffset)
+		+ IngredientBinVfxViewOffset;
+	const FVector End = (TargetCell->PieceIcon
+		? TargetCell->PieceIcon->GetComponentLocation()
+		: TargetCell->GetActorTransform().TransformPosition(IngredientBinVfxTargetOffset))
+		+ IngredientBinVfxViewOffset;
+	UNiagaraSystem* FogSystem = IngredientBinFogSystem.LoadSynchronous();
+	UNiagaraSystem* BurstSystem = IngredientBinFoodBurstSystem.LoadSynchronous();
+	UNiagaraSystem* TrailSystem = IngredientBinTrailSystem.LoadSynchronous();
+	if (FogSystem)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World, FogSystem, Start, FRotator::ZeroRotator, IngredientBinFogScale);
+	}
+	if (BurstSystem && bSpawnFoodBurstAtBin)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World, BurstSystem, Start, FRotator::ZeroRotator, IngredientBinFoodBurstScale);
+	}
+	if (TrailSystem)
+	{
+		// The Niagara graph writes the absolute User Start/Target Position values
+		// directly to Particles.Position. Spawning this component at Start as well
+		// applies the bin translation twice for local-space emitters and sends the
+		// effect off screen. Keep the component transform neutral so the exposed
+		// Position parameters are the single source of truth for the rendered flight path.
+		if (UNiagaraComponent* Trail = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World,
+			TrailSystem,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			IngredientBinTrailScale,
+			true,
+			false,
+			ENCPoolMethod::None,
+			false))
+		{
+			if (!IngredientTrailStartParameter.IsNone())
+			{
+				Trail->SetVariablePosition(IngredientTrailStartParameter, Start);
+			}
+			if (!IngredientTrailTargetParameter.IsNone())
+			{
+				Trail->SetVariablePosition(IngredientTrailTargetParameter, End);
+			}
+			if (!IngredientTrailDurationParameter.IsNone())
+			{
+				Trail->SetVariableFloat(
+					IngredientTrailDurationParameter,
+					FMath::Max(0.01f, IngredientTrailDuration));
+			}
+			FBox TrailBounds(EForceInit::ForceInit);
+			TrailBounds += Start;
+			TrailBounds += End;
+			Trail->SetSystemFixedBounds(
+				TrailBounds.ExpandBy(FMath::Max(0.0f, IngredientTrailBoundsPadding)));
+			// Position-typed user parameters must be in place before the first spawn/update tick.
+			Trail->Activate(true);
+		}
+	}
+
+	UTexture2D* IconTexture = DayBoardPresentationPrivate::ResolveIngredientIcon(IngredientId);
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (!IconTexture || !PlayerController)
+	{
+		return;
+	}
+
+	FVector2D StartScreen;
+	FVector2D EndScreen;
+	if (!UGameplayStatics::ProjectWorldToScreen(PlayerController, Start, StartScreen)
+		|| !UGameplayStatics::ProjectWorldToScreen(PlayerController, End, EndScreen))
+	{
+		return;
+	}
+
+	USDayDragPreview* FlyingPreview = CreateWidget<USDayDragPreview>(
+		PlayerController,
+		USDayDragPreview::StaticClass());
+	if (!FlyingPreview)
+	{
+		return;
+	}
+	PendingIngredientArrivalCounts.FindOrAdd(SpawnedCellIndex)++;
+	FlyingPreview->AddToViewport(160);
+	const float PreviewWidth = FMath::Max(1.0f, IngredientFlyIconWidth);
+	const float Aspect = IconTexture->GetSizeX() > 0
+		? static_cast<float>(IconTexture->GetSizeY()) / static_cast<float>(IconTexture->GetSizeX())
+		: 1.0f;
+	FlyingPreview->ShowPreview(
+		IconTexture,
+		StartScreen,
+		FVector2D(PreviewWidth, PreviewWidth * FMath::Clamp(Aspect, 0.65f, 1.35f)));
+
+	const double StartSeconds = World->GetTimeSeconds();
+	const float DurationSeconds = FMath::Max(0.01f, IngredientFlyDuration);
+	const float FlyArcHeight = FMath::Max(0.0f, IngredientFlyArcHeight);
+	const bool bBurstAtTarget = bSpawnFoodBurstAtTarget;
+	const FVector BurstScale = IngredientBinFoodBurstScale;
+	const TSharedRef<FTimerHandle> FlightTimer = MakeShared<FTimerHandle>();
+	const TWeakObjectPtr<USDayDragPreview> WeakFlyingPreview(FlyingPreview);
+	const TWeakObjectPtr<ASDayBoardPresenter> WeakPresenter(this);
+	World->GetTimerManager().SetTimer(
+		*FlightTimer,
+		FTimerDelegate::CreateWeakLambda(this, [WeakPresenter, WeakFlyingPreview, FlightTimer, StartScreen, EndScreen, End, StartSeconds, DurationSeconds, FlyArcHeight, BurstSystem, bBurstAtTarget, BurstScale, SpawnedCellIndex]()
+		{
+			ASDayBoardPresenter* Presenter = WeakPresenter.Get();
+			USDayDragPreview* Preview = WeakFlyingPreview.Get();
+			if (!Presenter || !Presenter->GetWorld())
+			{
+				return;
+			}
+			UWorld* CurrentWorld = Presenter->GetWorld();
+			const float Alpha = FMath::Clamp(
+				static_cast<float>((CurrentWorld->GetTimeSeconds() - StartSeconds) / DurationSeconds),
+				0.0f,
+				1.0f);
+			const float EasedAlpha = FMath::InterpEaseOut(0.0f, 1.0f, Alpha, 2.2f);
+			FVector2D Position = FMath::Lerp(StartScreen, EndScreen, EasedAlpha);
+			Position.Y -= FMath::Sin(Alpha * PI) * FlyArcHeight;
+			if (Preview)
+			{
+				Preview->MovePreview(Position);
+			}
+			if (Alpha >= 1.0f)
+			{
+				if (BurstSystem && bBurstAtTarget)
+				{
+					UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+						CurrentWorld, BurstSystem, End, FRotator::ZeroRotator, BurstScale);
+				}
+				CurrentWorld->GetTimerManager().ClearTimer(*FlightTimer);
+				if (Preview)
+				{
+					Preview->HidePreview();
+					Preview->RemoveFromParent();
+				}
+
+				if (int32* PendingCount = Presenter->PendingIngredientArrivalCounts.Find(SpawnedCellIndex))
+				{
+					if (--(*PendingCount) <= 0)
+					{
+						Presenter->PendingIngredientArrivalCounts.Remove(SpawnedCellIndex);
+						if (ASDayCellVisual* ArrivedCell = Presenter->GetCellVisual(SpawnedCellIndex))
+						{
+							ArrivedCell->RefreshVisual();
+						}
+					}
+				}
+			}
+		}),
+		1.0f / 60.0f,
+		true);
 }
 
 void ASDayBoardPresenter::PlayIngredientBinAnimation(const int32 BinIndex)
@@ -3150,11 +3335,15 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitTest(ScreenPosition)))
 	{
 #pragma region K2 moonyfli
-		const bool bSpawnSucceeded = Board->TrySpawnFromMotherPiece(Bin->IngredientId);
+		int32 SpawnedCellIndex = INDEX_NONE;
+		const bool bSpawnSucceeded = Board->TrySpawnFromMotherPieceWithResult(
+			Bin->IngredientId,
+			SpawnedCellIndex);
 		BP_OnIngredientBinClicked(Bin->BinIndex, Bin->IngredientId, bSpawnSucceeded);
 		if (bSpawnSucceeded)
 		{
 			PlayIngredientBinAnimation(Bin->BinIndex);
+			PlayIngredientSpawnFeedback(Bin, Bin->IngredientId, SpawnedCellIndex);
 		}
 #pragma endregion K2 moonyfli
 		RefreshFromLogic();
@@ -3827,6 +4016,65 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 			Property->SetObjectPropertyValue_InContainer(Object, Value);
 		}
 	};
+	auto InitializeFlyingItem = [&](UUserWidget* FlyingItem,
+		const FVector& ItemStart,
+		const FVector& ItemEnd,
+		const FVector& ItemControl,
+		const double Duration,
+		const double StartDelay,
+		const double MaxScale)
+	{
+		// WBP_FlyingItem already owns the author's Init function. Invoke that public contract so the
+		// Blueprint's assignments run exactly as authored instead of relying on member-name reflection.
+		if (UFunction* InitFunction = FlyingItem->FindFunction(TEXT("Init")))
+		{
+			FStructOnScope Parameters(InitFunction);
+			uint8* ParameterMemory = Parameters.GetStructMemory();
+			auto SetVectorParameter = [&](const FName Name, const FVector& Value)
+			{
+				if (FStructProperty* Property = FindFProperty<FStructProperty>(InitFunction, Name))
+				{
+					Property->CopyCompleteValue_InContainer(ParameterMemory, &Value);
+				}
+			};
+			auto SetNumberParameter = [&](const FName Name, const double Value)
+			{
+				if (FNumericProperty* Property = FindFProperty<FNumericProperty>(InitFunction, Name))
+				{
+					void* Storage = Property->ContainerPtrToValuePtr<void>(ParameterMemory);
+					Property->SetFloatingPointPropertyValue(Storage, Value);
+				}
+			};
+			auto SetObjectParameter = [&](const FName Name, UObject* Value)
+			{
+				if (FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(InitFunction, Name))
+				{
+					Property->SetObjectPropertyValue_InContainer(ParameterMemory, Value);
+				}
+			};
+
+			SetVectorParameter(TEXT("InStartPos"), ItemStart);
+			SetVectorParameter(TEXT("InEndPos"), ItemEnd);
+			SetVectorParameter(TEXT("InCtrlPos"), ItemControl);
+			SetNumberParameter(TEXT("InDuration"), Duration);
+			SetNumberParameter(TEXT("InStartDelay"), StartDelay);
+			SetNumberParameter(TEXT("InMaxScale"), MaxScale);
+			SetObjectParameter(TEXT("InPathCurve"), RevenueFlyPathCurve);
+			SetObjectParameter(TEXT("InScaleCurve"), RevenueFlyScaleCurve);
+			FlyingItem->ProcessEvent(InitFunction, ParameterMemory);
+			return;
+		}
+
+		// Compatibility fallback for an older/minimal flying-item Widget without Init.
+		SetVectorProperty(FlyingItem, TEXT("StartPos"), ItemStart);
+		SetVectorProperty(FlyingItem, TEXT("EndPos"), ItemEnd);
+		SetVectorProperty(FlyingItem, TEXT("CtrlPos"), ItemControl);
+		SetNumberProperty(FlyingItem, TEXT("Duration"), Duration);
+		SetNumberProperty(FlyingItem, TEXT("StartDelay"), StartDelay);
+		SetNumberProperty(FlyingItem, TEXT("MaxScale"), MaxScale);
+		SetObjectProperty(FlyingItem, TEXT("PathCurve"), RevenueFlyPathCurve);
+		SetObjectProperty(FlyingItem, TEXT("ScaleCurve"), RevenueFlyScaleCurve);
+	};
 
 	const int32 MinItemCount = FMath::Max(1, FMath::Min(RevenueFlyMinItemCount, RevenueFlyMaxItemCount));
 	const int32 MaxItemCount = FMath::Max(MinItemCount, FMath::Max(RevenueFlyMinItemCount, RevenueFlyMaxItemCount));
@@ -3848,14 +4096,14 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 
 		const FVector2D Jitter(FMath::FRandRange(-22.0f, 22.0f), FMath::FRandRange(-14.0f, 14.0f));
 		const FVector2D ItemStart = StartPosition + Jitter;
-		SetVectorProperty(FlyingItem, TEXT("StartPos"), FVector(ItemStart, 0.0f));
-		SetVectorProperty(FlyingItem, TEXT("EndPos"), FVector(EndPosition, 0.0f));
-		SetVectorProperty(FlyingItem, TEXT("CtrlPos"), FVector(ControlPosition + Jitter * 0.35f, 0.0f));
-		SetNumberProperty(FlyingItem, TEXT("Duration"), FMath::FRandRange(MinDuration, MaxDuration));
-		SetNumberProperty(FlyingItem, TEXT("StartDelay"), ItemIndex * FMath::Max(0.0f, RevenueFlyItemInterval));
-		SetNumberProperty(FlyingItem, TEXT("MaxScale"), FMath::FRandRange(MinScale, MaxScale));
-		SetObjectProperty(FlyingItem, TEXT("PathCurve"), RevenueFlyPathCurve);
-		SetObjectProperty(FlyingItem, TEXT("ScaleCurve"), RevenueFlyScaleCurve);
+		InitializeFlyingItem(
+			FlyingItem,
+			FVector(ItemStart, 0.0f),
+			FVector(EndPosition, 0.0f),
+			FVector(ControlPosition + Jitter * 0.35f, 0.0f),
+			FMath::FRandRange(MinDuration, MaxDuration),
+			ItemIndex * FMath::Max(0.0f, RevenueFlyItemInterval),
+			FMath::FRandRange(MinScale, MaxScale));
 
 		// Projection and placement now both use complete game-viewport coordinates.
 		FlyingItem->AddToViewport(150);
