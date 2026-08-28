@@ -180,6 +180,12 @@ void USChefGameInstance::Init()
 {
 	Super::Init();
 
+	// Production builds should never cover gameplay with AddOnScreenDebugMessage or
+	// engine warning overlays. Diagnostics remain available in the output log.
+	if (GEngine)
+	{
+		GEngine->Exec(nullptr, TEXT("DisableAllScreenMessages"));
+	}
 
 	if (SceneLoadingTexture.IsNull())
 	{
@@ -4652,10 +4658,10 @@ void ASFakeNightGateway::BeginPlay()
 	// The 3D day whitebox is opt-in per level: only a level that places a
 	// BP_SDayBoardPresenter switches to it, so the legacy debug sandbox stays untouched.
 	DayBoardPresenter = nullptr;
-	for (TActorIterator<ASDayBoardPresenter> It(GetWorld()); It; ++It)
+	TActorIterator<ASDayBoardPresenter> DayPresenterIt(GetWorld());
+	if (DayPresenterIt)
 	{
-		DayBoardPresenter = *It;
-		break;
+		DayBoardPresenter = *DayPresenterIt;
 	}
 
 	if (DayBoardPresenter)
@@ -4730,7 +4736,10 @@ void ASFakeNightGateway::BeginPlay()
 		}
 #pragma endregion K2 moonyfli
 
-		if (bShowDebugPanel || !DayBoardPresenter)
+				// The restaurant debug panel is development tooling only and must never be
+		// created by the playable restaurant flow, including Development APKs.
+		bShowDebugPanel = false;
+		if (bShowDebugPanel)
 		{
 			UClass* PanelClass = LoadClass<USDebugPanel>(
 				nullptr,
@@ -6464,7 +6473,8 @@ void ASChefGameMode::BeginPlay()
 		GetWorld()->SpawnActor<ASSpecialNpcDirector>();
 	}
 
-	for (TActorIterator<ASFakeNightGateway> It(GetWorld()); It; ++It)
+	TActorIterator<ASFakeNightGateway> ExistingGatewayIt(GetWorld());
+	if (ExistingGatewayIt)
 	{
 		return;
 	}
@@ -6538,11 +6548,8 @@ void ASDayWhiteboxGameMode::BeginPlay()
 	// Create the 3D presentation before Super spawns the gateway, so the gateway
 	// detects it and installs the day HUD instead of the legacy debug panel.
 	bool bHasPresenter = false;
-	for (TActorIterator<ASDayBoardPresenter> It(GetWorld()); It; ++It)
-	{
-		bHasPresenter = true;
-		break;
-	}
+	TActorIterator<ASDayBoardPresenter> ExistingPresenterIt(GetWorld());
+	bHasPresenter = !!ExistingPresenterIt;
 
 	if (!bHasPresenter)
 	{

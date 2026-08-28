@@ -23,6 +23,17 @@ void UNightFeelStubComponent::BeginPlay()
 
 	ApplyTuning(); //add by K2
 
+	// Production presentation never emits judgment/debug overlays. Force this after
+	// tuning is applied so legacy serialized tuning assets cannot turn them back on.
+	bLogJudge = false;
+	bLogHudLines = false;
+	if (GEngine)
+	{
+		GEngine->RemoveOnScreenDebugMessage(9911);
+		GEngine->RemoveOnScreenDebugMessage(9912);
+		GEngine->RemoveOnScreenDebugMessage(9913);
+	}
+
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
 	{
 		SetupInput(Cast<APlayerController>(Pawn->GetController()));
@@ -399,7 +410,7 @@ const TCHAR* UNightFeelStubComponent::GetInputHintText(bool bAttack) const
 // add by K2 (R1)
 void UNightFeelStubComponent::PushHudLine(int32 Key, float Duration, const FColor& Color, const FString& Msg) const
 {
-	if (GEngine)
+	if (bLogHudLines && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(Key, Duration, Color, Msg);
 	}
@@ -467,7 +478,7 @@ void UNightFeelStubComponent::PlayFailFeedback_Implementation(ENightJudgeOutcome
 void UNightFeelStubComponent::SetControlScheme_Implementation(ENightControlScheme Scheme)
 {
 	ControlScheme = Scheme;
-	if (GEngine)
+	if (bLogHudLines && GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			9913,

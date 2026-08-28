@@ -165,11 +165,11 @@ public:
 	int32 MaxBufferedInputs = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel|Debug")
-	bool bLogJudge = true;
+	bool bLogJudge = false;
 
 	/** add by K2 (R1)：屏显文字同时写日志（屏显变化太快看不清时用）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Feel|Debug")
-	bool bLogHudLines = true;
+	bool bLogHudLines = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Night|Feel|Debug")
 	ENightFeelPhase Phase = ENightFeelPhase::Idle;

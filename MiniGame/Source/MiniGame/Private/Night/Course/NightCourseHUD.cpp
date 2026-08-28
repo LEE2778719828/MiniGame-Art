@@ -119,6 +119,11 @@ ANightCourseHUD::ANightCourseHUD()
 void ANightCourseHUD::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Never let stale Blueprint defaults expose development overlays in a packaged build.
+	bShowDebugHud = false;
+	bShowTouchZones = false;
+
 	if (USChefGameInstance* GameInstance = GetGameInstance<USChefGameInstance>())
 	{
 		if (!SceneLoadingTexture.IsNull())
@@ -574,25 +579,35 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 
 		const float SafeDesignX = FMath::Max(1.f, HUDDesignSize.X);
 		const float SafeDesignY = FMath::Max(1.f, HUDDesignSize.Y);
+
+		// WBP_NightHUD_Multi is authored as a fixed 900x2000 canvas. Fill the actual
+		// game viewport in both axes so phones with a different aspect ratio do not
+		// leave black bands or let the slot and its fixed-size children disagree.
 		HUDCameraFitScale = FMath::Min(
 			GameViewportSize.X / SafeDesignX,
 			GameViewportSize.Y / SafeDesignY);
-		HUDCameraFrameSize = FVector2D(SafeDesignX, SafeDesignY) * HUDCameraFitScale;
-		HUDCameraFrameOffset = GameViewportOffset
-			+ (GameViewportSize - HUDCameraFrameSize) * 0.5f;
+		HUDCameraFrameSize = GameViewportSize;
+		HUDCameraFrameOffset = GameViewportOffset;
+		const FVector2D HUDCameraStretchScale(
+			GameViewportSize.X / SafeDesignX,
+			GameViewportSize.Y / SafeDesignY);
 
-		MainHUDWidget->SetRenderScale(FVector2D(1.f, 1.f));
-		MainHUDWidget->SetPositionInViewport(HUDCameraFrameOffset, false);
-		MainHUDWidget->SetDesiredSizeInViewport(HUDCameraFrameSize);
-		auto PlaceResultWidget = [this](UUserWidget* ResultWidget)
+		auto PlaceDesignedWidget = [this, HUDCameraStretchScale](UUserWidget* Widget)
 		{
-			if (!ResultWidget)
+			if (!Widget)
 			{
 				return;
 			}
-			ResultWidget->SetRenderScale(FVector2D(1.f, 1.f));
-			ResultWidget->SetPositionInViewport(HUDCameraFrameOffset, false);
-			ResultWidget->SetDesiredSizeInViewport(HUDCameraFrameSize);
+			Widget->SetAlignmentInViewport(FVector2D::ZeroVector);
+			Widget->SetDesiredSizeInViewport(HUDDesignSize);
+			Widget->SetRenderTransformPivot(FVector2D::ZeroVector);
+			Widget->SetRenderScale(HUDCameraStretchScale);
+			Widget->SetPositionInViewport(HUDCameraFrameOffset, false);
+		};
+		PlaceDesignedWidget(MainHUDWidget);
+		auto PlaceResultWidget = [&PlaceDesignedWidget](UUserWidget* ResultWidget)
+		{
+			PlaceDesignedWidget(ResultWidget);
 		};
 		PlaceResultWidget(SuccessResultWidget);
 		PlaceResultWidget(FailureResultWidget);

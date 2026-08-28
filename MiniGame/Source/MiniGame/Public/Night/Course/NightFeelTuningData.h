@@ -105,11 +105,11 @@ public:
 
 	// -------------------------------------------------------------------- 调试
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug 调试")
-	bool bLogJudge = true;
+	bool bLogJudge = false;
 
 	/** 屏显文字同时写日志（屏显一闪而过看不清时用）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug 调试")
-	bool bLogHudLines = true;
+	bool bLogHudLines = false;
 
 	/** 把本表的值套到运行中的 Feel 组件与主角上。Pawn 可为空（只套 Feel 部分）。 */
 	void ApplyTo(UNightFeelStubComponent& Feel, ANightCoursePawn* Pawn) const;

@@ -3486,11 +3486,7 @@ void USDayHUD::BuildWidgetTree()
 	UHorizontalBox* ToggleRow = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(),
 		TEXT("DayHudChromeRow"));
-#if UE_BUILD_SHIPPING
 	ToggleRow->SetVisibility(ESlateVisibility::Collapsed);
-#else
-	ToggleRow->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-#endif
 	Root->AddChildToVerticalBox(ToggleRow)->SetPadding(FMargin(8.0f, 6.0f, 8.0f, 0.0f));
 
 	USizeBox* ToggleSpacer = WidgetTree->ConstructWidget<USizeBox>(
@@ -3526,13 +3522,9 @@ void USDayHUD::BuildWidgetTree()
 	ChromeToggle->OnCheckStateChanged.AddDynamic(this, &USDayHUD::HandleChromeVisibilityChanged);
 
 	ControlsHost = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DayHUDControls"));
-#if UE_BUILD_SHIPPING
-	// The generated HUD chrome is a runtime debug/control surface. Keep the HUD alive for
-	// settlement presentation and foreground readouts, but never expose this surface in release builds.
+	// The generated HUD chrome is a runtime debug/control surface. Keep it disabled
+	// in every configuration; the foreground art HUD remains available.
 	ControlsHost->SetVisibility(ESlateVisibility::Collapsed);
-#else
-	ControlsHost->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-#endif
 	UVerticalBoxSlot* ControlsSlot = Root->AddChildToVerticalBox(ControlsHost);
 	ControlsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 #pragma endregion K2 moonyfli
@@ -4175,8 +4167,8 @@ void USDayHUD::ApplyChromeVisibility(const bool bShow)
 {
 	if (ControlsHost)
 	{
-		ControlsHost->SetVisibility(
-			bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		(void)bShow;
+		ControlsHost->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	if (!bShow && CheatPanel)
@@ -4187,26 +4179,7 @@ void USDayHUD::ApplyChromeVisibility(const bool bShow)
 
 void USDayHUD::HandleToggleCheatPanel()
 {
-#if UE_BUILD_SHIPPING
-	return;
-#else
-	if (!CheatPanel)
-	{
-		CheatPanel = CreateWidget<USDayCheatPanel>(this, USDayCheatPanel::StaticClass());
-		if (CheatPanel)
-		{
-			// Full-screen overlay; the movable frame is a canvas child inside it.
-			CheatPanel->AddToViewport(120);
-			CheatPanel->SetPanelVisible(true);
-			return;
-		}
-	}
-	if (CheatPanel)
-	{
-		const bool bShow = CheatPanel->GetVisibility() == ESlateVisibility::Collapsed;
-		CheatPanel->SetPanelVisible(bShow);
-	}
-#endif
+	// Disabled in all configurations; retained for Blueprint/API compatibility.
 }
 
 void USDayCheatPanel::SetPanelVisible(const bool bVisible)
