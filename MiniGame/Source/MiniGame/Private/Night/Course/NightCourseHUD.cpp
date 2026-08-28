@@ -431,6 +431,52 @@ void ANightCourseHUD::ApplySuccessIngredientCounts(const FNightResult& Result)
 	}
 }
 
+#pragma region K2 moonyfli
+void ANightCourseHUD::ApplyResultMaxCombo(UUserWidget* ResultWidget, const int32 MaxCombo)
+{
+	if (!ResultWidget || ResultComboTextWidgetName.IsNone())
+	{
+		return;
+	}
+
+	UWidget* Target = ResultWidget->GetWidgetFromName(ResultComboTextWidgetName);
+	if (!Target)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightHUD] Result widget '%s' is missing combo text '%s'."),
+			*ResultWidget->GetName(),
+			*ResultComboTextWidgetName.ToString());
+		return;
+	}
+
+	const FText ComboText = FText::AsNumber(FMath::Max(0, MaxCombo));
+	if (UTextBlock* TextBlock = Cast<UTextBlock>(Target))
+	{
+		TextBlock->SetText(ComboText);
+	}
+	else if (URichTextBlock* RichTextBlock = Cast<URichTextBlock>(Target))
+	{
+		RichTextBlock->SetText(ComboText);
+	}
+	else if (UEditableTextBox* EditableTextBox = Cast<UEditableTextBox>(Target))
+	{
+		EditableTextBox->SetIsReadOnly(true);
+		EditableTextBox->SetText(ComboText);
+	}
+	else
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightHUD] Combo widget '%s' has unsupported class '%s'."),
+			*ResultComboTextWidgetName.ToString(),
+			*Target->GetClass()->GetName());
+	}
+}
+#pragma endregion K2 moonyfli
+
 void ANightCourseHUD::SetResultInputMode(UUserWidget* ActiveResultWidget)
 {
 	APlayerController* PC = GetOwningPlayerController();
@@ -463,6 +509,7 @@ bool ANightCourseHUD::PresentNightResult(const FNightResult& Result)
 	{
 		ApplySuccessIngredientCounts(Result);
 	}
+	ApplyResultMaxCombo(bSucceeded ? SuccessResultWidget.Get() : FailureResultWidget.Get(), Result.MaxCombo);
 	UpdateMainHUDPlacement();
 
 	if (SuccessResultWidget)

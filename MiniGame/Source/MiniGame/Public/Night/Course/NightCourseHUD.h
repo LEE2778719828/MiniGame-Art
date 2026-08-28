@@ -165,6 +165,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
 	FString SuccessIngredientCountFormat = TEXT("{0}");
 
+#pragma region K2 moonyfli
+	/** WBP_Success / WBP_Failed widget that shows peak slash combo. Art still has a placeholder 60. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
+	FName ResultComboTextWidgetName = TEXT("EditableTextBox_1");
+#pragma endregion K2 moonyfli
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result", meta = (ClampMin = "0"))
 	int32 ResultWidgetZOrder = 100;
 
@@ -365,6 +371,7 @@ private:
 	void EnsureResultWidgets();
 	void ConfigureResultWidget(UUserWidget* ResultWidget, FName ContinueButtonName);
 	void ApplySuccessIngredientCounts(const FNightResult& Result);
+	void ApplyResultMaxCombo(UUserWidget* ResultWidget, int32 MaxCombo); //add by K2
 	void SetResultInputMode(UUserWidget* ActiveResultWidget);
 	void UpdateMainHUDPlacement();
 	void PushSoulToHealthBar(float Soul);
