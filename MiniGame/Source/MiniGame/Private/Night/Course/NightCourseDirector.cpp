@@ -74,6 +74,30 @@ FNightG1DebugSettings UNightCourseDirector::GetDebug() const
 	return FNightG1DebugSettings();
 }
 
+bool UNightCourseDirector::IsForkEnabledForActiveCourse() const
+{
+	return ActiveBootstrap.bUseCourseQueueOverride
+		? ActiveBootstrap.bEnableForkOverride
+		: (Config && Config->bEnableFork);
+}
+
+int32 UNightCourseDirector::ResolveMainRouteAtomCount(const int32 AuthoredCount) const
+{
+	return ActiveBootstrap.bUseCourseQueueOverride
+		&& ActiveBootstrap.MainRouteAtomCountOverride > 0
+		? ActiveBootstrap.MainRouteAtomCountOverride
+		: AuthoredCount;
+}
+
+int32 UNightCourseDirector::ResolveForkRouteAtomCount(const int32 AuthoredCount) const
+{
+	return ActiveBootstrap.bUseCourseQueueOverride
+		&& ActiveBootstrap.bEnableForkOverride
+		&& ActiveBootstrap.ForkRouteAtomCountOverride > 0
+		? ActiveBootstrap.ForkRouteAtomCountOverride
+		: AuthoredCount;
+}
+
 void UNightCourseDirector::SetPhase(ENightCoursePhase NewPhase)
 {
 	if (Phase == NewPhase)
@@ -1224,7 +1248,9 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			TEXT("[NightCourse][Stage=Compose] Canonical CourseRuleData is missing or disabled."));
 		return false;
 	}
-	const float CourseStartZ = Config->TrackOrigin.Z;
+	// Course handoff anchors are intentionally planar. Atom exits only carry XY;
+	// every atom entry/exit used to connect the next atom is pinned to Z=0.
+	const float CourseStartZ = 0.f;
 	const bool bRuntimeBuildContext = bBuildingRuntimeCourse || bRunning;
 	const ENightRouteId BuildRoute = CurrentRoute != ENightRouteId::None
 		? CurrentRoute
@@ -1278,19 +1304,22 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 
 	const int32 AuthoredBaseAtomCount = bGenerateAllAtomsForTesting
 		? DefaultRouteQueue->Atoms.Num()
-		: (DefaultRouteQueue->TargetAtomCount > 0
-			? DefaultRouteQueue->TargetAtomCount
-			: DefaultRouteQueue->Atoms.Num());
+		: ResolveMainRouteAtomCount(
+			DefaultRouteQueue->TargetAtomCount > 0
+				? DefaultRouteQueue->TargetAtomCount
+				: DefaultRouteQueue->Atoms.Num());
 	// RouteModes is the authoritative source for the selected pre-fork route
 	// length. Keep the CourseConfig override only as a legacy level fallback.
 	const int32 ForkIndex = bGenerateAllAtomsForTesting
 		? AuthoredBaseAtomCount
-		: (Config->ForkAfterBaseAtomIndex != INDEX_NONE
-			? Config->ForkAfterBaseAtomIndex
-			: AuthoredBaseAtomCount);
+		: (ActiveBootstrap.bUseCourseQueueOverride
+			? AuthoredBaseAtomCount
+			: (Config->ForkAfterBaseAtomIndex != INDEX_NONE
+				? Config->ForkAfterBaseAtomIndex
+				: AuthoredBaseAtomCount));
 	const bool bUsesForkBase =
 		BuildRoute != ENightRouteId::None
-		|| (Config->bEnableFork && ForkIndex != INDEX_NONE);
+		|| (IsForkEnabledForActiveCourse() && ForkIndex != INDEX_NONE);
 	if (bUsesForkBase
 		&& (ForkIndex <= 0 || ForkIndex > AuthoredBaseAtomCount))
 	{
@@ -1436,9 +1465,10 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		}
 		const int32 BranchAtomCount = bGenerateAllAtomsForTesting
 			? BranchQueue->Atoms.Num()
-			: (BranchQueue->TargetAtomCount > 0
-				? BranchQueue->TargetAtomCount
-				: BranchQueue->Atoms.Num());
+			: ResolveForkRouteAtomCount(
+				BranchQueue->TargetAtomCount > 0
+					? BranchQueue->TargetAtomCount
+					: BranchQueue->Atoms.Num());
 		if (BranchAtomCount <= 0)
 		{
 			UE_LOG(
@@ -1530,7 +1560,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 	int32 PreviousLastStoneIndex = INDEX_NONE;
 	bool bFirstAtom = true;
 	const bool bForkRouteEnabled =
-		Config->bEnableFork && Rule->BranchRoutes.Num() > 0;
+		IsForkEnabledForActiveCourse() && Rule->BranchRoutes.Num() > 0;
 	const ENightForkPair BuildForkPair = bRuntimeBuildContext
 		? ActiveForkPair
 		: Config->PreviewForkPair;
@@ -1936,6 +1966,9 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		const bool bBypassLayoutBoundsForBranch =
 			bIsForkConnector;
 		FTransform TargetEntry = InitialEntry;
+		FVector TargetEntryLocation = TargetEntry.GetLocation();
+		TargetEntryLocation.Z = CourseStartZ;
+		TargetEntry.SetLocation(TargetEntryLocation);
 		if (!bFirstAtom)
 		{
 			if (bIsForkConnector)
@@ -2014,13 +2047,11 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 
 		FTransform LocalEntry = AtomSource->GetEntryAnchorTransform();
 		const FTransform LocalExit = AtomSource->GetExitAnchorTransform();
-		if (BuildRoute != ENightRouteId::None
-			&& AtomSlotIndex >= GeneratedBaseAtomCount)
-		{
-			FVector BranchEntryLocation = TargetEntry.GetLocation();
-			BranchEntryLocation.Z = CourseStartZ;
-			TargetEntry.SetLocation(BranchEntryLocation);
-		}
+		// Normalize after every route/fork offset so no authored exit can leak
+		// a Z value into the next atom's entry anchor.
+		TargetEntryLocation = TargetEntry.GetLocation();
+		TargetEntryLocation.Z = CourseStartZ;
+		TargetEntry.SetLocation(TargetEntryLocation);
 		const FTransform BaseAtomWorld = NightCourseAtom_Private::MakeAtomWorldTransform(
 			TargetEntry,
 			LocalEntry);
@@ -2262,9 +2293,12 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 
 		if (!bIsForkConnector)
 		{
+			FVector PlanarExitLocation =
+				AtomWorld.TransformPosition(LocalExit.GetLocation());
+			PlanarExitLocation.Z = CourseStartZ;
 			PreviousExit = FTransform(
 				AtomWorld.TransformRotation(LocalExit.GetRotation()),
-				AtomWorld.TransformPosition(LocalExit.GetLocation()),
+				PlanarExitLocation,
 				FVector::OneVector);
 			PreviousLastStoneIndex = OutStones.Num() - 1;
 			bFirstAtom = false;
@@ -2283,9 +2317,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				ForkWorld.TransformPosition(ForkLocalEntry.GetLocation()).Y;
 			ForkWorld.AddToTranslation(
 				FVector(0.f, -ForkEntryYBeforeReset, 0.f));
-			FVector ForkLocation = ForkWorld.GetLocation();
-			ForkLocation.Z = CourseStartZ;
-			ForkWorld.SetLocation(ForkLocation);
+
 			UE_LOG(
 				LogTemp,
 				Display,
@@ -2295,7 +2327,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 			UE_LOG(
 				LogTemp,
 				Display,
-				TEXT("[NightCourse][Stage=ForkAtom] pair=%d forced world Z to course start %.2fcm."),
+				TEXT("[NightCourse][Stage=ForkAtom] pair=%d kept entry anchor Z at course start %.2fcm."),
 				static_cast<int32>(BuildForkPair),
 				CourseStartZ);
 			UE_LOG(
@@ -3948,8 +3980,8 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 		}
 	}
 
-	const int32 BaseRouteLength =
-		Config->CourseRuleData->GetRouteModeLength(ActiveDefaultRoute);
+	const int32 BaseRouteLength = ResolveMainRouteAtomCount(
+		Config->CourseRuleData->GetRouteModeLength(ActiveDefaultRoute));
 	if (BaseRouteLength <= 0)
 	{
 		OutError = FString::Printf(
@@ -3959,9 +3991,11 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 	}
 	// RouteModes.TargetAtomCount is authoritative. The CourseConfig field is
 	// retained only as a legacy fallback for old level instances.
-	const int32 ForkIndex = Config->ForkAfterBaseAtomIndex != INDEX_NONE
-		? Config->ForkAfterBaseAtomIndex
-		: BaseRouteLength;
+	const int32 ForkIndex = ActiveBootstrap.bUseCourseQueueOverride
+		? BaseRouteLength
+		: (Config->ForkAfterBaseAtomIndex != INDEX_NONE
+			? Config->ForkAfterBaseAtomIndex
+			: BaseRouteLength);
 	if (ForkIndex != INDEX_NONE
 		&& (ForkIndex <= 0 || ForkIndex > BaseRouteLength))
 	{
@@ -3971,14 +4005,14 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 			BaseRouteLength);
 		return FailValidation();
 	}
-	if (Config->bEnableFork
+	if (IsForkEnabledForActiveCourse()
 		&& ForkIndex != INDEX_NONE
 		&& Config->CourseRuleData->BranchRoutes.Num() == 0)
 	{
 		OutError = TEXT("ForkAfterBaseAtomIndex is set but no branch Atom queues are authored.");
 		return FailValidation();
 	}
-	if (Config->bEnableFork && Config->CourseRuleData->BranchRoutes.Num() > 0)
+	if (IsForkEnabledForActiveCourse() && Config->CourseRuleData->BranchRoutes.Num() > 0)
 	{
 		if (ForkIndex == INDEX_NONE)
 		{
@@ -4007,7 +4041,7 @@ bool UNightCourseDirector::ValidateConfiguration(FString& OutError) const
 
 	const bool bRuleBranch =
 		Config->CourseRuleData->BranchRoutes.Num() > 0;
-	if (Config->bEnableFork && bRuleBranch)
+	if (IsForkEnabledForActiveCourse() && bRuleBranch)
 	{
 		if (!Config->RouteRules)
 		{
@@ -4226,7 +4260,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 		RightRoute,
 		bForcedAB);
 	bForkPending = false;
-	if (Config->bEnableFork
+	if (IsForkEnabledForActiveCourse()
 		&& Config->CourseRuleData->BranchRoutes.Num() > 0)
 	{
 		bForkPending = true;
@@ -4861,9 +4895,10 @@ FString UNightCourseDirector::GetForkHintText() const
 			if (const FNightRuleAtomQueue* Queue =
 				Config->CourseRuleData->BranchRoutes.Find(RouteId))
 			{
-				return Queue->TargetAtomCount > 0
-					? Queue->TargetAtomCount
-					: Queue->Atoms.Num();
+				return ResolveForkRouteAtomCount(
+					Queue->TargetAtomCount > 0
+						? Queue->TargetAtomCount
+						: Queue->Atoms.Num());
 			}
 		}
 		return 0;

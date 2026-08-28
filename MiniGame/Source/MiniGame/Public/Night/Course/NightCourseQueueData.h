@@ -1,0 +1,43 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+#include "Night/Shared/NightSharedTypes.h"
+#include "NightCourseQueueData.generated.h"
+
+/** One authored NightCourse selection in the Day -> Night queue. */
+USTRUCT(BlueprintType)
+struct FNightCourseQueueEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue")
+	ENightRouteId MainRoute = ENightRouteId::A;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue", meta = (ClampMin = "1"))
+	int32 MainRouteAtomCount = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue")
+	bool bEnableFork = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue", meta = (EditCondition = "bEnableFork"))
+	ENightForkPair ForkPair = ENightForkPair::AB;
+
+	/** Applied symmetrically to either player-selected route in the configured fork pair. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue", meta = (EditCondition = "bEnableFork", ClampMin = "1"))
+	int32 ForkRouteAtomCount = 30;
+};
+
+/** Ordered Day -> Night course plans. Entries loop by default so a completed list remains playable. */
+UCLASS(BlueprintType, meta = (DisplayName = "Night Course Queue"))
+class MINIGAME_API UNightCourseQueueData : public UPrimaryDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue")
+	TArray<FNightCourseQueueEntry> Entries;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue")
+	bool bLoop = true;
+};

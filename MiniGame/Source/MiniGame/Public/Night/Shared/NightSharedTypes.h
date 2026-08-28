@@ -145,6 +145,23 @@ struct FNightBootstrap
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night", meta = (DisplayName = "岔路组合", ToolTip = "Day 传入的特殊岔路组合：AB、AC 或 BC；默认 AB。"))
 	ENightForkPair ForkPair = ENightForkPair::AB;
 
+	/** When true, this Night uses a queue entry instead of the CourseConfig's fork/count defaults. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course Queue")
+	bool bUseCourseQueueOverride = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course Queue", meta = (EditCondition = "bUseCourseQueueOverride"))
+	bool bEnableForkOverride = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course Queue", meta = (EditCondition = "bUseCourseQueueOverride", ClampMin = "1"))
+	int32 MainRouteAtomCountOverride = INDEX_NONE;
+
+	/** Applied to both selectable routes of the active fork pair. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Course Queue", meta = (EditCondition = "bUseCourseQueueOverride && bEnableForkOverride", ClampMin = "1"))
+	int32 ForkRouteAtomCountOverride = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Course Queue")
+	int32 CourseQueueIndex = INDEX_NONE;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night", meta = (DisplayName = "Gift效果状态", ToolTip = "Day 传入的 Gift/Buff 状态；通常由 Day 流程自动填写。"))
 	FGiftBuffState GiftBuffs;
 

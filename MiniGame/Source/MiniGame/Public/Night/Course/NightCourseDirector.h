@@ -406,6 +406,9 @@ protected:
 
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
+	bool IsForkEnabledForActiveCourse() const;
+	int32 ResolveMainRouteAtomCount(int32 AuthoredCount) const;
+	int32 ResolveForkRouteAtomCount(int32 AuthoredCount) const;
 	void SetPhase(ENightCoursePhase NewPhase);
 	void EmitDebugMessage(const FString& Message, bool bIsError);
 	void FinishNight(const FNightResult& Result);

@@ -80,6 +80,8 @@ ANightCourseHUD::ANightCourseHUD()
 	SuccessIngredientTextWidgetNames.Add(EIngredientId::F05_XuanYuQin, TEXT("5"));
 	IngredientIconTable = TSoftObjectPtr<UDataTable>(
 		FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Ingredients.DT_Ingredients"))); //add by K2
+	StartScreenTexture = TSoftObjectPtr<UTexture2D>(
+		FSoftObjectPath(TEXT("/Game/Night/Course/UI/T_NightCourseStartScreen.T_NightCourseStartScreen")));
 
 #pragma region K2 moonyfli
 	auto MakeSfx = [](const TCHAR* Path)
@@ -124,7 +126,44 @@ void ANightCourseHUD::BeginPlay()
 			GameInstance->RegisterSceneLoadingTexture(SceneLoadingTexture);
 		}
 	}
+	if (bShowStartScreenOnBeginPlay && !StartScreenTexture.IsNull())
+	{
+		// Prime the opening art before the first frame. The asset is a soft reference so a
+		// missing unsaved import simply leaves the normal HUD path intact.
+		StartScreenTexture.LoadSynchronous();
+	}
 	EnsureMainHUD();
+}
+
+
+bool ANightCourseHUD::IsStartScreenVisible() const
+{
+	return bShowStartScreenOnBeginPlay && !bStartScreenDismissed && StartScreenTexture.Get() != nullptr;
+}
+
+void ANightCourseHUD::DismissStartScreen()
+{
+	if (!IsStartScreenVisible())
+	{
+		return;
+	}
+
+	bStartScreenDismissed = true;
+	if (MainHUDWidget && !bNightResultVisible)
+	{
+		MainHUDWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
+}
+
+bool ANightCourseHUD::DismissStartScreenIfVisible()
+{
+	if (!IsStartScreenVisible())
+	{
+		return false;
+	}
+
+	DismissStartScreen();
+	return true;
 }
 
 void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -477,7 +516,10 @@ void ANightCourseHUD::HideNightResult()
 		{
 			EmbeddedFailure->SetVisibility(ESlateVisibility::Collapsed);
 		}
-		MainHUDWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		MainHUDWidget->SetVisibility(
+			IsStartScreenVisible()
+				? ESlateVisibility::Collapsed
+				: ESlateVisibility::SelfHitTestInvisible);
 	}
 	SetResultInputMode(nullptr);
 	bNightResultVisible = false;
@@ -673,6 +715,26 @@ void ANightCourseHUD::DrawHUD()
 
 	const float W = Canvas->SizeX;
 	const float H = Canvas->SizeY;
+	if (IsStartScreenVisible())
+	{
+		if (UTexture2D* StartTexture = StartScreenTexture.Get())
+		{
+			// The supplied art is authored at 9:20. Fit its height and center it in wider
+			// PC windows, preserving the same portrait frame used on Android.
+			const float FitScale = H / FMath::Max(1.f, HUDDesignSize.Y);
+			const float DrawWidth = HUDDesignSize.X * FitScale;
+			const float DrawX = (W - DrawWidth) * 0.5f;
+			Canvas->K2_DrawTexture(
+				StartTexture,
+				FVector2D(DrawX, 0.f),
+				FVector2D(DrawWidth, H),
+				FVector2D::ZeroVector,
+				FVector2D::UnitVector,
+				FLinearColor::White,
+				BLEND_Translucent);
+		}
+	}
+
 	ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwningPawn());
 	UNightCourseDirector* Director = CoursePawn
 		? CoursePawn->GetCourseDirector()

@@ -196,6 +196,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|HUD")
 	UUserWidget* GetMainHUDWidget() const { return MainHUDWidget; }
 
+	/** Whether the optional parkour start-screen overlay is currently shown. */
+	UFUNCTION(BlueprintPure, Category = "Night|HUD|Start Screen")
+	bool IsStartScreenVisible() const;
+
+	/** Hide the parkour start-screen overlay. Safe to call from Blueprint or C++. */
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|Start Screen")
+	void DismissStartScreen();
+
+	/** Called by gameplay input so the first key/touch dismisses the overlay. */
+	bool DismissStartScreenIfVisible();
+
 	/** Blueprint presentation hook: bind result text, play animation, focus the result button, etc. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Night|HUD|Result", meta = (DisplayName = "On Night Result Ready"))
 	void BP_OnNightResultReady(const FNightResult& Result);
@@ -295,6 +306,18 @@ private:
 	/** Main parkour widget: /Game/Night/Course/Blueprints/WBP_NightHUD_Multi. */
 	UPROPERTY(EditAnywhere, Category = "Night|HUD")
 	TSubclassOf<UUserWidget> MainHUDWidgetClass;
+
+	/** 20:9 opening artwork shown over the parkour HUD until the first input. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Start Screen", meta = (AllowPrivateAccess = "true"))
+	TSoftObjectPtr<UTexture2D> StartScreenTexture;
+
+	/** Show the opening artwork when this HUD begins play. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Start Screen", meta = (AllowPrivateAccess = "true"))
+	bool bShowStartScreenOnBeginPlay = true;
+
+	/** Hide the opening artwork after the first key/touch. */
+	UPROPERTY(Transient)
+	bool bStartScreenDismissed = false;
 
 	/** Authored size of the bar inside the WBP: SetHealth pins the fill to x = FullBarWidth. */
 	UPROPERTY(EditAnywhere, Category = "Night|HUD")

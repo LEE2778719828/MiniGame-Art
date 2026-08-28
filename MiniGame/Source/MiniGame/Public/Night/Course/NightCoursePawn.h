@@ -330,6 +330,7 @@ public:
 protected:
 	void OnJumpPressed(const FInputActionValue& Value);
 	void OnAttackPressed(const FInputActionValue& Value);
+	void OnAnyKeyPressed(FKey Key);
 	void OnHudPointerPressed();
 	void OnHudTouchPressed(const ETouchIndex::Type FingerIndex, const FVector Location);
 	void TryResolveHudPointer(float ScreenX, float ScreenY);

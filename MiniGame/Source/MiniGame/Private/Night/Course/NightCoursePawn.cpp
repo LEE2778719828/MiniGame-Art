@@ -897,8 +897,43 @@ void ANightCoursePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	// add by K2 (R1): pads are Canvas rects, not widgets, so Enhanced Input cannot hit-test them.
 	// Mouse (PIE) and Touch (device) share the same classify path. Q/E stay on the mapping context.
 	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANightCoursePawn::OnHudPointerPressed);
+	
+PlayerInputComponent->BindKey(EKeys::AnyKey, IE_Pressed, this, &ANightCoursePawn::OnAnyKeyPressed);
 	PlayerInputComponent->BindTouch(IE_Pressed, this, &ANightCoursePawn::OnHudTouchPressed);
 }
+
+void ANightCoursePawn::OnAnyKeyPressed(FKey Key)
+{
+	
+(void)Key;
+	// Q/E and the mouse button also drive gameplay handlers; let those handlers dismiss first
+	// so the opening input is not accidentally consumed as a jump, attack, or pad press.
+	if (Key == EKeys::Q || Key == EKeys::E || Key == EKeys::LeftMouseButton)
+	{
+		return;
+	}
+	
+if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	
+{
+	
+	
+if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+	
+	
+{
+	
+	
+	
+NightHUD->DismissStartScreenIfVisible();
+	
+	
+}
+	
+}
+
+}
+
 
 void ANightCoursePawn::OnHudPointerPressed()
 {
@@ -941,6 +976,15 @@ void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
 	PC->GetViewportSize(ViewX, ViewY);
 
 	ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD());
+	
+if (NightHUD && NightHUD->DismissStartScreenIfVisible())
+	
+{
+	
+	
+return;
+	
+}
 	ENightFeelInput Input = ENightFeelInput::Jump;
 	if (!NightHUD
 		|| !NightHUD->HitTestActionButtons(
@@ -1029,6 +1073,38 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 {
 	(void)Value;
+	
+if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	
+{
+	
+	
+if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+	
+	
+{
+	
+	
+	
+if (NightHUD->DismissStartScreenIfVisible())
+	
+	
+	
+{
+	
+	
+	
+	
+return;
+	
+	
+	
+}
+	
+	
+}
+	
+}
 	if (CourseDirector && CourseDirector->IsForkChoiceActive())
 	{
 		CourseDirector->ChooseForkLeft();
@@ -1044,6 +1120,38 @@ void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
+	
+if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	
+{
+	
+	
+if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+	
+	
+{
+	
+	
+	
+if (NightHUD->DismissStartScreenIfVisible())
+	
+	
+	
+{
+	
+	
+	
+	
+return;
+	
+	
+	
+}
+	
+	
+}
+	
+}
 
 	// LeftMouseButton is still mapped to IA_NightAttack in IMC_NightCourse. The HUD pads own the
 	// mouse now, so swallow that chord here and let OnHudPointerPressed classify the click;
