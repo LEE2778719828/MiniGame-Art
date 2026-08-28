@@ -113,8 +113,41 @@ struct FSGameStageRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 CustomerConcurrentMax = 2;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Customers",
+		meta = (
+			ClampMin = "0.1",
+			UIMin = "0.1",
+			DisplayName = "Customer Spawn Interval"
+		)
+	)
 	float CustomerSpawnInterval = 7.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Orders",
+		meta = (
+			ClampMin = "0",
+			UIMin = "0",
+			DisplayName = "Minimum Planned Order Count"
+		)
+	)
+	int32 MinPlannedOrderCount = 0;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Orders",
+		meta = (
+			ClampMin = "0",
+			UIMin = "0",
+			DisplayName = "Maximum Planned Order Count"
+		)
+	)
+	int32 MaxPlannedOrderCount = 0;
 
 #pragma region K2 moonyfli
 	/**
@@ -1093,7 +1126,6 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	float CustomerSpawnIntervalSeconds = 7.0f;
-
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	int32 CustomerConcurrentMax = 4;
 
@@ -1253,6 +1285,7 @@ private:
 	void CaptureProfileToSave(USChefSaveGame& SaveObject) const;
 	bool ApplyProfileFromSave(const USChefSaveGame& SaveObject);
 	bool AutoSaveChefProfile(const FString& Reason);
+	int32 GetSafeCarryOverTargetBonusPerUnit() const;
 };
 
 /** Blueprint-facing settlement base: Blueprint owns art; C++ owns safe actions. */

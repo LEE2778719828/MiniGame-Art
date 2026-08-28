@@ -180,7 +180,7 @@ void USChefGameInstance::Init()
 {
 	Super::Init();
 
-	
+
 	if (SceneLoadingTexture.IsNull())
 	{
 		SceneLoadingTexture = TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/UI/Loading/T_LoadingScene_20x9.T_LoadingScene_20x9")));
@@ -777,13 +777,14 @@ namespace
 
 	int32 MaxSellableValueForStock(
 		const TMap<FName, int32>& Stock,
-		const TFunctionRef<int32(FName, int32)>& SellOf)
+		const TFunctionRef<int32(FName, int32)>& SellOf,
+		const int32 DishLevelCap = MaxDishLevel)
 	{
 		int32 Total = 0;
 		for (const TPair<FName, int32>& Pair : Stock)
 		{
 			int32 Units = FMath::Max(0, Pair.Value);
-			for (int32 Level = MaxDishLevel; Level >= 0; --Level)
+			for (int32 Level = FMath::Clamp(DishLevelCap, 0, MaxDishLevel); Level >= 0; --Level)
 			{
 				const int32 Cost = OrderUnitCost(Level);
 				const int32 Count = Units / Cost;
@@ -824,7 +825,8 @@ namespace
 		const TArray<FSPlannedOrder>& Orders,
 		const TMap<FName, int32>& StartingStock,
 		const int32 EffectiveTarget,
-		FString& OutReason)
+		FString& OutReason,
+		const bool bRequireMixedLevels = true)
 	{
 		TMap<FName, int32> Remaining = StartingStock;
 		int32 TotalValue = 0;
@@ -869,7 +871,7 @@ namespace
 			OutReason = FString::Printf(TEXT("value %d < target %d"), TotalValue, EffectiveTarget);
 			return false;
 		}
-		if (Orders.Num() >= 3 && CanMixLevelsWithStock(StartingStock) && Levels.Num() < 2)
+		if (bRequireMixedLevels && Orders.Num() >= 3 && CanMixLevelsWithStock(StartingStock) && Levels.Num() < 2)
 		{
 			OutReason = TEXT("all orders share one level");
 			return false;
@@ -891,24 +893,46 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 	};
 
 	const int32 MaxValue = MaxSellableValueForStock(StartingStock, SellOf);
-	int32 EffectiveTarget = RevenueTarget;
-	if (MaxValue < RevenueTarget)
+	const int32 EffectiveTarget = FMath::Max(0, RevenueTarget);
+	if (MaxValue < EffectiveTarget)
 	{
 		UE_LOG(
 			LogSSandbox,
-			Warning,
-			TEXT("Day order plan: max sellable %d < target %d, clamping effective target."),
+			Error,
+			TEXT("Day order plan is impossible: max sellable %d < target %d."),
 			MaxValue,
-			RevenueTarget);
-		EffectiveTarget = MaxValue;
+			EffectiveTarget);
 	}
 
 	const FSDayBalanceRow Balance = GetDayBalance();
 	const int32 DishCap = FMath::Clamp(Balance.MaxDishLevel, 0, MaxDishLevel);
-	const int32 MinimumAppearanceSlots = FMath::Max(1, Balance.MinPlannedOrderSlots);
+
+	const int32 ConfiguredMinOrders =
+    ActiveStageRow.MinPlannedOrderCount > 0
+        ? ActiveStageRow.MinPlannedOrderCount
+        : Balance.MinPlannedOrderSlots;
+
+	const int32 ConfiguredMaxOrders =
+		ActiveStageRow.MaxPlannedOrderCount > 0
+			? ActiveStageRow.MaxPlannedOrderCount
+			: ConfiguredMinOrders;
+
+	const int32 MinimumAppearanceSlots = FMath::Max(1, ConfiguredMinOrders);
+
+	const int32 MaximumAppearanceSlots = FMath::Max(
+		MinimumAppearanceSlots,
+		ConfiguredMaxOrders
+	);
 	const TArray<FName> NpcIds = ParseGuaranteedNpcIds(
 		ActiveStageRow.GuaranteedNpcRules,
 		GetConfiguredSpecialNpcIds());
+	const int32 NpcPlacementMinimumSlots = FMath::Max(1, NpcIds.Num() * 2 - 1);
+	const int32 GuaranteedMinimumAppearanceSlots = FMath::Max(
+		MinimumAppearanceSlots,
+		NpcPlacementMinimumSlots);
+	const int32 GuaranteedMaximumAppearanceSlots = FMath::Max(
+		MaximumAppearanceSlots,
+		GuaranteedMinimumAppearanceSlots);
 	const uint32 StageHash = GetTypeHash(StageId) ^ GetTypeHash(ActiveStageRow.CustomerConfigId);
 	bool bAccepted = false;
 	FString FailReason;
@@ -916,6 +940,12 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 	for (int32 Attempt = 0; Attempt < 24; ++Attempt)
 	{
 		FRandomStream Stream(ReviewSeed ^ StageHash ^ (Attempt * 9973));
+
+		const int32 DesiredAppearanceSlots = Stream.RandRange(
+			GuaranteedMinimumAppearanceSlots,
+			GuaranteedMaximumAppearanceSlots
+		);
+
 		TMap<FName, int32> Remaining = StartingStock;
 		TArray<FSPlannedOrder> NpcSlots;
 		TArray<FSPlannedOrder> GuestSlots;
@@ -996,13 +1026,24 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 			continue;
 		}
 
+		const int32 AttemptMaxValue = SumValue + MaxSellableValueForStock(Remaining, SellOf, DishCap);
+		if (AttemptMaxValue < EffectiveTarget)
+		{
+			FailReason = TEXT("target unreachable after mandatory NPC orders");
+			continue;
+		}
+
 		// Keep a small reserve behind the visible seats so an independently freed
 		// seat can demonstrate automatic replenishment without waiting for a new batch.
 		int32 Guard = 0;
-		while ((SumValue < EffectiveTarget
-			|| GuestSlots.Num() + NpcSlots.Num() < MinimumAppearanceSlots)
-			&& Guard++ < 64)
-		{
+		while (
+			(
+				SumValue < EffectiveTarget
+				|| GuestSlots.Num() + NpcSlots.Num() < DesiredAppearanceSlots
+			)
+			&& GuestSlots.Num() + NpcSlots.Num() < GuaranteedMaximumAppearanceSlots
+			&& Guard++ < 64
+		) {
 			TArray<FName> IngredientChoices;
 			TArray<float> IngredientWeights;
 			float IngredientWeightSum = 0.0f;
@@ -1120,7 +1161,12 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 			Assembled.Add(GuestSlots[GuestCursor++]);
 		}
 
-		if (ValidatePlannedOrders(Assembled, StartingStock, EffectiveTarget, FailReason))
+		if (ValidatePlannedOrders(
+			Assembled,
+			StartingStock,
+			EffectiveTarget,
+			FailReason
+		))
 		{
 			PlannedDayOrders = MoveTemp(Assembled);
 			NextPlannedOrderIndex = 0;
@@ -1131,49 +1177,111 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 
 	if (!bAccepted)
 	{
-		// Last-resort greedy Lv0 fill so the day still has a feasible queue.
+		// Deterministic fallback: preserve the target instead of silently creating
+		// a low-value queue. Required NPCs use the highest feasible level, then
+		// guests consume the remaining stock from high value to low value.
 		TMap<FName, int32> Remaining = StartingStock;
+		TArray<FSPlannedOrder> FallbackNpcSlots;
+		TArray<FSPlannedOrder> FallbackGuestSlots;
 		int32 SumValue = 0;
+
 		for (const FName NpcId : NpcIds)
 		{
 			const FName IngredientId = DefaultNpcIngredient(this, NpcId);
-			if (Remaining.FindRef(IngredientId) <= 0)
+			int32 Level = INDEX_NONE;
+			for (int32 CandidateLevel = DishCap; CandidateLevel >= 0; --CandidateLevel)
 			{
-				continue;
+				if (Remaining.FindRef(IngredientId) >= OrderUnitCost(CandidateLevel))
+				{
+					Level = CandidateLevel;
+					break;
+				}
 			}
+			if (Level == INDEX_NONE)
+			{
+				FailReason = TEXT("NPC order infeasible in deterministic fallback");
+				break;
+			}
+
 			FSPlannedOrder Slot;
 			Slot.Kind = ESOrderSlotKind::Npc;
 			Slot.NpcId = NpcId;
-			Slot.Order = MakePlannedRequest(*this, IngredientId, 0);
-			Remaining.FindOrAdd(IngredientId) -= 1;
+			Slot.Order = MakePlannedRequest(*this, IngredientId, Level);
+			Remaining.FindOrAdd(IngredientId) -= OrderUnitCost(Level);
 			SumValue += Slot.Order.SellValue;
-			PlannedDayOrders.Add(Slot);
+			FallbackNpcSlots.Add(Slot);
 		}
-		// 每隔几单抬一次等级，兜底队列也不会退化成清一色 Lv0。
-		int32 GuestCounter = 0;
-		for (const FName Id : GetKnownIds())
+
+		if (FallbackNpcSlots.Num() == NpcIds.Num())
 		{
-			while (Remaining.FindRef(Id) > 0
-				&& (SumValue < EffectiveTarget || PlannedDayOrders.Num() < MinimumAppearanceSlots))
+			for (const FName IngredientId : GetKnownIds())
 			{
-				const bool bPromote = (GuestCounter % 3) == 2 && Remaining.FindRef(Id) >= OrderUnitCost(1);
-				const int32 Level = bPromote ? 1 : 0;
-				FSPlannedOrder Slot;
-				Slot.Kind = ESOrderSlotKind::Guest;
-				Slot.Order = MakePlannedRequest(*this, Id, Level);
-				Remaining.FindOrAdd(Id) -= OrderUnitCost(Level);
-				SumValue += Slot.Order.SellValue;
-				PlannedDayOrders.Add(Slot);
-				++GuestCounter;
+				for (int32 Level = DishCap; Level >= 0 && SumValue < EffectiveTarget; --Level)
+				{
+					const int32 Cost = OrderUnitCost(Level);
+					while (Remaining.FindRef(IngredientId) >= Cost && SumValue < EffectiveTarget)
+					{
+						FSPlannedOrder Slot;
+						Slot.Kind = ESOrderSlotKind::Guest;
+						Slot.Order = MakePlannedRequest(*this, IngredientId, Level);
+						Remaining.FindOrAdd(IngredientId) -= Cost;
+						SumValue += Slot.Order.SellValue;
+						FallbackGuestSlots.Add(Slot);
+					}
+				}
+			}
+
+			for (const FName IngredientId : GetKnownIds())
+			{
+				while (
+					FallbackNpcSlots.Num() + FallbackGuestSlots.Num()
+						< GuaranteedMinimumAppearanceSlots
+					&& Remaining.FindRef(IngredientId) > 0)
+				{
+					FSPlannedOrder Slot;
+					Slot.Kind = ESOrderSlotKind::Guest;
+					Slot.Order = MakePlannedRequest(*this, IngredientId, 0);
+					Remaining.FindOrAdd(IngredientId) -= 1;
+					SumValue += Slot.Order.SellValue;
+					FallbackGuestSlots.Add(Slot);
+				}
+			}
+
+			TArray<FSPlannedOrder> FallbackOrders;
+			FallbackOrders.Reserve(FallbackNpcSlots.Num() + FallbackGuestSlots.Num());
+			FallbackOrders.Append(FallbackNpcSlots);
+			FallbackOrders.Append(FallbackGuestSlots);
+
+			FString FallbackReason;
+			if (ValidatePlannedOrders(
+				FallbackOrders,
+				StartingStock,
+				EffectiveTarget,
+				FallbackReason,
+				false))
+			{
+				PlannedDayOrders = MoveTemp(FallbackOrders);
+				bAccepted = true;
+			}
+			else
+			{
+				FailReason = FallbackReason;
 			}
 		}
-		UE_LOG(
-			LogSSandbox,
-			Warning,
-			TEXT("Day order plan fell back to greedy Lv0 fill (%s)."),
-			FailReason.IsEmpty() ? TEXT("retries exhausted") : *FailReason);
-	}
 
+		if (bAccepted)
+		{
+			UE_LOG(LogSSandbox, Warning, TEXT("Day order deterministic fallback succeeded."));
+		}
+		else
+		{
+			UE_LOG(
+				LogSSandbox,
+				Error,
+				TEXT("Day order deterministic fallback failed (%s)."),
+				FailReason.IsEmpty() ? TEXT("retries exhausted") : *FailReason);
+		}
+	}
 	NextPlannedOrderIndex = 0;
 	UE_LOG(
 		LogSSandbox,
@@ -1183,7 +1291,7 @@ bool USChefGameInstance::BuildPlannedDayOrders()
 		GetPlannedOrderTotalValue(),
 		EffectiveTarget,
 		RevenueTarget);
-	return PlannedDayOrders.Num() > 0 || EffectiveTarget <= 0;
+	return bAccepted || EffectiveTarget <= 0;
 }
 
 int32 USChefGameInstance::GetPlannedOrderTotalValue() const
@@ -1972,7 +2080,7 @@ void USChefGameInstance::EnterDaySettlement(const ESDayEndReason Reason)
 	const int32 ReclaimedUnits = ReclaimBoardPiecesOnClose();
 	const int32 LeftoverUnits = CountPantryUnits();
 	CarryOverTargetBonus = Reason == ESDayEndReason::TimeUp
-		? LeftoverUnits * FMath::Max(0, GetDayBalance().CarryOverTargetBonusPerUnit)
+		? LeftoverUnits * GetSafeCarryOverTargetBonusPerUnit()
 		: 0;
 	CompletedDayFlags.AddUnique(StageId);
 	DayTimeRemaining = 0.0f;
@@ -2229,6 +2337,8 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.RevenueTarget = 180;
 		Row.CustomerConcurrentMax = 4;
 		Row.CustomerSpawnInterval = 3.8f;
+		Row.MinPlannedOrderCount = 6;
+		Row.MaxPlannedOrderCount = 8;
 		Row.CustomerPatienceSeconds = 32.0f;
 		Row.CustomerConfigId = TEXT("Wave_T0");
 		Row.NextLevelId = TEXT("L1");
@@ -2244,6 +2354,8 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.RevenueTarget = 460;
 		Row.CustomerConcurrentMax = 4;
 		Row.CustomerSpawnInterval = 3.2f;
+		Row.MinPlannedOrderCount = 8;
+		Row.MaxPlannedOrderCount = 12;
 		Row.CustomerPatienceSeconds = 28.0f;
 		Row.CustomerConfigId = TEXT("Wave_L1");
 		Row.NextLevelId = TEXT("L2");
@@ -2259,6 +2371,8 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.RevenueTarget = 1010;
 		Row.CustomerConcurrentMax = 4;
 		Row.CustomerSpawnInterval = 2.9f;
+		Row.MinPlannedOrderCount = 10;
+		Row.MaxPlannedOrderCount = 15;
 		Row.CustomerPatienceSeconds = 25.0f;
 		Row.CustomerConfigId = TEXT("Wave_L2");
 		Row.NextLevelId = TEXT("L3");
@@ -2274,6 +2388,8 @@ FSGameStageRow USChefGameInstance::MakeBuiltInStageRow(const FName InStageId)
 		Row.RevenueTarget = 1280;
 		Row.CustomerConcurrentMax = 4;
 		Row.CustomerSpawnInterval = 2.7f;
+		Row.MinPlannedOrderCount = 12;
+		Row.MaxPlannedOrderCount = 18;
 		Row.CustomerPatienceSeconds = 22.0f;
 		Row.CustomerConfigId = TEXT("Wave_L3");
 		Row.NextLevelId = NAME_None;
@@ -2330,7 +2446,7 @@ bool USChefGameInstance::ApplyStage(const FName InStageId)
 	NightDurationSeconds = Row.NightDuration;
 	// 上一关时间到闭店时的剩余食材已结转，目标相应抬高。
 	RevenueTarget = Row.RevenueTarget + FMath::Max(0, CarryOverTargetBonus); //add by K2
-	CustomerSpawnIntervalSeconds = Row.CustomerSpawnInterval;
+	CustomerSpawnIntervalSeconds = FMath::Max(0.1f, Row.CustomerSpawnInterval);
 	CustomerConcurrentMax = Row.CustomerConcurrentMax;
 #pragma region K2 moonyfli
 	CustomerPatienceSeconds = Row.CustomerPatienceSeconds;
@@ -2701,6 +2817,38 @@ bool USChefGameInstance::AutoSaveChefProfile(const FString& Reason)
 		NotifyStateChanged();
 	}
 	return bOk;
+}
+
+int32 USChefGameInstance::GetSafeCarryOverTargetBonusPerUnit() const
+{
+    const int32 ConfiguredBonus = FMath::Max(
+        0,
+        GetDayBalance().CarryOverTargetBonusPerUnit
+    );
+
+    int32 MinimumLv0SellValue = TNumericLimits<int32>::Max();
+
+    for (const FName IngredientId : GetKnownIds())
+    {
+        const int32 SellValue = GetRecipeSellValue(
+            MakeRecipeId(IngredientId, 0)
+        );
+
+        if (SellValue > 0)
+        {
+            MinimumLv0SellValue = FMath::Min(
+                MinimumLv0SellValue,
+                SellValue
+            );
+        }
+    }
+
+    if (MinimumLv0SellValue == TNumericLimits<int32>::Max())
+    {
+        return ConfiguredBonus;
+    }
+
+    return FMath::Min(ConfiguredBonus, MinimumLv0SellValue);
 }
 
 bool USChefGameInstance::LoadChefProfile()
@@ -3870,19 +4018,19 @@ int32 ASCustomerDirector::ForceNextCustomersNow()
 			SeatOrder.Add(SeatIndex);
 		}
 	}
-	
+
 	for (int32 Index = SeatOrder.Num() - 1; Index > 0; --Index)
 	{
 		SeatOrder.Swap(Index, FMath::RandRange(0, Index));
 	}
-	
+
 	for (const int32 SeatIndex : SeatOrder)
 	{
 		if (SeatCooldowns.IsValidIndex(SeatIndex))
 		{
 			SeatCooldowns[SeatIndex] = 0.0f;
 		}
-	
+
 		if (TryFillSeat(SeatIndex))
 		{
 			++Spawned;
