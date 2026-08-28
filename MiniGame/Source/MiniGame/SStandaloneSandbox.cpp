@@ -1349,9 +1349,10 @@ int32 USChefGameInstance::GetConfiguredMaxDishLevel() const
 
 int32 USChefGameInstance::GetServiceSeatCount() const
 {
-	const FSDayBalanceRow Balance = GetDayBalance();
-	const int32 MaxSeats = FMath::Clamp(Balance.MaxServiceSeats, 1, 6);
-	return FMath::Clamp(CustomerConcurrentMax, 1, MaxSeats);
+    const FSDayBalanceRow Balance = GetDayBalance();
+
+    // 这是物理座位总数，不受当前同时出现顾客数限制。
+    return FMath::Clamp(Balance.MaxServiceSeats, 1, 4);
 }
 
 FString USChefGameInstance::ResolveIngredientDisplayName(const FName IngredientId) const
@@ -3605,10 +3606,38 @@ void ASCustomerDirector::NotifyDayStarted()
 		SpawnIntervalSeconds = GameInstance->CustomerSpawnIntervalSeconds;
 	}
 #pragma region K2 moonyfli
-	// Every seat owns its own arrival clock. All start ready and independently
-	// consume the unified appearance queue.
+	// 每个座位都有独立的到客冷却。
+	// 开店时所有座位都可用，但入座顺序随机。
+	TArray<int32> SeatOrder;
+	SeatOrder.Reserve(SeatCount);
+
 	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
 	{
+		SeatOrder.Add(SeatIndex);
+	}
+
+	// Fisher-Yates 洗牌
+	for (int32 Index = SeatOrder.Num() - 1; Index > 0; --Index)
+	{
+		SeatOrder.Swap(Index, FMath::RandRange(0, Index));
+	}
+
+	for (const int32 SeatIndex : SeatOrder)
+	{
+		if (bOrderQueueExhausted)
+		{
+			break;
+		}
+
+		if (const USChefGameInstance* GameInstance = GetChefGameInstance())
+		{
+			if (GameInstance->CustomerConcurrentMax > 0
+				&& GetOccupiedSeatCount() >= GameInstance->CustomerConcurrentMax)
+			{
+				break;
+			}
+		}
+
 		TryFillSeat(SeatIndex);
 	}
 #pragma endregion K2 moonyfli
@@ -3642,15 +3671,28 @@ void ASCustomerDirector::SetFeedback(const FString& Message)
 
 bool ASCustomerDirector::SpawnNextPlannedCustomer()
 {
-	const int32 SeatCount = GetConfiguredSeatCount();
-	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
-	{
-		if (!IsSeatOccupied(SeatIndex) && GetSeatCooldownRemaining(SeatIndex) <= 0.0f)
-		{
-			return TryFillSeat(SeatIndex);
-		}
-	}
-	return false;
+    const int32 SeatCount = GetConfiguredSeatCount();
+
+    TArray<int32> ReadySeats;
+    ReadySeats.Reserve(SeatCount);
+
+    for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
+    {
+        if (!IsSeatOccupied(SeatIndex)
+            && GetSeatCooldownRemaining(SeatIndex) <= 0.0f)
+        {
+            ReadySeats.Add(SeatIndex);
+        }
+    }
+
+    if (ReadySeats.IsEmpty())
+    {
+        return false;
+    }
+
+    // 随机选择一个当前可用座位。
+    const int32 RandomIndex = FMath::RandRange(0, ReadySeats.Num() - 1);
+    return TryFillSeat(ReadySeats[RandomIndex]);
 }
 
 #pragma region K2 moonyfli
@@ -3663,6 +3705,12 @@ bool ASCustomerDirector::TryFillSeat(const int32 SeatIndex)
 
 	USChefGameInstance* GameInstance = GetChefGameInstance();
 	if (!GameInstance)
+	{
+		return false;
+	}
+
+	if (GameInstance->CustomerConcurrentMax > 0
+		&& GetOccupiedSeatCount() >= GameInstance->CustomerConcurrentMax)
 	{
 		return false;
 	}
@@ -3741,6 +3789,21 @@ bool ASCustomerDirector::IsSeatOccupied(const int32 SeatIndex) const
 	return false;
 }
 
+int32 ASCustomerDirector::GetOccupiedSeatCount() const
+{
+    int32 OccupiedCount = 0;
+
+    for (int32 SeatIndex = 0; SeatIndex < GetConfiguredSeatCount(); ++SeatIndex)
+    {
+        if (IsSeatOccupied(SeatIndex))
+        {
+            ++OccupiedCount;
+        }
+    }
+
+    return OccupiedCount;
+}
+
 void ASCustomerDirector::ClearCustomer(const FString& CustomerId, const FString& Reason)
 {
 	const int32 CustomerIndex = ActiveCustomers.IndexOfByPredicate(
@@ -3798,16 +3861,28 @@ int32 ASCustomerDirector::ForceNextCustomersNow()
 	bOrderQueueExhausted = false;
 	int32 Spawned = 0;
 	const int32 SeatCount = GetConfiguredSeatCount();
+	TArray<int32> SeatOrder;
+
 	for (int32 SeatIndex = 0; SeatIndex < SeatCount; ++SeatIndex)
 	{
-		if (IsSeatOccupied(SeatIndex))
+		if (!IsSeatOccupied(SeatIndex))
 		{
-			continue;
+			SeatOrder.Add(SeatIndex);
 		}
+	}
+	
+	for (int32 Index = SeatOrder.Num() - 1; Index > 0; --Index)
+	{
+		SeatOrder.Swap(Index, FMath::RandRange(0, Index));
+	}
+	
+	for (const int32 SeatIndex : SeatOrder)
+	{
 		if (SeatCooldowns.IsValidIndex(SeatIndex))
 		{
 			SeatCooldowns[SeatIndex] = 0.0f;
 		}
+	
 		if (TryFillSeat(SeatIndex))
 		{
 			++Spawned;
@@ -3883,9 +3958,38 @@ void ASCustomerDirector::Tick(const float DeltaSeconds)
 			continue;
 		}
 
-		SeatCooldowns[SeatIndex] = FMath::Max(0.0f, SeatCooldowns[SeatIndex] - DeltaSeconds);
-		if (SeatCooldowns[SeatIndex] <= 0.0f && !bOrderQueueExhausted)
+		SeatCooldowns[SeatIndex] = FMath::Max(
+			0.0f,
+			SeatCooldowns[SeatIndex] - DeltaSeconds);
+	}
+
+	// 收集本帧已经准备好的座位。
+	TArray<int32> ReadySeats;
+
+	if (!bOrderQueueExhausted)
+	{
+		for (int32 SeatIndex = 0; SeatIndex < SeatCooldowns.Num(); ++SeatIndex)
 		{
+			if (!IsSeatOccupied(SeatIndex)
+				&& SeatCooldowns[SeatIndex] <= 0.0f)
+			{
+				ReadySeats.Add(SeatIndex);
+			}
+		}
+
+		// 随机化后续补客的座位顺序。
+		for (int32 Index = ReadySeats.Num() - 1; Index > 0; --Index)
+		{
+			ReadySeats.Swap(Index, FMath::RandRange(0, Index));
+		}
+
+		for (const int32 SeatIndex : ReadySeats)
+		{
+			if (bOrderQueueExhausted)
+			{
+				break;
+			}
+
 			TryFillSeat(SeatIndex);
 		}
 	}
@@ -4423,13 +4527,15 @@ void ASFakeNightGateway::BeginPlay()
 	{
 		if (GameInstance->IsShopOpen())
 		{
-			if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
-			{
-				Director->NotifyDayStarted();
-			}
+			// NPC 名册必须先建立，顾客导演随后才能正确处理首个 NPC 订单。
 			if (ASSpecialNpcDirector* NpcDirector = ASSpecialNpcDirector::FindDirector(this))
 			{
 				NpcDirector->NotifyDayStarted();
+			}
+
+			if (ASCustomerDirector* Director = ASCustomerDirector::FindDirector(this))
+			{
+				Director->NotifyDayStarted();
 			}
 		}
 	}

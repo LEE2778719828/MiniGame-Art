@@ -1440,6 +1440,7 @@ private:
 
 	static FName MakeRecipeId(FName IngredientId, int32 Level);
 	USChefGameInstance* GetChefGameInstance() const;
+	int32 GetOccupiedSeatCount() const;
 	void SetFeedback(const FString& Message);
 	bool IsValidCellIndex(int32 CellIndex) const;
 	void ClearCell(int32 CellIndex);
@@ -1527,6 +1528,7 @@ private:
 	void SetFeedback(const FString& Message);
 #pragma region K2 moonyfli
 	int32 GetConfiguredSeatCount() const;
+	int32 GetOccupiedSeatCount() const;
 	bool TryFillSeat(int32 SeatIndex);
 	bool IsSeatOccupied(int32 SeatIndex) const;
 	void ClearCustomer(const FString& CustomerId, const FString& Reason);
