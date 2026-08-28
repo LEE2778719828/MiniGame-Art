@@ -20,7 +20,6 @@ class UDirectionalLightComponent;
 class UImage;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
-class UNiagaraSystem;
 class USkeletalMeshComponent; //add by K2
 class USkyLightComponent;
 class UFont;
@@ -565,78 +564,6 @@ public:
 	/** When false the bin lid holds the last frame instead of closing itself. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Bin Animation")
 	bool bBinAnimAutoClose = true;
-
-	/** Niagara systems used by a successful ingredient-bin click. Defaults point at /Game/VFX_Merge. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	TSoftObjectPtr<UNiagaraSystem> IngredientBinFogSystem;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	TSoftObjectPtr<UNiagaraSystem> IngredientBinFoodBurstSystem;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	TSoftObjectPtr<UNiagaraSystem> IngredientBinTrailSystem;
-
-	/** Bin-local offset for Fog, initial FoodBurst, Trail, and the temporary food icon. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinVfxStartOffset = FVector(0.0f, 0.0f, 90.0f);
-
-	/** Target-cell local offset used when PieceIcon is unavailable. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinVfxTargetOffset = FVector(0.0f, 0.0f, 55.0f);
-
-	/**
-	 * World-space draw offset shared by Fog, FoodBurst, Trail and the temporary food icon.
-	 * The Day camera looks toward world -Y, so the default pulls feedback in front of the models.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinVfxViewOffset = FVector(0.0f, -80.0f, 0.0f);
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinFogScale = FVector::OneVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinFoodBurstScale = FVector::OneVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	FVector IngredientBinTrailScale = FVector::OneVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	bool bSpawnFoodBurstAtBin = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX")
-	bool bSpawnFoodBurstAtTarget = true;
-
-	/** Niagara user-parameter names written after spawning the Trail component. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Trail")
-	FName IngredientTrailStartParameter = TEXT("User.StartPosition");
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Trail")
-	FName IngredientTrailTargetParameter = TEXT("User.TargetPosition");
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Trail")
-	FName IngredientTrailDurationParameter = TEXT("User.DurationTime");
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Trail",
-		meta = (ClampMin = "0.01", UIMin = "0.1", UIMax = "2.0"))
-	float IngredientTrailDuration = 0.35f;
-
-	/** Extra local bounds around the complete start-to-target path; prevents long trails being culled. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Trail",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1000.0"))
-	float IngredientTrailBoundsPadding = 180.0f;
-
-	/** Screen-space food icon layered over the Niagara trail. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Food Icon",
-		meta = (ClampMin = "1.0", UIMin = "32.0", UIMax = "256.0"))
-	float IngredientFlyIconWidth = 118.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Food Icon",
-		meta = (ClampMin = "0.01", UIMin = "0.1", UIMax = "2.0"))
-	float IngredientFlyDuration = 0.42f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Food Icon",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "500.0"))
-	float IngredientFlyArcHeight = 105.0f;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
@@ -668,10 +595,6 @@ private:
 	bool TryDropPieceAndNotify(ASMergeBoard* Board, int32 FromCellIndex, int32 ToCellIndex);
 #pragma region K2 moonyfli
 	void PlayIngredientBinAnimation(int32 BinIndex);
-	void PlayIngredientSpawnFeedback(
-		ASDayIngredientBinVisual* Bin,
-		FName IngredientId,
-		int32 SpawnedCellIndex);
 	void CloseIngredientBinAnimation(int32 BinIndex);
 	void RestIngredientBinAnimation(int32 BinIndex);
 	USkeletalMeshComponent* FindIngredientBinAnimComponent(int32 BinIndex) const;
@@ -700,8 +623,6 @@ private:
 	TObjectPtr<USDayDragPreview> DragPreview;
 
 	TMap<int32, FTimerHandle> BinAnimTimers; //add by K2
-	/** Number of in-flight bin items targeting each cell; their resting visuals stay hidden until arrival. */
-	TMap<int32, int32> PendingIngredientArrivalCounts;
 
 	bool bUsingSceneAuthoredSeats = false; //add by K2
 	bool bPointerWasDown = false;

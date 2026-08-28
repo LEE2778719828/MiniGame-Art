@@ -58,7 +58,7 @@ guai
 /Game/Day/VFX/Niagara/Min_Customer_001
 /Game/Day/VFX/Niagara/Min_FireDebuff_Character
 /Game/Day/VFX/Niagara/Min_FoodMerge_001
-/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_FoodBurst
+/Game/Day/VFX/Niagara/BOX/Min_BoxOpen_FoodBurst
 ```
 
 用途分别是：
@@ -156,7 +156,7 @@ BP_SDayCanguan
 ```text
 /Game/Day/VFX/Niagara/Min_Customer_001
 /Game/Day/VFX/Niagara/Min_FireDebuff_Character
-/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_FoodBurst
+/Game/Day/VFX/Niagara/BOX/Min_BoxOpen_FoodBurst
 ```
 
 每次打开后检查：
@@ -403,7 +403,7 @@ View Depth
 2. 在另一个编辑器标签页打开：
 
 ```text
-/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_FoodBurst
+/Game/Day/VFX/Niagara/BOX/Min_BoxOpen_FoodBurst
 ```
 
 3. 检查两个 Sprite Renderer 分别使用什么材质。
