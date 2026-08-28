@@ -3295,6 +3295,8 @@ bool ASDayBoardPresenter::TryDropPieceAndNotify(
 	const bool bDropSucceeded = Board->TryDropPiece(FromCellIndex, ToCellIndex);
 	if (bDropSucceeded && bMergeCandidate)
 	{
+		PendingIngredientArrivalCounts.Remove(FromCellIndex);
+    	PendingIngredientArrivalCounts.Remove(ToCellIndex);
 		BP_OnIngredientMergeCompleted(ToPiece.IngredientId, ToPiece.Level + 1, ToCellIndex);
 	}
 	return bDropSucceeded;

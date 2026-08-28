@@ -13,7 +13,9 @@
 ASDayPlayerController::ASDayPlayerController()
 {
 	bShowMouseCursor = true;
-	bEnableClickEvents = false;
+	// The foreground cooking UI is a camera-attached Widget Component. Keep
+	// controller click events enabled so its UMG buttons receive mouse presses.
+	bEnableClickEvents = true;
 	bEnableMouseOverEvents = false;
 
 	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MappingFinder(
