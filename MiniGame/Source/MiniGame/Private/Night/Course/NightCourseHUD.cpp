@@ -635,20 +635,18 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 			GameViewportSize.Y / SafeDesignY);
 		HUDCameraFrameSize = GameViewportSize;
 		HUDCameraFrameOffset = GameViewportOffset;
-		const FVector2D HUDCameraStretchScale(
-			GameViewportSize.X / SafeDesignX,
-			GameViewportSize.Y / SafeDesignY);
-
-		auto PlaceDesignedWidget = [this, HUDCameraStretchScale](UUserWidget* Widget)
+		auto PlaceDesignedWidget = [this](UUserWidget* Widget)
 		{
 			if (!Widget)
 			{
 				return;
 			}
+			// Let UMG apply DPI and Canvas layout once. Manual X/Y scaling here
+			// desynchronizes Android's layout geometry from its rendered pixels.
 			Widget->SetAlignmentInViewport(FVector2D::ZeroVector);
-			Widget->SetDesiredSizeInViewport(HUDDesignSize);
+			Widget->SetDesiredSizeInViewport(HUDCameraFrameSize);
 			Widget->SetRenderTransformPivot(FVector2D::ZeroVector);
-			Widget->SetRenderScale(HUDCameraStretchScale);
+			Widget->SetRenderScale(FVector2D(1.f, 1.f));
 			Widget->SetPositionInViewport(HUDCameraFrameOffset, false);
 		};
 		PlaceDesignedWidget(MainHUDWidget);

@@ -1053,7 +1053,7 @@ bool UNightCourseDirector::BuildRoadsideSpecs(
 		&& (bBuildingRuntimeCourse || bRunning);
 	const int32 BaseSeed = bUseRuntimeSeed
 		? RuntimeSeed
-		: (Config->CourseRuleData ? Config->CourseRuleData->Seed : 1001);
+		: 1001;
 	FString Error;
 	if (!NightCourseRoadside_Private::AppendCategory(
 		Config,
@@ -1277,7 +1277,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		Display,
 		TEXT("[NightCourse][Stage=Compose] Begin Atom composition context=%s seed=%d defaultRoute=%d selectedRoute=%d modeTemplates=%d modeTarget=%d branchRoutes=%d TransitionJumpGapCm=%.1f."),
 		bRuntimeBuildContext ? TEXT("Runtime") : TEXT("Preview"),
-		bHasRuntimeSeed ? RuntimeSeed : Rule->Seed,
+		bHasRuntimeSeed ? RuntimeSeed : 1001,
 		static_cast<int32>(BuildDefaultRoute),
 		static_cast<int32>(BuildRoute),
 		DefaultRouteQueue->Atoms.Num(),
@@ -1345,7 +1345,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 	}
 
 	FRandomStream TemplateSelectionStream(
-		(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed) ^ 0x54454D50);
+		(bHasRuntimeSeed ? RuntimeSeed : 1001) ^ 0x54454D50);
 	auto AppendWeightedTemplates =
 		[&PlannerEntries, &PlannerForkConnectorRoutes, &TemplateSelectionStream](
 			const TArray<FNightRuleAtomEntry>& Templates,
@@ -1492,7 +1492,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 		else
 		{
 			FRandomStream FirstBranchStream(
-				(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed)
+				(bHasRuntimeSeed ? RuntimeSeed : 1001)
 				^ (0x464F524B + static_cast<int32>(BuildRoute) * 7919));
 			if (!NightCourseAtom_Private::SelectWeightedTemplate(
 				BranchQueue->Atoms,
@@ -1667,7 +1667,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				}
 
 				FRandomStream ConnectorStream(
-					(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed)
+					(bHasRuntimeSeed ? RuntimeSeed : 1001)
 					^ (0x464F524B + static_cast<int32>(ConnectorRoute) * 7919));
 				FNightRuleAtomEntry ConnectorEntry;
 				int32 ConnectorTemplateIndex = INDEX_NONE;
@@ -1700,9 +1700,9 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 	const int32 AtomCount = PlannerEntries.Num();
 	int32 FoeOrdinal = 0;
 	FRandomStream AtomSelectionStream(
-		(bHasRuntimeSeed ? RuntimeSeed : Rule->Seed) ^ 0x41544F4D);
+		(bHasRuntimeSeed ? RuntimeSeed : 1001) ^ 0x41544F4D);
 	FRandomStream RuleRandomStream(
-		bHasRuntimeSeed ? RuntimeSeed : Rule->Seed);
+		bHasRuntimeSeed ? RuntimeSeed : 1001);
 
 	for (int32 AtomSlotIndex = 0; AtomSlotIndex < AtomCount; ++AtomSlotIndex)
 	{
@@ -1737,7 +1737,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 						LogTemp,
 						Error,
 						TEXT("[NightCourse] Seed=%d route=%d slot=%d Atom candidate rejected: %s"),
-						bHasRuntimeSeed ? RuntimeSeed : Rule->Seed,
+						bHasRuntimeSeed ? RuntimeSeed : 1001,
 						static_cast<int32>(BuildRoute),
 						AtomSlotIndex,
 						*Reason);
@@ -1746,7 +1746,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 					LogTemp,
 					Error,
 					TEXT("[NightCourse] Seed=%d route=%d slot=%d has no compatible Atom candidate for %d actions; library candidates=%d."),
-					bHasRuntimeSeed ? RuntimeSeed : Rule->Seed,
+					bHasRuntimeSeed ? RuntimeSeed : 1001,
 					static_cast<int32>(BuildRoute),
 					AtomSlotIndex,
 					PlannerEntry.Actions.Num(),
@@ -1761,7 +1761,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				LogTemp,
 				Log,
 				TEXT("[NightCourse] Seed=%d route=%d slot=%d selected AtomKey='%s' from %d compatible candidates."),
-				bHasRuntimeSeed ? RuntimeSeed : Rule->Seed,
+				bHasRuntimeSeed ? RuntimeSeed : 1001,
 				static_cast<int32>(BuildRoute),
 				AtomSlotIndex,
 				*AtomKey,
@@ -1773,7 +1773,7 @@ bool UNightCourseDirector::BuildAtomRouteCourse(
 				LogTemp,
 				Log,
 				TEXT("[NightCourse] Seed=%d route=%d slot=%d uses explicit AtomKey='%s'."),
-				bHasRuntimeSeed ? RuntimeSeed : Rule->Seed,
+				bHasRuntimeSeed ? RuntimeSeed : 1001,
 				static_cast<int32>(BuildRoute),
 				AtomSlotIndex,
 				*AtomKey);
@@ -4200,14 +4200,9 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	ActiveKeySwapCues = AuthoredKeySwapCues;
 	bHasActiveRouteRule = false;
 	PreparedBranchRoutes.Reset();
-	RuntimeSeed = Bootstrap.Seed;
-	if (RuntimeSeed == 0)
-	{
-		if (Config->CourseRuleData && Config->CourseRuleData->bEnabled)
-		{
-			RuntimeSeed = Config->CourseRuleData->Seed;
-		}
-	}
+	// Runtime seeds are supplied by the active DA_Queue entry.  Keep a stable
+	// fallback for preview or manually spawned courses without a queue.
+	RuntimeSeed = Bootstrap.Seed != 0 ? Bootstrap.Seed : 1001;
 	bHasRuntimeSeed = true;
 	UE_LOG(
 		LogTemp,

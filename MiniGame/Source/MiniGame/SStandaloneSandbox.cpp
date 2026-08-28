@@ -602,6 +602,9 @@ bool USChefGameInstance::ConsumeNightResult(const FSNightResult& Result)
 	{
 		Phase = ESGamePhase::NightSettlement;
 		bAwaitingNightRetry = false;
+		// The next Day -> Night transition consumes the next authored queue entry.
+		// A failed Night intentionally never reaches this branch, so retry is stable.
+		NightCourseQueueIndex = FMath::Max(0, NightCourseQueueIndex + 1);
 
 		// NightSettlement → PrepareDay：提交夜间食材。
 		for (const FSIngredientStack& Stack : Result.Ingredients)
@@ -2667,6 +2670,7 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 	SaveObject.LastConsumedNightResultId = LastConsumedNightResultId;
 	SaveObject.CompletedDayFlags = CompletedDayFlags;
 	SaveObject.ReviewSeedState = ReviewSeed;
+	SaveObject.NightCourseQueueIndex = NightCourseQueueIndex;
 	SaveObject.ConsumedResultIds = ConsumedResultIds.Array();
 	SaveObject.Phase = Phase;
 	SaveObject.bAwaitingNightRetry = bAwaitingNightRetry;
@@ -2675,7 +2679,7 @@ void USChefGameInstance::CaptureProfileToSave(USChefSaveGame& SaveObject) const
 
 bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 {
-	const bool bLegacyBootstrapSave = SaveObject.SaveVersion == 3;
+	const bool bLegacyBootstrapSave = SaveObject.SaveVersion >= 3 && SaveObject.SaveVersion <= 4;
 	if (SaveObject.SaveVersion != USChefSaveGame::CurrentSaveVersion
 		&& !bLegacyBootstrapSave)
 	{
@@ -2733,6 +2737,7 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 		: SaveObject.LastConsumedNightResultId;
 	CompletedDayFlags = SaveObject.CompletedDayFlags;
 	ReviewSeed = SaveObject.ReviewSeedState;
+	NightCourseQueueIndex = FMath::Max(0, SaveObject.NightCourseQueueIndex);
 	ConsumedResultIds.Empty();
 	for (const FString& Id : SaveObject.ConsumedResultIds)
 	{
@@ -2950,6 +2955,7 @@ void USChefGameInstance::ResetSandbox()
 	PlannedDayOrders.Reset();
 	NextPlannedOrderIndex = 0;
 #pragma endregion K2 moonyfli
+	NightCourseQueueIndex = 0;
 	bAwaitingNightRetry = false;
 	CompletedDayFlags.Empty();
 	LastConsumedNightResultId = TEXT("None");

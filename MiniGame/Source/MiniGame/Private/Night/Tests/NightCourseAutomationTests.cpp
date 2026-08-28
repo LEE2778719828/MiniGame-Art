@@ -93,7 +93,6 @@ namespace NightCourseAutomation_Private
 		UNightCourseRuleData* Rule = NewObject<UNightCourseRuleData>(Config);
 		Rule->bEnabled = true;
 		Rule->bAutoSelectAtomKeys = true;
-		Rule->Seed = RuleSeed;
 		FNightRuleAtomQueue MainQueue;
 		MainQueue.Atoms = {
 			MakeEntry(ENightNodeKind::Hazard, ENightNodeKind::Enemy, ENightNodeKind::Hazard),
@@ -516,7 +515,6 @@ bool FNightCourseAtomSeedSelectionTest::RunTest(const FString& Parameters)
 	bool bDifferentSeedChangedSelection = false;
 	for (int32 CandidateSeed = 1002; CandidateSeed < 1100; ++CandidateSeed)
 	{
-		FirstConfig->CourseRuleData->Seed = CandidateSeed;
 		TArray<FNightStoneSpec> CandidateStones;
 		TArray<FNightBeatSpec> CandidateBeats;
 		TArray<FNightBridgeSpec> CandidateBridges;
@@ -538,8 +536,6 @@ bool FNightCourseAtomSeedSelectionTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("different Seed selects a different valid combination when candidates exist"),
 		bDifferentSeedChangedSelection);
-
-	FirstConfig->CourseRuleData->Seed = 1001;
 	FirstConfig->CourseRuleData->RouteModes[ENightRouteId::A].Atoms[0].AtomKey = TEXT("B");
 	TArray<FNightStoneSpec> ExplicitStones;
 	TArray<FNightBeatSpec> ExplicitBeats;

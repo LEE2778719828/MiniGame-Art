@@ -3,6 +3,7 @@
 #include "Night/Course/NightBridgeSegmentActor.h"
 #include "Night/Course/NightCourseGameMode.h"
 #include "Night/Course/NightG1CourseConfig.h"
+#include "Night/Course/NightCourseQueueData.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseHUD.h"
@@ -340,6 +341,23 @@ namespace NightCourseStage_Private
 		Bootstrap.GiftBuffs.NearDeathThreshold = Source.GiftBuffState.NearDeathThreshold;
 		Bootstrap.Seed = Source.Seed;
 		return Bootstrap;
+	}
+
+	static void ApplyCourseQueueEntry(FNightBootstrap& Bootstrap, const UNightG1CourseConfig* Config, const int32 QueueCursor)
+	{
+		const UNightCourseQueueData* Queue = Config ? Config->CourseQueueData.Get() : nullptr;
+		if (!Queue || Queue->Entries.IsEmpty()) return;
+		const int32 NumEntries = Queue->Entries.Num();
+		const int32 EntryIndex = Queue->bLoop ? FMath::Abs(QueueCursor) % NumEntries : FMath::Clamp(QueueCursor, 0, NumEntries - 1);
+		const FNightCourseQueueEntry& Entry = Queue->Entries[EntryIndex];
+		Bootstrap.bUseCourseQueueOverride = true;
+		Bootstrap.bEnableForkOverride = Entry.bEnableFork;
+		Bootstrap.MainRouteAtomCountOverride = FMath::Max(1, Entry.MainRouteAtomCount);
+		Bootstrap.ForkRouteAtomCountOverride = Entry.bEnableFork ? FMath::Max(1, Entry.ForkRouteAtomCount) : INDEX_NONE;
+		Bootstrap.CourseQueueIndex = EntryIndex;
+		Bootstrap.DefaultRoute = Entry.MainRoute;
+		Bootstrap.ForkPair = Entry.ForkPair;
+		Bootstrap.Seed = FMath::Max(1, Entry.Seed);
 	}
 }
 
@@ -718,6 +736,7 @@ void ANightCourseHost::PrepareChefNightFlow()
 	{
 		Bootstrap = NightCourseStage_Private::MakeNightBootstrap(
 			GameInstance->GetPendingNightBootstrap());
+		NightCourseStage_Private::ApplyCourseQueueEntry(Bootstrap, Config, GameInstance->NightCourseQueueIndex);
 		UE_LOG(
 			LogTemp,
 			Display,
@@ -1414,6 +1433,7 @@ void ANightCourseHost::RetryAfterFailure()
 		{
 			Bootstrap = NightCourseStage_Private::MakeNightBootstrap(
 				GameInstance->GetPendingNightBootstrap());
+			NightCourseStage_Private::ApplyCourseQueueEntry(Bootstrap, Config, GameInstance->NightCourseQueueIndex);
 		}
 	}
 

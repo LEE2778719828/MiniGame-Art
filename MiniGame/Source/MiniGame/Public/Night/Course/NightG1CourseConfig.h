@@ -12,6 +12,7 @@ class ANightCourseStoneActor;
 class ANightCourseForkAtomActor;
 class UNightCourseAtomRouteData;
 class UNightCourseRuleData;
+class UNightCourseQueueData;
 class UNightRouteRulesAsset;
 class ANightRoadsideSegmentActor;
 class UMaterialInterface;
@@ -205,8 +206,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Route", meta = (DisplayName = "Atom库", ToolTip = "AtomKey 到 Atom Blueprint 的唯一映射；用于主路线和分支路线的实际布局。"))
 	TObjectPtr<UNightCourseAtomRouteData> AtomRoute;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Route", meta = (DisplayName = "路线规则DA", ToolTip = "配置 RouteModes、BranchRoutes、Seed 和岔路前数量；运行时由 Day DefaultRoute 选择主模式。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Atom Route", meta = (DisplayName = "路线规则DA", ToolTip = "配置 RouteModes、BranchRoutes 与 Atom 模板；随机种子由课程队列DA提供。"))
 	TObjectPtr<UNightCourseRuleData> CourseRuleData;
+
+	/** Ordered Day -> Night plan. Each entry controls route, fork, atom counts and the deterministic seed. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Course Queue", meta = (DisplayName = "课程队列DA", ToolTip = "绑定 DA_Queue；每次成功完成 Night 后推进到下一条，失败重试保持当前条目。"))
+	TObjectPtr<UNightCourseQueueData> CourseQueueData;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Route Rules", meta = (DisplayName = "分支节奏规则DA", ToolTip = "配置 A/B/C 分支的可见区块、掉落节奏、倍率和结算加成。"))
 	TObjectPtr<UNightRouteRulesAsset> RouteRules;

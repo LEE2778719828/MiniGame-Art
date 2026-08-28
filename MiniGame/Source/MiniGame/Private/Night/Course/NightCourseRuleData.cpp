@@ -436,12 +436,8 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 		return false;
 	}
 
-	double JsonSeed = 0.0;
-	if (!Root->TryGetNumberField(TEXT("seed"), JsonSeed))
-	{
-		OutError = TEXT("Rule JSON requires numeric 'seed'.");
-		return false;
-	}
+	// Legacy Rule JSON may carry a seed.  Seeds now live exclusively on the
+	// Day -> Night queue entry, so preserve JSON compatibility but ignore it.
 	auto ParseQueueMap = [&OutError](
 		const TSharedPtr<FJsonObject>& JsonQueues,
 		const TCHAR* QueueLabel,
@@ -568,13 +564,11 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 	Root->TryGetBoolField(TEXT("autoSelectAtomKeys"), ImportedAutoSelectAtomKeys);
 
 	UNightCourseRuleData* MutableThis = this;
-	const int32 PreviousSeed = MutableThis->Seed;
 	const TMap<ENightRouteId, FNightRuleAtomQueue> PreviousRouteModes = MutableThis->RouteModes;
 	const TMap<ENightRouteId, FNightRuleAtomQueue> PreviousBranchRoutes = MutableThis->BranchRoutes;
 	const bool PreviousAutoSelectAtomKeys = MutableThis->bAutoSelectAtomKeys;
 	const FString PreviousEditorJson = MutableThis->EditorJson;
 	MutableThis->Modify();
-	MutableThis->Seed = static_cast<int32>(JsonSeed);
 	MutableThis->RouteModes = MoveTemp(ImportedRouteModes);
 	MutableThis->BranchRoutes = MoveTemp(ImportedBranchRoutes);
 	MutableThis->bAutoSelectAtomKeys = ImportedAutoSelectAtomKeys;
@@ -582,7 +576,6 @@ bool UNightCourseRuleData::ImportJson(const FString& JsonText, FString& OutError
 
 	if (!ValidateRule(OutError))
 	{
-		MutableThis->Seed = PreviousSeed;
 		MutableThis->RouteModes = PreviousRouteModes;
 		MutableThis->BranchRoutes = PreviousBranchRoutes;
 		MutableThis->bAutoSelectAtomKeys = PreviousAutoSelectAtomKeys;
@@ -603,7 +596,6 @@ bool UNightCourseRuleData::ExportJson(FString& OutJson, FString& OutError) const
 	}
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetNumberField(TEXT("seed"), Seed);
 	Root->SetBoolField(TEXT("autoSelectAtomKeys"), bAutoSelectAtomKeys);
 
 	if (RouteModes.Num() > 0)

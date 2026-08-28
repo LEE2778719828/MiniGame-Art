@@ -685,7 +685,7 @@ class MINIGAME_API USChefSaveGame : public USaveGame
 
 public:
 	// v3: day order queue + cursor for mid-day load / day-start rollback.
-	static constexpr int32 CurrentSaveVersion = 4;
+	static constexpr int32 CurrentSaveVersion = 5;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 SaveVersion = CurrentSaveVersion;
@@ -741,6 +741,10 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	int32 ReviewSeedState = 1001;
+
+	/** Current DA_Queue entry. Advances only after a successful Night. */
+	UPROPERTY(VisibleAnywhere, Category = "S Save")
+	int32 NightCourseQueueIndex = 0;
 
 	UPROPERTY(VisibleAnywhere, Category = "S Save")
 	TArray<FString> ConsumedResultIds;
@@ -1114,6 +1118,10 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Sandbox")
 	int32 ReviewSeed = 1001;
+
+	/** Selected DA_Queue entry for the next Night.  Success advances it; retry preserves it. */
+	UPROPERTY(BlueprintReadOnly, Category = "S Flow|Course Queue")
+	int32 NightCourseQueueIndex = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	FName ForkPair = TEXT("AB");

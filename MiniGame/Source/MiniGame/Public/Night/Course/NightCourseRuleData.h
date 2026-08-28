@@ -55,15 +55,13 @@ public:
 	bool bEnabled = true;
 
 	/** Empty AtomKey values select deterministically from the configured Atom library. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Rule", meta = (DisplayName = "空Key自动选Atom", ToolTip = "开启后，AtomKey 为空的模板会按 Seed 从 DA_Atoms 选择兼容 Atom；关闭后所有模板都必须填写有效 AtomKey。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Rule", meta = (DisplayName = "空Key自动选Atom", ToolTip = "开启后，AtomKey 为空的模板会按当前队列条目的随机种子从 DA_Atoms 选择兼容 Atom；关闭后所有模板都必须填写有效 AtomKey。"))
 	bool bAutoSelectAtomKeys = true;
 
 /** Editor inspection mode: append every Atom template once in authored order. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Rule|Debug", meta = (DisplayName = "测试：生成全部Atom", ToolTip = "仅用于检查道路 Atom 与地面的相对位置；开启后忽略队列生成数量，按配置顺序生成每个 Atom 模板一次。"))
 	bool bGenerateAllAtomsForTesting = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Rule", meta = (DisplayName = "随机种子", ToolTip = "相同种子会得到相同的路线模板与 Atom 组合；修改它可生成另一套确定性结果。"))
-	int32 Seed = 1001;
 
 	/**
 	 * Day selects the default route mode. The selected mode supplies the
