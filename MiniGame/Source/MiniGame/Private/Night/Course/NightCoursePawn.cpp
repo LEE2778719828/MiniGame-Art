@@ -940,8 +940,15 @@ void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
 	int32 ViewY = 0;
 	PC->GetViewportSize(ViewX, ViewY);
 
+	ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD());
 	ENightFeelInput Input = ENightFeelInput::Jump;
-	if (!ANightCourseHUD::HitTestActionButtons(ScreenX, ScreenY, static_cast<float>(ViewX), static_cast<float>(ViewY), Input))
+	if (!NightHUD
+		|| !NightHUD->HitTestActionButtons(
+			ScreenX,
+			ScreenY,
+			static_cast<float>(ViewX),
+			static_cast<float>(ViewY),
+			Input))
 	{
 		return;
 	}

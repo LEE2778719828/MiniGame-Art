@@ -72,15 +72,33 @@ public:
 	virtual void DrawHUD() override;
 
 	/**
-	 * add by K2 (R1): maps a screen point onto the two on-screen Jump / Attack pads.
-	 * The pads are the same rectangles DrawHUD paints; false means the pointer missed both.
+	 * add by K2 (R1): maps a screen point onto the Jump / Attack touch zones.
+	 * Zones are authored in viewport fractions so they stay aligned after letterbox.
 	 */
-	static bool HitTestActionButtons(
+	bool HitTestActionButtons(
 		float ScreenX,
 		float ScreenY,
 		float ViewX,
 		float ViewY,
-		ENightFeelInput& OutInput);
+		ENightFeelInput& OutInput) const;
+
+#pragma region K2 moonyfli
+	/** Left-bottom Jump zone: X, Y, Width, Height as 0–1 of the game view. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Touch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	FVector4 JumpTouchNorm = FVector4(0.f, 0.5f, 0.5f, 0.5f);
+
+	/** Right-bottom Attack zone: X, Y, Width, Height as 0–1 of the game view. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Touch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	FVector4 AttackTouchNorm = FVector4(0.5f, 0.5f, 0.5f, 0.5f);
+
+	/** Phase / NOW / route text. Off for shipping; leave on only while tuning feel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Debug")
+	bool bShowDebugHud = false;
+
+	/** Translucent Jump / Attack rectangles so the authored touch zones can be lined up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Debug")
+	bool bShowTouchZones = false;
+#pragma endregion K2 moonyfli
 
 	/** Legacy placement scale. Only used when bUseLegacyHUDPlacement is enabled. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD", meta = (ClampMin = "0.1", ClampMax = "2.0"))
