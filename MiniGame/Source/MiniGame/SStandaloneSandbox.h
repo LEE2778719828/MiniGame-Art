@@ -1420,6 +1420,9 @@ public:
 	/** 闭店等清盘场景：先把棋子按付费单位退回库存，再清空棋盘。返回退回总数。 */
 	UFUNCTION(BlueprintCallable, Category = "S Merge")
 	int32 ReclaimPiecesToInventory();
+
+	UFUNCTION(BlueprintCallable, Category = "S Merge")
+	bool TrySpawnFromMotherPieceWithResult(FName IngredientId, int32& OutCellIndex);
 #pragma endregion K2 moonyfli
 
 private:

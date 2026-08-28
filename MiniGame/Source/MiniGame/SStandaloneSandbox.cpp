@@ -3168,6 +3168,15 @@ bool ASMergeBoard::CanMergePieces(const FSDishPiece& A, const FSDishPiece& B, FS
 
 bool ASMergeBoard::TrySpawnFromMotherPiece(const FName IngredientId)
 {
+	int32 IgnoredCellIndex = INDEX_NONE;
+	return TrySpawnFromMotherPieceWithResult(IngredientId, IgnoredCellIndex);
+}
+
+bool ASMergeBoard::TrySpawnFromMotherPieceWithResult(
+	const FName IngredientId,
+	int32& OutCellIndex)
+{
+	OutCellIndex = INDEX_NONE;
 	USChefGameInstance* GameInstance = GetChefGameInstance();
 	if (!GameInstance)
 	{
@@ -3201,6 +3210,7 @@ bool ASMergeBoard::TrySpawnFromMotherPiece(const FName IngredientId)
 	}
 
 	PlacePiece(EmptyIndex, IngredientId, 0, 1); //add by K2
+	OutCellIndex = EmptyIndex;
 	const int32 QuantityAfter = GameInstance->GetQuantity(IngredientId);
 	SetFeedback(FString::Printf(
 		TEXT("母棋子 %s：随机空格 #%d 生成 Lv0，库存 %d→%d，占用 %d/%d。"),
