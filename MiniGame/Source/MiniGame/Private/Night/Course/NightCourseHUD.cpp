@@ -21,8 +21,10 @@
 #include "Engine/Engine.h"
 #include "Engine/Texture2D.h" //add by K2
 #include "GameFramework/PlayerController.h"
+#include "Components/AudioComponent.h" //add by K2
 #include "Kismet/GameplayStatics.h" //add by K2
 #include "Sound/SoundBase.h" //add by K2
+#include "TimerManager.h" //add by K2
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
@@ -1063,11 +1065,19 @@ void ANightCourseHUD::NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop)
 
 	if (bPlayDrop)
 	{
-		PlaySfx(IngredientDropSound, IngredientDropVolume);
+		PlaySfx(
+			IngredientDropSound,
+			IngredientDropVolume,
+			IngredientDropPlaySeconds,
+			IngredientDropFadeSeconds);
 	}
 }
 
-void ANightCourseHUD::PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float Volume)
+void ANightCourseHUD::PlaySfx(
+	const TSoftObjectPtr<USoundBase>& SoftSound,
+	float Volume,
+	float StopAfterSeconds,
+	float FadeOutSeconds)
 {
 	if (SoftSound.IsNull() || Volume <= KINDA_SMALL_NUMBER)
 	{
@@ -1078,6 +1088,26 @@ void ANightCourseHUD::PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float
 	{
 		return;
 	}
-	UGameplayStatics::PlaySound2D(this, Sound, Volume);
+
+	UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(this, Sound, Volume);
+	if (!Comp || StopAfterSeconds <= KINDA_SMALL_NUMBER || !GetWorld())
+	{
+		return;
+	}
+
+	TWeakObjectPtr<UAudioComponent> WeakComp(Comp);
+	const float Fade = FMath::Max(0.01f, FadeOutSeconds);
+	FTimerHandle FadeHandle;
+	GetWorld()->GetTimerManager().SetTimer(
+		FadeHandle,
+		[WeakComp, Fade]()
+		{
+			if (UAudioComponent* Alive = WeakComp.Get())
+			{
+				Alive->FadeOut(Fade, 0.f);
+			}
+		},
+		StopAfterSeconds,
+		false);
 }
 #pragma endregion K2 moonyfli

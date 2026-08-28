@@ -255,6 +255,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.0"))
 	float IngredientDropVolume = 1.f;
 
+	/** Seconds of the drop wave to keep before fade. 0 plays the full 1.87s file. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.0"))
+	float IngredientDropPlaySeconds = 0.28f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX", meta = (ClampMin = "0.01"))
+	float IngredientDropFadeSeconds = 0.12f;
+
 	UFUNCTION(BlueprintCallable, Category = "Night|HUD|SFX")
 	void NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop);
 #pragma endregion K2 moonyfli
@@ -333,7 +340,11 @@ private:
 	FVector2D GetCanvasLetterboxPixelOffset() const;
 	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
 	void DrawDropFlyIcons(float DeltaSeconds);
-	void PlaySfx(const TSoftObjectPtr<USoundBase>& SoftSound, float Volume);
+	void PlaySfx(
+		const TSoftObjectPtr<USoundBase>& SoftSound,
+		float Volume,
+		float StopAfterSeconds = 0.f,
+		float FadeOutSeconds = 0.08f);
 #pragma endregion K2 moonyfli
 };
 #pragma endregion K2 moonyfli
