@@ -110,6 +110,9 @@ struct FSGameStageRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 RevenueTarget = 90;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", DisplayName = "Daily Revenue Cap"))
+	int32 DailyRevenueCap = 0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 CustomerConcurrentMax = 2;
 

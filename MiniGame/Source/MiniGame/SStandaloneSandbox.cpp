@@ -1408,8 +1408,27 @@ void USChefGameInstance::AddRevenue(const int32 Amount)
 	{
 		return;
 	}
-	Revenue += Amount;
-	TotalCoinsEarned += Amount;
+	const int32 RevenueCap = ActiveStageRow.DailyRevenueCap;
+
+	const int32 AcceptedAmount = RevenueCap > 0
+		? FMath::Max(0, FMath::Min(Amount, RevenueCap - Revenue))
+		: Amount;
+	
+	if (AcceptedAmount <= 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("营业额已达上限：%d/%d，本次收入 %d 未入账。"),
+			Revenue,
+			RevenueCap,
+			Amount
+		);
+		return;
+	}
+	
+	Revenue += AcceptedAmount;
+	TotalCoinsEarned += AcceptedAmount;
 #pragma region K2 moonyfli
 	// 达标只是解锁日结，营业照旧继续，直到时间结束或食材耗尽。
 	if (Phase == ESGamePhase::DayRunning && Revenue >= RevenueTarget)
