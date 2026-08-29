@@ -700,8 +700,11 @@ private:
 	TObjectPtr<USDayDragPreview> DragPreview;
 
 	TMap<int32, FTimerHandle> BinAnimTimers; //add by K2
+	/** Presenter-owned timer handles keep flight callbacks from owning and destroying their own handles. */
+	TMap<uint64, FTimerHandle> IngredientFlightTimers;
 	/** Number of in-flight bin items targeting each cell; their resting visuals stay hidden until arrival. */
 	TMap<int32, int32> PendingIngredientArrivalCounts;
+	uint64 NextIngredientFlightId = 0;
 
 	bool bUsingSceneAuthoredSeats = false; //add by K2
 	bool bPointerWasDown = false;

@@ -1842,6 +1842,15 @@ void ASDayBoardPresenter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		GameInstance->OnSandboxStateChanged.RemoveDynamic(this, &ASDayBoardPresenter::RefreshFromLogic);
 	}
+	if (UWorld* World = GetWorld())
+	{
+		for (TPair<uint64, FTimerHandle>& Flight : IngredientFlightTimers)
+		{
+			World->GetTimerManager().ClearTimer(Flight.Value);
+		}
+	}
+	IngredientFlightTimers.Reset();
+	PendingIngredientArrivalCounts.Reset();
 	if (DragPreview)
 	{
 		DragPreview->RemoveFromParent();
@@ -2951,12 +2960,13 @@ void ASDayBoardPresenter::PlayIngredientSpawnFeedback(
 	const float FlyArcHeight = FMath::Max(0.0f, IngredientFlyArcHeight);
 	const bool bBurstAtTarget = bSpawnFoodBurstAtTarget;
 	const FVector BurstScale = IngredientBinFoodBurstScale;
-	const TSharedRef<FTimerHandle> FlightTimer = MakeShared<FTimerHandle>();
+	const uint64 FlightId = ++NextIngredientFlightId;
+	FTimerHandle& FlightTimer = IngredientFlightTimers.Add(FlightId);
 	const TWeakObjectPtr<USDayDragPreview> WeakFlyingPreview(FlyingPreview);
 	const TWeakObjectPtr<ASDayBoardPresenter> WeakPresenter(this);
 	World->GetTimerManager().SetTimer(
-		*FlightTimer,
-		FTimerDelegate::CreateWeakLambda(this, [WeakPresenter, WeakFlyingPreview, FlightTimer, StartScreen, EndScreen, End, StartSeconds, DurationSeconds, FlyArcHeight, BurstSystem, bBurstAtTarget, BurstScale, SpawnedCellIndex]()
+		FlightTimer,
+		FTimerDelegate::CreateWeakLambda(this, [WeakPresenter, WeakFlyingPreview, FlightId, StartScreen, EndScreen, End, StartSeconds, DurationSeconds, FlyArcHeight, BurstSystem, bBurstAtTarget, BurstScale, SpawnedCellIndex]()
 		{
 			ASDayBoardPresenter* Presenter = WeakPresenter.Get();
 			USDayDragPreview* Preview = WeakFlyingPreview.Get();
@@ -2978,12 +2988,14 @@ void ASDayBoardPresenter::PlayIngredientSpawnFeedback(
 			}
 			if (Alpha >= 1.0f)
 			{
+				// Copy the presenter-owned handle before removing it. Clearing an executing timer
+				// destroys its delegate immediately, so all captured state must be finished first.
+				FTimerHandle TimerHandleToClear = Presenter->IngredientFlightTimers.FindRef(FlightId);
 				if (BurstSystem && bBurstAtTarget)
 				{
 					UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 						CurrentWorld, BurstSystem, End, FRotator::ZeroRotator, BurstScale);
 				}
-				CurrentWorld->GetTimerManager().ClearTimer(*FlightTimer);
 				if (Preview)
 				{
 					Preview->HidePreview();
@@ -3001,6 +3013,9 @@ void ASDayBoardPresenter::PlayIngredientSpawnFeedback(
 						}
 					}
 				}
+
+				Presenter->IngredientFlightTimers.Remove(FlightId);
+				CurrentWorld->GetTimerManager().ClearTimer(TimerHandleToClear);
 			}
 		}),
 		1.0f / 60.0f,
@@ -3309,11 +3324,16 @@ bool ASDayBoardPresenter::TryDropPieceAndNotify(
 		&& FromPiece.IngredientId == ToPiece.IngredientId
 		&& FromPiece.Level == ToPiece.Level;
 	const bool bDropSucceeded = Board->TryDropPiece(FromCellIndex, ToCellIndex);
-	if (bDropSucceeded && bMergeCandidate)
+	if (bDropSucceeded)
 	{
+		// A piece can be moved after its flight overlay has finished but before a stale
+		// arrival flag was released. Never let that old cell index hide future contents.
 		PendingIngredientArrivalCounts.Remove(FromCellIndex);
-    	PendingIngredientArrivalCounts.Remove(ToCellIndex);
-		BP_OnIngredientMergeCompleted(ToPiece.IngredientId, ToPiece.Level + 1, ToCellIndex);
+		if (bMergeCandidate)
+		{
+			PendingIngredientArrivalCounts.Remove(ToCellIndex);
+			BP_OnIngredientMergeCompleted(ToPiece.IngredientId, ToPiece.Level + 1, ToCellIndex);
+		}
 	}
 	return bDropSucceeded;
 }
