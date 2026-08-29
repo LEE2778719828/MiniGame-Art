@@ -3989,7 +3989,7 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	{
 		RevenueFlyingItemMaterial = LoadObject<UMaterialInterface>(
 			nullptr,
-			TEXT("/Game/Day/Art/cookingUI/MI_CookingFG_01_Coins.MI_CookingFG_01_Coins"));
+			TEXT("/Game/Day/UI/Materials/MI_UI_RevenueCoinFly.MI_UI_RevenueCoinFly"));
 	}
 	if (!RevenueFlyingItemClass || !RevenueFlyPathCurve || !RevenueFlyScaleCurve)
 	{
