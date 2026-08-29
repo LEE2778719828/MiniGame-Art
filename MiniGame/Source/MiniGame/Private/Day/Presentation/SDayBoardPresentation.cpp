@@ -3859,6 +3859,43 @@ void USDayHUD::ResolveForegroundReadouts()
 		return;
 	}
 
+	auto CacheReadouts = [this](UUserWidget* Page)
+	{
+		if (!Page)
+		{
+			return false;
+		}
+
+		UTextBlock* Coin = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("CoinAmount")));
+		UTextBlock* Current = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueCurrent")));
+		UTextBlock* Target = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueTarget")));
+		if (!Coin && !Current && !Target)
+		{
+			return false;
+		}
+
+		CoinAmountText = Coin;
+		RevenueCurrentText = Current;
+		RevenueTargetText = Target;
+		return true;
+	};
+
+	// The foreground may be created by the level blueprint and added directly to the viewport.
+	// Prefer that top-level instance before falling back to the legacy camera widget component.
+	TArray<UUserWidget*> ViewportWidgets;
+	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(
+		this,
+		ViewportWidgets,
+		UUserWidget::StaticClass(),
+		true);
+	for (UUserWidget* ViewportWidget : ViewportWidgets)
+	{
+		if (CacheReadouts(ViewportWidget))
+		{
+			return;
+		}
+	}
+
 	TInlineComponentArray<UWidgetComponent*> WidgetComponents;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
@@ -3869,22 +3906,10 @@ void USDayHUD::ResolveForegroundReadouts()
 			{
 				continue;
 			}
-			UUserWidget* Page = WidgetComponent->GetUserWidgetObject();
-			if (!Page)
+			if (CacheReadouts(WidgetComponent->GetUserWidgetObject()))
 			{
-				continue;
+				return;
 			}
-			UTextBlock* Coin = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("CoinAmount")));
-			UTextBlock* Current = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueCurrent")));
-			UTextBlock* Target = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueTarget")));
-			if (!Coin && !Current && !Target)
-			{
-				continue;
-			}
-			CoinAmountText = Coin;
-			RevenueCurrentText = Current;
-			RevenueTargetText = Target;
-			return;
 		}
 	}
 }
