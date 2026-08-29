@@ -29,6 +29,7 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UTextBlock;
 class UTextRenderComponent;
+class UWidget;
 class UTexture2D;
 class USChefGameInstance;
 class UScrollBox;
@@ -821,6 +822,7 @@ private:
 	 */
 	void RefreshForegroundReadouts(const USChefGameInstance& GameInstance);
 	void ResolveForegroundReadouts();
+	bool ResolveRevenueFlyTargetPosition(FVector2D& OutPixelPosition);
 #pragma endregion K2 moonyfli
 
 	void SpawnIngredient(FName IngredientId);
@@ -874,6 +876,7 @@ private:
 	TWeakObjectPtr<UTextBlock> CoinAmountText;
 	TWeakObjectPtr<UTextBlock> RevenueCurrentText;
 	TWeakObjectPtr<UTextBlock> RevenueTargetText;
+	TWeakObjectPtr<UWidget> RevenueFlyTargetWidget;
 
 	/** Single flying item authored in UMG; one sale creates a short staggered burst of instances. */
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
@@ -892,11 +895,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
 	FVector2D RevenueFlySourceScreenOffset = FVector2D::ZeroVector;
 
-	/** Normalized player-viewport destination. (0,0) is top-left and (1,1) is bottom-right. */
+	/** Named non-zero-size widget in WBP_SDayCookingForeground whose center is the authored flight destination. */
+	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
+	FName RevenueFlyTargetWidgetName = TEXT("RevenueFlyTarget");
+
+	/** Legacy fallback used only when neither RevenueFlyTarget nor RevenueCurrent has valid geometry. */
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	FVector2D RevenueFlyTargetViewportRatio = FVector2D(0.08f, 0.07f);
 
-	/** Fine adjustment in pixels after applying RevenueFlyTargetViewportRatio. */
+	/** Legacy fallback adjustment in pixels after applying RevenueFlyTargetViewportRatio. */
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Placement")
 	FVector2D RevenueFlyTargetScreenOffset = FVector2D::ZeroVector;
 
@@ -928,6 +935,8 @@ private:
 	/** Arc height as a fraction of viewport height; 0.10 means ten percent. */
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback|Motion", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.3"))
 	float RevenueFlyArcHeightRatio = 0.10f;
+
+	bool bRevenueFlyTargetFallbackWarningLogged = false;
 #pragma endregion K2 moonyfli
 
 	/** Shop clock and spawn cooldown move without state events, so poll the logic. */

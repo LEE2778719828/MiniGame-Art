@@ -4,6 +4,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "EngineUtils.h" //add by K2
 #include "Components/Border.h"
@@ -4098,6 +4099,7 @@ void USDayHUD::ResolveForegroundReadouts()
 	CoinAmountText.Reset();
 	RevenueCurrentText.Reset();
 	RevenueTargetText.Reset();
+	RevenueFlyTargetWidget.Reset();
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -4115,7 +4117,8 @@ void USDayHUD::ResolveForegroundReadouts()
 		UTextBlock* Coin = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("CoinAmount")));
 		UTextBlock* Current = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueCurrent")));
 		UTextBlock* Target = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueTarget")));
-		if (!Coin && !Current && !Target)
+		UWidget* FlyTarget = Page->GetWidgetFromName(RevenueFlyTargetWidgetName);
+		if (!Coin && !Current && !Target && !FlyTarget)
 		{
 			return false;
 		}
@@ -4123,6 +4126,7 @@ void USDayHUD::ResolveForegroundReadouts()
 		CoinAmountText = Coin;
 		RevenueCurrentText = Current;
 		RevenueTargetText = Target;
+		RevenueFlyTargetWidget = FlyTarget;
 		return true;
 	};
 
@@ -4158,6 +4162,57 @@ void USDayHUD::ResolveForegroundReadouts()
 			}
 		}
 	}
+}
+
+bool USDayHUD::ResolveRevenueFlyTargetPosition(FVector2D& OutPixelPosition)
+{
+	if (!RevenueFlyTargetWidget.IsValid())
+	{
+		ResolveForegroundReadouts();
+	}
+
+	UWidget* TargetWidget = RevenueFlyTargetWidget.Get();
+	if (!TargetWidget)
+	{
+		// Keep old foreground assets functional while the named designer anchor is being added.
+		TargetWidget = RevenueCurrentText.Get();
+		if (TargetWidget && !bRevenueFlyTargetFallbackWarningLogged)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("[DayRevenueFly] Widget '%s' was not found; using RevenueCurrent center until the UMG anchor is configured."),
+				*RevenueFlyTargetWidgetName.ToString());
+			bRevenueFlyTargetFallbackWarningLogged = true;
+		}
+	}
+	if (!TargetWidget)
+	{
+		return false;
+	}
+
+	const FGeometry& Geometry = TargetWidget->GetCachedGeometry();
+	const FVector2D LocalSize = Geometry.GetLocalSize();
+	if (LocalSize.X <= KINDA_SMALL_NUMBER || LocalSize.Y <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	FVector2D PixelPosition = FVector2D::ZeroVector;
+	FVector2D ViewportPosition = FVector2D::ZeroVector;
+	USlateBlueprintLibrary::LocalToViewport(
+		this,
+		Geometry,
+		LocalSize * 0.5f,
+		PixelPosition,
+		ViewportPosition);
+	if (!FMath::IsFinite(PixelPosition.X) || !FMath::IsFinite(PixelPosition.Y))
+	{
+		return false;
+	}
+
+	OutPixelPosition = PixelPosition;
+	return true;
 }
 
 void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
@@ -4255,13 +4310,26 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	}
 
 	StartPosition += RevenueFlySourceScreenOffset;
-	const FVector2D ClampedTargetRatio(
-		FMath::Clamp(RevenueFlyTargetViewportRatio.X, 0.0f, 1.0f),
-		FMath::Clamp(RevenueFlyTargetViewportRatio.Y, 0.0f, 1.0f));
-	FVector2D EndPosition(
-		CameraViewRect.Min.X + CameraViewRect.Width() * ClampedTargetRatio.X,
-		CameraViewRect.Min.Y + CameraViewRect.Height() * ClampedTargetRatio.Y);
-	EndPosition += RevenueFlyTargetScreenOffset;
+	FVector2D EndPosition = FVector2D::ZeroVector;
+	const bool bResolvedWidgetTarget = ResolveRevenueFlyTargetPosition(EndPosition);
+	if (!bResolvedWidgetTarget)
+	{
+		const FVector2D ClampedTargetRatio(
+			FMath::Clamp(RevenueFlyTargetViewportRatio.X, 0.0f, 1.0f),
+			FMath::Clamp(RevenueFlyTargetViewportRatio.Y, 0.0f, 1.0f));
+		EndPosition = FVector2D(
+			CameraViewRect.Min.X + CameraViewRect.Width() * ClampedTargetRatio.X,
+			CameraViewRect.Min.Y + CameraViewRect.Height() * ClampedTargetRatio.Y);
+		EndPosition += RevenueFlyTargetScreenOffset;
+		if (!bRevenueFlyTargetFallbackWarningLogged)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("[DayRevenueFly] No valid UMG target geometry was available; using the legacy viewport-ratio fallback."));
+			bRevenueFlyTargetFallbackWarningLogged = true;
+		}
+	}
 	if (bClampRevenueFlyToViewport)
 	{
 		const float CameraMinX = static_cast<float>(CameraViewRect.Min.X);
@@ -4270,8 +4338,12 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 		const float CameraMaxY = static_cast<float>(CameraViewRect.Max.Y);
 		StartPosition.X = FMath::Clamp(StartPosition.X, CameraMinX, CameraMaxX);
 		StartPosition.Y = FMath::Clamp(StartPosition.Y, CameraMinY, CameraMaxY);
-		EndPosition.X = FMath::Clamp(EndPosition.X, CameraMinX, CameraMaxX);
-		EndPosition.Y = FMath::Clamp(EndPosition.Y, CameraMinY, CameraMaxY);
+		const float TargetMaxX = bResolvedWidgetTarget ? static_cast<float>(ViewportWidth) : CameraMaxX;
+		const float TargetMaxY = bResolvedWidgetTarget ? static_cast<float>(ViewportHeight) : CameraMaxY;
+		const float TargetMinX = bResolvedWidgetTarget ? 0.0f : CameraMinX;
+		const float TargetMinY = bResolvedWidgetTarget ? 0.0f : CameraMinY;
+		EndPosition.X = FMath::Clamp(EndPosition.X, TargetMinX, TargetMaxX);
+		EndPosition.Y = FMath::Clamp(EndPosition.Y, TargetMinY, TargetMaxY);
 	}
 
 	auto SetVectorProperty = [](UObject* Object, const FName Name, const FVector& Value)
