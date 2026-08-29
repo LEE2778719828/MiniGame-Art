@@ -1782,6 +1782,38 @@ ASDayBoardPresenter::ASDayBoardPresenter()
 		FSoftObjectPath(TEXT("/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_FoodBurst.Min_BoxOpen_FoodBurst")));
 	IngredientBinTrailSystem = TSoftObjectPtr<UNiagaraSystem>(
 		FSoftObjectPath(TEXT("/Game/VFX_Merge/Niagara/BOX/Min_BoxOpen_Trail.Min_BoxOpen_Trail")));
+
+#pragma region K2 moonyfli
+	auto MakeGhostFire = [](const TCHAR* ComponentName, const TCHAR* AssetPath, const float BiasX, const float BiasY)
+	{
+		FSDayGhostFireAnchor Anchor;
+		Anchor.ComponentName = FName(ComponentName);
+		Anchor.System = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(AssetPath));
+		Anchor.FrameBias = FVector2D(BiasX, BiasY);
+		return Anchor;
+	};
+	GhostFireAnchors.Reset();
+	GhostFireAnchors.Add(MakeGhostFire(
+		TEXT("NC_Ghost_TopLeft"),
+		TEXT("/Game/VFX_Fire/Niagara/Min_NormalFire_LeftUp.Min_NormalFire_LeftUp"),
+		-0.74f,
+		0.72f));
+	GhostFireAnchors.Add(MakeGhostFire(
+		TEXT("NC_Ghost_TopRight"),
+		TEXT("/Game/VFX_Fire/Niagara/Min_NormalFire_RightUp.Min_NormalFire_RightUp"),
+		0.74f,
+		0.70f));
+	GhostFireAnchors.Add(MakeGhostFire(
+		TEXT("NC_Ghost_Right"),
+		TEXT("/Game/VFX_Fire/Niagara/Min_NormalFire_RightBottom.Min_NormalFire_RightBottom"),
+		0.88f,
+		0.08f));
+	GhostFireAnchors.Add(MakeGhostFire(
+		TEXT("NC_Ghost_BottomLeft"),
+		TEXT("/Game/VFX_Fire/Niagara/Min_NormalFire_LeftBottom.Min_NormalFire_LeftBottom"),
+		-0.72f,
+		-0.62f));
+#pragma endregion K2 moonyfli
 }
 
 void ASDayBoardPresenter::BeginPlay()
@@ -1834,6 +1866,9 @@ void ASDayBoardPresenter::BeginPlay()
 		}
 	}
 	RefreshFromLogic();
+#pragma region K2 moonyfli
+	EnsureGhostFireVfx();
+#pragma endregion K2 moonyfli
 }
 
 void ASDayBoardPresenter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -2848,6 +2883,195 @@ USkeletalMeshComponent* ASDayBoardPresenter::FindIngredientBinAnimComponent(cons
 	return Fallback;
 #pragma endregion K2 moonyfli
 }
+
+#pragma region K2 moonyfli
+namespace
+{
+	bool MatchesAuthoredComponentName(const UActorComponent* Component, const FName TargetName)
+	{
+		if (!Component || TargetName.IsNone())
+		{
+			return false;
+		}
+		const FString Name = Component->GetName();
+		const FString Exact = TargetName.ToString();
+		return Name.Equals(Exact, ESearchCase::IgnoreCase)
+			|| Name.StartsWith(Exact + TEXT("_"), ESearchCase::IgnoreCase);
+	}
+}
+
+UStaticMeshComponent* ASDayBoardPresenter::FindGhostMeshComponent(AActor** OutOwner) const
+{
+	if (OutOwner)
+	{
+		*OutOwner = nullptr;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World || GhostMeshComponentName.IsNone())
+	{
+		return nullptr;
+	}
+
+	UStaticMeshComponent* Fallback = nullptr;
+	AActor* FallbackOwner = nullptr;
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Candidate = *It;
+		if (!Candidate)
+		{
+			continue;
+		}
+
+		TInlineComponentArray<UStaticMeshComponent*> Meshes;
+		Candidate->GetComponents(Meshes);
+		for (UStaticMeshComponent* Mesh : Meshes)
+		{
+			if (!MatchesAuthoredComponentName(Mesh, GhostMeshComponentName))
+			{
+				continue;
+			}
+			if (Candidate->ActorHasTag(DayBoardPresentationPrivate::DayArtEnvironmentTag))
+			{
+				if (OutOwner)
+				{
+					*OutOwner = Candidate;
+				}
+				return Mesh;
+			}
+			if (!Fallback)
+			{
+				Fallback = Mesh;
+				FallbackOwner = Candidate;
+			}
+		}
+	}
+
+	if (OutOwner)
+	{
+		*OutOwner = FallbackOwner;
+	}
+	return Fallback;
+}
+
+void ASDayBoardPresenter::EnsureGhostFireVfx()
+{
+	if (!bEnableGhostFireVfx || GhostFireAnchors.Num() == 0)
+	{
+		return;
+	}
+
+	AActor* Restaurant = nullptr;
+	UStaticMeshComponent* GhostMesh = FindGhostMeshComponent(&Restaurant);
+	if (!Restaurant || !GhostMesh)
+	{
+		return;
+	}
+
+	DayBoardPresentationPrivate::FDayCameraFrame Frame;
+	const bool bHaveFrame = DayBoardPresentationPrivate::TryGetDayCameraFrame(GetWorld(), Frame);
+
+	float MinRight = 0.0f;
+	float MaxRight = 0.0f;
+	float MinUp = 0.0f;
+	float MaxUp = 0.0f;
+	float CenterDepth = 0.0f;
+	if (bHaveFrame)
+	{
+		const FVector Origin = GhostMesh->Bounds.Origin;
+		const FVector Extent = GhostMesh->Bounds.BoxExtent;
+		bool bHasCorner = false;
+		for (int32 SignX = -1; SignX <= 1; SignX += 2)
+		{
+			for (int32 SignY = -1; SignY <= 1; SignY += 2)
+			{
+				for (int32 SignZ = -1; SignZ <= 1; SignZ += 2)
+				{
+					const FVector Corner = Origin + FVector(
+						static_cast<double>(SignX) * Extent.X,
+						static_cast<double>(SignY) * Extent.Y,
+						static_cast<double>(SignZ) * Extent.Z);
+					const FVector InFrame = Frame.ToFrame(Corner);
+					if (!bHasCorner)
+					{
+						MinRight = MaxRight = InFrame.X;
+						MinUp = MaxUp = InFrame.Y;
+						bHasCorner = true;
+					}
+					else
+					{
+						MinRight = FMath::Min(MinRight, InFrame.X);
+						MaxRight = FMath::Max(MaxRight, InFrame.X);
+						MinUp = FMath::Min(MinUp, InFrame.Y);
+						MaxUp = FMath::Max(MaxUp, InFrame.Y);
+					}
+				}
+			}
+		}
+		CenterDepth = Frame.ToFrame(Origin).Z;
+	}
+
+	TInlineComponentArray<UNiagaraComponent*> ExistingFires;
+	Restaurant->GetComponents(ExistingFires);
+
+	for (const FSDayGhostFireAnchor& Anchor : GhostFireAnchors)
+	{
+		UNiagaraSystem* System = Anchor.System.LoadSynchronous();
+		if (!System)
+		{
+			continue;
+		}
+
+		FVector WorldLocation = GhostMesh->GetComponentLocation();
+		if (bAutoPlaceGhostFire && bHaveFrame)
+		{
+			const float AlphaX = FMath::Clamp(0.5f + 0.5f * Anchor.FrameBias.X, 0.0f, 1.0f);
+			const float AlphaY = FMath::Clamp(0.5f + 0.5f * Anchor.FrameBias.Y, 0.0f, 1.0f);
+			WorldLocation = Frame.ToWorld(FVector(
+				FMath::Lerp(MinRight, MaxRight, AlphaX),
+				FMath::Lerp(MinUp, MaxUp, AlphaY),
+				CenterDepth - GhostFireTowardCameraCm));
+		}
+
+		UNiagaraComponent* Fire = nullptr;
+		for (UNiagaraComponent* Candidate : ExistingFires)
+		{
+			if (MatchesAuthoredComponentName(Candidate, Anchor.ComponentName))
+			{
+				Fire = Candidate;
+				break;
+			}
+		}
+
+		if (!Fire)
+		{
+			if (!bAutoPlaceGhostFire)
+			{
+				continue;
+			}
+			Fire = NewObject<UNiagaraComponent>(Restaurant, Anchor.ComponentName);
+			if (!Fire)
+			{
+				continue;
+			}
+			Fire->SetAsset(System);
+			Fire->SetupAttachment(GhostMesh);
+			Fire->SetAutoActivate(true);
+			Fire->RegisterComponent();
+			Restaurant->AddInstanceComponent(Fire);
+			Fire->SetAbsolute(false, false, true);
+			Fire->SetWorldScale3D(GhostFireWorldScale);
+			Fire->SetWorldLocation(WorldLocation);
+		}
+		else if (!Fire->GetAsset())
+		{
+			Fire->SetAsset(System);
+		}
+
+		Fire->Activate(true);
+	}
+}
+#pragma endregion K2 moonyfli
 
 void ASDayBoardPresenter::PlayIngredientSpawnFeedback(
 	ASDayIngredientBinVisual* Bin,

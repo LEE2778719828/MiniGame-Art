@@ -119,6 +119,26 @@ struct MINIGAME_API FSDayDishIconSet
 	TArray<TSoftObjectPtr<UTexture2D>> LevelIcons;
 };
 
+#pragma region K2 moonyfli
+/** One looping fire around the restaurant ghost mesh (guai). */
+USTRUCT(BlueprintType)
+struct MINIGAME_API FSDayGhostFireAnchor
+{
+	GENERATED_BODY()
+
+	/** Reused if BP_SDayCanguan already has this Niagara component. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	FName ComponentName = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	TSoftObjectPtr<UNiagaraSystem> System;
+
+	/** Bias inside the ghost-mesh AABB in camera frame: X = screen right, Y = screen up, -1..1. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	FVector2D FrameBias = FVector2D::ZeroVector;
+};
+#pragma endregion K2 moonyfli
+
 UCLASS(BlueprintType)
 class MINIGAME_API USDayBoardVisualConfig : public UPrimaryDataAsset
 {
@@ -637,6 +657,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ingredient Bins|VFX|Food Icon",
 		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "500.0"))
 	float IngredientFlyArcHeight = 105.0f;
+
+	/** Looping /Game/VFX_Fire systems on the four painted ghosts around the tray. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	bool bEnableGhostFireVfx = false;
+
+	/** When true, C++ spawns and moves anchors. Leave false if the restaurant BP authors them. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	bool bAutoPlaceGhostFire = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	FName GhostMeshComponentName = TEXT("guai");
+
+	/** Pull each flame toward the camera so the ghost mesh does not occlude it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire",
+		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "120.0"))
+	float GhostFireTowardCameraCm = 28.0f;
+
+	/** Absolute world scale; ignores Stall parent scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	FVector GhostFireWorldScale = FVector(0.35f, 0.35f, 0.35f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Ghost Fire")
+	TArray<FSDayGhostFireAnchor> GhostFireAnchors;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "S Day Board")
@@ -675,6 +718,8 @@ private:
 	void CloseIngredientBinAnimation(int32 BinIndex);
 	void RestIngredientBinAnimation(int32 BinIndex);
 	USkeletalMeshComponent* FindIngredientBinAnimComponent(int32 BinIndex) const;
+	void EnsureGhostFireVfx();
+	UStaticMeshComponent* FindGhostMeshComponent(AActor** OutOwner = nullptr) const;
 #pragma endregion K2 moonyfli
 	bool IsInIngredientDropZone(const FVector2D& ScreenPosition) const;
 	bool TryDecomposeInIngredientArea(const FVector2D& ScreenPosition, ASMergeBoard* Board);
