@@ -896,7 +896,7 @@ public:
 	static FName MakeRecipeId(FName IngredientId, int32 Level);
 
 #pragma region K2 moonyfli
-	/** 开店前预生成当日订单出现顺序（含特殊 NPC 槽）。 */
+	/** 开店前预生成覆盖营业额目标的保底订单段（含特殊 NPC 槽）。 */
 	UFUNCTION(BlueprintCallable, Category = "S Orders")
 	bool BuildPlannedDayOrders();
 
@@ -913,7 +913,7 @@ public:
 	FString GetPlannedOrderSummary() const;
 
 #pragma region K2 moonyfli
-	/** Take the next appearance slot and advance the queue cursor immediately. */
+	/** Take the next appearance slot; after the guaranteed segment, append ordinary guest orders on demand. */
 	UFUNCTION(BlueprintCallable, Category = "S Orders")
 	bool TryDequeueNextPlannedOrder(FSPlannedOrder& OutOrder);
 #pragma endregion K2 moonyfli
@@ -1186,7 +1186,7 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	FSRunSnapshot DayStartSnapshot;
 
-	/** 当日预生成订单队列（含 NPC 槽）；日初快照也会备份一份。 */
+	/** 当日订单队列：日初保底段含 NPC，消费完后按需追加普通顾客；日初快照也会备份一份。 */
 	UPROPERTY(BlueprintReadOnly, Category = "S Orders")
 	TArray<FSPlannedOrder> PlannedDayOrders;
 
@@ -1283,6 +1283,7 @@ private:
 	void ResetDayDirectors(bool bStartService);
 	int32 CountPantryUnits() const;
 	int32 CountChainUnitsAvailable(FName IngredientId) const;
+	bool TryGenerateEndlessGuestOrder(FSPlannedOrder& OutOrder) const;
 	bool HasDayResourcesLeft() const;
 	static const TCHAR* DayEndReasonText(ESDayEndReason Reason);
 

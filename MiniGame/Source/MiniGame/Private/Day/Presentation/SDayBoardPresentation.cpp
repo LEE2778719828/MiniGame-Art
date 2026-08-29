@@ -3989,10 +3989,11 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	{
 		RevenueFlyingItemMaterial = LoadObject<UMaterialInterface>(
 			nullptr,
-			TEXT("/Game/Day/UI/Materials/MI_UI_RevenueCoinFly.MI_UI_RevenueCoinFly"));
+			TEXT("/Game/Day/Art/food/M_RevenueCoin.M_RevenueCoin"));
 	}
-	if (!RevenueFlyingItemClass || !RevenueFlyPathCurve || !RevenueFlyScaleCurve)
+	if (!RevenueFlyingItemClass || !RevenueFlyPathCurve || !RevenueFlyScaleCurve || !RevenueFlyingItemMaterial)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[DayRevenueFly] Missing flying-item class, curve, or UI material."));
 		return;
 	}
 
