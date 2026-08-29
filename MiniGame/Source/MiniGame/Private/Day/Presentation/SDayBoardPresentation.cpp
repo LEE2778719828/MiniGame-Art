@@ -891,6 +891,20 @@ namespace DayBoardPresentationPrivate
 		return BuiltIn;
 	}
 
+	UTexture2D* KeepIngredientIconResident(UTexture2D* Icon)
+	{
+#if PLATFORM_ANDROID
+		if (Icon)
+		{
+			// The box feedback lives only for a short time. Keep its first mobile mip
+			// resident long enough for Slate/Niagara to render the complete flight.
+			Icon->SetForceMipLevelsToBeResident(2.0f);
+			Icon->WaitForStreaming();
+		}
+#endif
+		return Icon;
+	}
+
 	UTexture2D* ResolveIngredientIcon(const FName IngredientId)
 	{
 		if (UDataTable* Table = LoadSharedDayTable(TEXT("DT_Ingredients")))
@@ -902,7 +916,7 @@ namespace DayBoardPresentationPrivate
 			{
 				if (UTexture2D* Icon = Row->Icon.LoadSynchronous())
 				{
-					return Icon;
+					return KeepIngredientIconResident(Icon);
 				}
 			}
 		}
@@ -913,7 +927,7 @@ namespace DayBoardPresentationPrivate
 		else if (IngredientId == DayChiYanJiaoId) Fallback = TEXT("/Game/Day/Art/food/food_hand_V0.food_hand_V0");
 		else if (IngredientId == DayYueLinYuId) Fallback = TEXT("/Game/Day/Art/food/food_fish_V0.food_fish_V0");
 		else if (IngredientId == DayXuanYuQinId) Fallback = TEXT("/Game/Day/Art/food/food_leg_V0.food_leg_V0");
-		return Fallback ? LoadObject<UTexture2D>(nullptr, Fallback) : nullptr;
+		return Fallback ? KeepIngredientIconResident(LoadObject<UTexture2D>(nullptr, Fallback)) : nullptr;
 	}
 
 	/** Artwork stem shipped for each chain: /Game/Day/Art/food/food_<stem>_V<level>. */
