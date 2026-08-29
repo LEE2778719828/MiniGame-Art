@@ -891,13 +891,14 @@ namespace DayBoardPresentationPrivate
 		return BuiltIn;
 	}
 
-	UTexture2D* KeepIngredientIconResident(UTexture2D* Icon)
+	UTexture2D* KeepDayFoodTextureReady(UTexture2D* Icon)
 	{
 #if PLATFORM_ANDROID
 		if (Icon)
 		{
-			// The box feedback lives only for a short time. Keep its first mobile mip
-			// resident long enough for Slate/Niagara to render the complete flight.
+			// Android can return a synchronously loaded texture before its first mobile mip is
+			// ready for either Slate or a world-space material. Keep it resident through the
+			// immediate presentation and wait so newly merged dish levels render on first use.
 			Icon->SetForceMipLevelsToBeResident(2.0f);
 			Icon->WaitForStreaming();
 		}
@@ -916,7 +917,7 @@ namespace DayBoardPresentationPrivate
 			{
 				if (UTexture2D* Icon = Row->Icon.LoadSynchronous())
 				{
-					return KeepIngredientIconResident(Icon);
+					return KeepDayFoodTextureReady(Icon);
 				}
 			}
 		}
@@ -927,7 +928,7 @@ namespace DayBoardPresentationPrivate
 		else if (IngredientId == DayChiYanJiaoId) Fallback = TEXT("/Game/Day/Art/food/food_hand_V0.food_hand_V0");
 		else if (IngredientId == DayYueLinYuId) Fallback = TEXT("/Game/Day/Art/food/food_fish_V0.food_fish_V0");
 		else if (IngredientId == DayXuanYuQinId) Fallback = TEXT("/Game/Day/Art/food/food_leg_V0.food_leg_V0");
-		return Fallback ? KeepIngredientIconResident(LoadObject<UTexture2D>(nullptr, Fallback)) : nullptr;
+		return Fallback ? KeepDayFoodTextureReady(LoadObject<UTexture2D>(nullptr, Fallback)) : nullptr;
 	}
 
 	/** Artwork stem shipped for each chain: /Game/Day/Art/food/food_<stem>_V<level>. */
@@ -953,7 +954,7 @@ namespace DayBoardPresentationPrivate
 		{
 			if (Cached->IsValid())
 			{
-				return Cached->Get();
+				return KeepDayFoodTextureReady(Cached->Get());
 			}
 		}
 
@@ -961,6 +962,7 @@ namespace DayBoardPresentationPrivate
 		UTexture2D* Loaded = LoadObject<UTexture2D>(
 			nullptr,
 			*FString::Printf(TEXT("/Game/Day/Art/food/%s.%s"), *Name, *Name));
+		Loaded = KeepDayFoodTextureReady(Loaded);
 		if (Loaded)
 		{
 			IconCache.Add(AssetName, Loaded);
