@@ -4350,7 +4350,8 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 	{
 		if (FStructProperty* Property = FindFProperty<FStructProperty>(Object->GetClass(), Name))
 		{
-			Property->CopyCompleteValue_InContainer(Object, &Value);
+			void* Storage = Property->ContainerPtrToValuePtr<void>(Object);
+			Property->CopyCompleteValue(Storage, &Value);
 		}
 	};
 	auto SetNumberProperty = [](UObject* Object, const FName Name, const double Value)
@@ -4386,7 +4387,8 @@ void USDayHUD::PlayRevenueFlyFromWorld(const FVector& SourceWorldLocation, const
 			{
 				if (FStructProperty* Property = FindFProperty<FStructProperty>(InitFunction, Name))
 				{
-					Property->CopyCompleteValue_InContainer(ParameterMemory, &Value);
+					void* Storage = Property->ContainerPtrToValuePtr<void>(ParameterMemory);
+					Property->CopyCompleteValue(Storage, &Value);
 				}
 			};
 			auto SetNumberParameter = [&](const FName Name, const double Value)
