@@ -982,6 +982,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "S Settlement")
 	bool ConfirmDaySettlementSuccess();
 
+	/** First restaurant bridge defaults to T0 and grants the existing WildMilk gift. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Dialogue")
+	bool bEnableRestaurantEndDialogue = true;
+
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Dialogue")
+	FName RestaurantEndDialogueStageId = TEXT("T0");
+
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "S Dialogue")
+	FName RestaurantEndDialogueGiftId = TEXT("WildMilk");
+
+	UFUNCTION(BlueprintPure, Category = "S Dialogue")
+	bool IsAwaitingRestaurantEndDialogue() const { return bAwaitingRestaurantEndDialogue; }
+
+	/** Called by USRestaurantEndDialogueWidget after the final line. */
+	UFUNCTION(BlueprintCallable, Category = "S Dialogue")
+	bool CompleteRestaurantEndDialogue();
+
 	/** Restore DayStartSnapshot and reopen the same daytime stage. */
 	UFUNCTION(BlueprintCallable, Category = "S Settlement")
 	bool ConfirmDaySettlementRetry();
@@ -1248,6 +1265,8 @@ private:
 
 	FDelegateHandle PreLoadMapDelegateHandle;
 	FDelegateHandle PostLoadMapDelegateHandle;
+	FDelegateHandle ApplicationWillEnterBackgroundDelegateHandle;
+	FDelegateHandle ApplicationWillTerminateDelegateHandle;
 	bool bSceneLoadingVisible = false;
 	bool bSceneLoadingUsingMoviePlayer = false;
 
@@ -1262,6 +1281,9 @@ private:
 
 	void HandlePreLoadMap(const FString& MapName);
 	void HandlePostLoadMap(UWorld* LoadedWorld);
+	void HandleApplicationWillEnterBackground();
+	void HandleApplicationWillTerminate();
+	void DeleteChefProfileForExit(const TCHAR* ExitReason);
 
 	bool IsKnownIngredient(FName IngredientId) const;
 	void InitializeIngredientMaps();
@@ -1291,6 +1313,9 @@ private:
 	/** 只有本日曾经有过食材，才允许用「食材耗尽」结束当天，避免空档 0.5s 循环回档。 */
 	bool bDayHadResources = false;
 	bool bDaySettlementActionCommitted = false;
+
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "S Dialogue", meta = (AllowPrivateAccess = "true"))
+	bool bAwaitingRestaurantEndDialogue = false;
 #pragma endregion K2 moonyfli
 
 	static FString FormatReclaimSuffix(int32 ReclaimedUnits);

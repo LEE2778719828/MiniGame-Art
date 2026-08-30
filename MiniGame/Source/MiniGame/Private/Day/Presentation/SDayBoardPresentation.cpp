@@ -1,6 +1,7 @@
 #include "Day/Presentation/SDayBoardPresentation.h"
 
 #include "../../../SStandaloneSandbox.h"
+#include "Day/UI/SRestaurantEndDialogueWidget.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
@@ -3730,6 +3731,12 @@ void USDayHUD::NativeDestruct()
 		SettlementWidget = nullptr;
 		RestoreDayInputMode();
 	}
+	if (RestaurantEndDialogueWidget)
+	{
+		RestaurantEndDialogueWidget->RemoveFromParent();
+		RestaurantEndDialogueWidget = nullptr;
+		RestoreDayInputMode();
+	}
 	Super::NativeDestruct();
 }
 
@@ -3906,6 +3913,7 @@ void USDayHUD::Refresh()
 		return;
 	}
 	RefreshSettlement(*GameInstance);
+	RefreshRestaurantEndDialogue(*GameInstance);
 
 	if (PhaseText)
 	{
@@ -4075,6 +4083,63 @@ void USDayHUD::RefreshSettlement(const USChefGameInstance& GameInstance)
 	{
 		FInputModeUIOnly InputMode;
 		InputMode.SetWidgetToFocus(SettlementWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PlayerController->SetInputMode(InputMode);
+		PlayerController->bShowMouseCursor = true;
+	}
+}
+
+void USDayHUD::RefreshRestaurantEndDialogue(const USChefGameInstance& GameInstance)
+{
+	const bool bShouldShow = GameInstance.IsAwaitingRestaurantEndDialogue();
+	if (!bShouldShow)
+	{
+		if (RestaurantEndDialogueWidget)
+		{
+			RestaurantEndDialogueWidget->RemoveFromParent();
+			RestaurantEndDialogueWidget = nullptr;
+			RestoreDayInputMode();
+		}
+		return;
+	}
+
+	if (RestaurantEndDialogueWidget)
+	{
+		return;
+	}
+
+	if (!RestaurantEndDialogueWidgetClass)
+	{
+		RestaurantEndDialogueWidgetClass = LoadClass<USRestaurantEndDialogueWidget>(
+			nullptr,
+			TEXT("/Game/Day/UI/Dialogue/WBP_RestaurantEndDialogue.WBP_RestaurantEndDialogue_C"));
+	}
+	if (!RestaurantEndDialogueWidgetClass)
+	{
+		if (!bRestaurantDialogueClassWarningLogged)
+		{
+			bRestaurantDialogueClassWarningLogged = true;
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("[RestaurantDialogue] Assign RestaurantEndDialogueWidgetClass on WBP_SDayHUD or create /Game/Day/UI/Dialogue/WBP_RestaurantEndDialogue."));
+		}
+		return;
+	}
+
+	RestaurantEndDialogueWidget = CreateWidget<USRestaurantEndDialogueWidget>(
+		GetOwningPlayer(),
+		RestaurantEndDialogueWidgetClass);
+	if (!RestaurantEndDialogueWidget)
+	{
+		return;
+	}
+
+	RestaurantEndDialogueWidget->AddToViewport(210);
+	if (APlayerController* PlayerController = GetOwningPlayer())
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(RestaurantEndDialogueWidget->TakeWidget());
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PlayerController->SetInputMode(InputMode);
 		PlayerController->bShowMouseCursor = true;

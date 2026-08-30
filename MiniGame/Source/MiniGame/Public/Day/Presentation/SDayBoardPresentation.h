@@ -15,6 +15,7 @@ class UCheckBox; //add by K2
 class UCurveFloat;
 class UCanvasPanelSlot;
 class USDaySettlementWidget;
+class USRestaurantEndDialogueWidget;
 class UCameraComponent;
 class UDirectionalLightComponent;
 class UImage;
@@ -779,6 +780,7 @@ protected:
 private:
 	void BuildWidgetTree();
 	void RefreshSettlement(const USChefGameInstance& GameInstance);
+	void RefreshRestaurantEndDialogue(const USChefGameInstance& GameInstance);
 	void RestoreDayInputMode();
 
 	UFUNCTION()
@@ -864,6 +866,15 @@ private:
 	TObjectPtr<USDaySettlementWidget> SettlementWidget;
 
 	bool bSettlementClassWarningLogged = false;
+
+	/** Assign /Game/Day/UI/Dialogue/WBP_RestaurantEndDialogue in WBP_SDayHUD defaults. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Day|Dialogue", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<USRestaurantEndDialogueWidget> RestaurantEndDialogueWidgetClass;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USRestaurantEndDialogueWidget> RestaurantEndDialogueWidget;
+
+	bool bRestaurantDialogueClassWarningLogged = false;
 
 #pragma region K2 moonyfli
 	UPROPERTY()

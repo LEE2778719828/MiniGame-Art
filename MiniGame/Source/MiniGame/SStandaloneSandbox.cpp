@@ -29,6 +29,7 @@
 #include "GameFramework/HUD.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
+#include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Parse.h"
@@ -193,6 +194,12 @@ void USChefGameInstance::Init()
 	}
 	PreLoadMapDelegateHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &USChefGameInstance::HandlePreLoadMap);
 	PostLoadMapDelegateHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &USChefGameInstance::HandlePostLoadMap);
+	ApplicationWillEnterBackgroundDelegateHandle = FCoreDelegates::ApplicationWillEnterBackgroundDelegate.AddUObject(
+		this,
+		&USChefGameInstance::HandleApplicationWillEnterBackground);
+	ApplicationWillTerminateDelegateHandle = FCoreDelegates::GetApplicationWillTerminateDelegate().AddUObject(
+		this,
+		&USChefGameInstance::HandleApplicationWillTerminate);
 	if (StageTable.IsNull())
 	{
 		StageTable = TSoftObjectPtr<UDataTable>(
@@ -242,6 +249,18 @@ void USChefGameInstance::Init()
 
 void USChefGameInstance::Shutdown()
 {
+	DeleteChefProfileForExit(TEXT("GameInstance Shutdown"));
+
+	if (ApplicationWillEnterBackgroundDelegateHandle.IsValid())
+	{
+		FCoreDelegates::ApplicationWillEnterBackgroundDelegate.Remove(ApplicationWillEnterBackgroundDelegateHandle);
+		ApplicationWillEnterBackgroundDelegateHandle.Reset();
+	}
+	if (ApplicationWillTerminateDelegateHandle.IsValid())
+	{
+		FCoreDelegates::GetApplicationWillTerminateDelegate().Remove(ApplicationWillTerminateDelegateHandle);
+		ApplicationWillTerminateDelegateHandle.Reset();
+	}
 	if (PreLoadMapDelegateHandle.IsValid())
 	{
 		FCoreUObjectDelegates::PreLoadMap.Remove(PreLoadMapDelegateHandle);
@@ -266,6 +285,30 @@ void USChefGameInstance::HandlePostLoadMap(UWorld* LoadedWorld)
 {
 	(void)LoadedWorld;
 	HideSceneLoadingScreen();
+}
+
+void USChefGameInstance::HandleApplicationWillEnterBackground()
+{
+	// Android can terminate a backgrounded process without another callback, so the
+	// persisted slot must already be gone before the game thread is suspended.
+	DeleteChefProfileForExit(TEXT("Application entering background"));
+}
+
+void USChefGameInstance::HandleApplicationWillTerminate()
+{
+	DeleteChefProfileForExit(TEXT("Application terminating"));
+}
+
+void USChefGameInstance::DeleteChefProfileForExit(const TCHAR* ExitReason)
+{
+	if (DeleteChefProfile())
+	{
+		UE_LOG(LogSSandbox, Log, TEXT("[Save] Deleted slot %s before exit (%s)."), SaveSlotName, ExitReason);
+	}
+	else
+	{
+		UE_LOG(LogSSandbox, Error, TEXT("[Save] Failed to delete slot %s before exit (%s)."), SaveSlotName, ExitReason);
+	}
 }
 
 void USChefGameInstance::RegisterSceneLoadingTexture(const TSoftObjectPtr<UTexture2D>& InTexture)
@@ -2297,6 +2340,7 @@ void USChefGameInstance::BeginDaySettlement(
 	const ESDayEndReason Reason,
 	const ESDaySettlementOutcome Outcome)
 {
+	bAwaitingRestaurantEndDialogue = false;
 	PendingDaySettlement = FSDaySettlementData();
 	PendingDaySettlement.bValid = true;
 	PendingDaySettlement.Outcome = Outcome;
@@ -2339,6 +2383,19 @@ bool USChefGameInstance::ConfirmDaySettlementSuccess()
 	bDaySettlementActionCommitted = true;
 	const ESDayEndReason Reason = PendingDaySettlement.EndReason;
 	EnterDaySettlement(Reason);
+	return true;
+}
+
+bool USChefGameInstance::CompleteRestaurantEndDialogue()
+{
+	if (!bAwaitingRestaurantEndDialogue)
+	{
+		return false;
+	}
+
+	bAwaitingRestaurantEndDialogue = false;
+	LastBoardFeedback = TEXT("第一关餐厅衔接对话完成，进入下一夜。");
+	AdvanceToNextStage();
 	return true;
 }
 
@@ -2401,11 +2458,31 @@ void USChefGameInstance::EnterDaySettlement(const ESDayEndReason Reason)
 		CarryOverTargetBonus);
 	PendingDaySettlement = FSDaySettlementData();
 	bDaySettlementActionCommitted = false;
+
+	const bool bShouldShowRestaurantDialogue = bEnableRestaurantEndDialogue
+		&& !RestaurantEndDialogueStageId.IsNone()
+		&& StageId == RestaurantEndDialogueStageId;
+	if (bShouldShowRestaurantDialogue)
+	{
+		bAwaitingRestaurantEndDialogue = true;
+		if (!RestaurantEndDialogueGiftId.IsNone() && !ActiveGiftIds.Contains(RestaurantEndDialogueGiftId))
+		{
+			GrantGift(RestaurantEndDialogueGiftId);
+		}
+		LastBoardFeedback = FString::Printf(
+			TEXT("%s 第一关餐厅结算完成，等待衔接对话。"),
+			*StageId.ToString());
+		NotifyStateChanged();
+		return;
+	}
+
+	bAwaitingRestaurantEndDialogue = false;
 	AdvanceToNextStage();
 }
 
 void USChefGameInstance::AdvanceToNextStage()
 {
+	bAwaitingRestaurantEndDialogue = false;
 	Phase = ESGamePhase::PrepareNextStage;
 	const FName FinishedStage = StageId;
 	const bool bEnding = ActiveStageRow.bEndingAfterDay || ActiveStageRow.NextLevelId.IsNone();
@@ -3002,6 +3079,7 @@ bool USChefGameInstance::ApplyProfileFromSave(const USChefSaveGame& SaveObject)
 	InitializeIngredientMaps();
 	PendingDaySettlement = FSDaySettlementData();
 	bDaySettlementActionCommitted = false;
+	bAwaitingRestaurantEndDialogue = false;
 	for (const TPair<FName, int32>& Pair : SaveObject.Inventory)
 	{
 		if (IsKnownIngredient(Pair.Key) && Pair.Value >= 0)
@@ -3252,6 +3330,7 @@ void USChefGameInstance::ResetSandbox()
 	DayStartSnapshot = FSRunSnapshot();
 	PendingDaySettlement = FSDaySettlementData();
 	bDaySettlementActionCommitted = false;
+	bAwaitingRestaurantEndDialogue = false;
 	PlannedDayOrders.Reset();
 	NextPlannedOrderIndex = 0;
 #pragma endregion K2 moonyfli
@@ -5664,8 +5743,12 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			&& GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success
 			&& GameInstance->StageId == StageBeforeSettle,
 			TEXT("qualified time up waits on success settlement"));
+		const bool bDayConfirmed = GameInstance->ConfirmDaySettlementSuccess();
+		const bool bDialogueCompleted = !GameInstance->IsAwaitingRestaurantEndDialogue()
+			|| GameInstance->CompleteRestaurantEndDialogue();
 		Check(
-			GameInstance->ConfirmDaySettlementSuccess()
+			bDayConfirmed
+			&& bDialogueCompleted
 			&& GameInstance->Phase == ESGamePhase::PrepareNight
 			&& GameInstance->StageId != StageBeforeSettle
 			&& GameInstance->CarryOverTargetBonus > 0
@@ -6004,7 +6087,11 @@ void ASFakeNightGateway::AdvanceFlow()
 		GameInstance->CloseShopNow(ESDayEndReason::TimeUp);
 		break;
 	case ESGamePhase::DaySettlement:
-		if (GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success)
+		if (GameInstance->IsAwaitingRestaurantEndDialogue())
+		{
+			GameInstance->CompleteRestaurantEndDialogue();
+		}
+		else if (GameInstance->GetPendingDaySettlement().Outcome == ESDaySettlementOutcome::Success)
 		{
 			GameInstance->ConfirmDaySettlementSuccess();
 		}
