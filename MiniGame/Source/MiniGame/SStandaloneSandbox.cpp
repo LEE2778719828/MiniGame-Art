@@ -1721,27 +1721,8 @@ void USChefGameInstance::AddRevenue(const int32 Amount)
 	{
 		return;
 	}
-	const int32 RevenueCap = ActiveStageRow.DailyRevenueCap;
-
-	const int32 AcceptedAmount = RevenueCap > 0
-		? FMath::Max(0, FMath::Min(Amount, RevenueCap - Revenue))
-		: Amount;
-	
-	if (AcceptedAmount <= 0)
-	{
-		UE_LOG(
-			LogTemp,
-			Verbose,
-			TEXT("营业额已达上限：%d/%d，本次收入 %d 未入账。"),
-			Revenue,
-			RevenueCap,
-			Amount
-		);
-		return;
-	}
-	
-	Revenue += AcceptedAmount;
-	TotalCoinsEarned += AcceptedAmount;
+	Revenue += Amount;
+	TotalCoinsEarned += Amount;
 #pragma region K2 moonyfli
 	// 达标只是解锁日结，营业照旧继续，直到时间结束或食材耗尽。
 	if (Phase == ESGamePhase::DayRunning && Revenue >= RevenueTarget)
@@ -2324,13 +2305,18 @@ void USChefGameInstance::EnterPrepareDay(const FString& Reason)
 
 	Phase = ESGamePhase::DayRunning;
 	ResetDayDirectors(true);
+	const FString RevenueCapText = ActiveStageRow.DailyRevenueCap > 0
+		? FString::FromInt(ActiveStageRow.DailyRevenueCap)
+		: TEXT("无");
 	LastBoardFeedback = FString::Printf(
-		TEXT("%s开店 %s：营业 %.0fs，目标 %d（含结转 +%d）。%s"),
+		TEXT("%s开店 %s：营业 %.0fs，目标 %d（基础 %d，结转 +%d，上限 %s）。%s"),
 		*Reason,
 		*StageId.ToString(),
 		DayTimeRemaining,
 		RevenueTarget,
+		ActiveStageRow.RevenueTarget,
 		CarryOverTargetBonus,
+		*RevenueCapText,
 		*GetPlannedOrderSummary());
 	NotifyStateChanged();
 	AutoSaveChefProfile(TEXT("开店并建立日初快照"));
@@ -2509,13 +2495,17 @@ void USChefGameInstance::AdvanceToNextStage()
 	}
 
 	Phase = ESGamePhase::PrepareNight;
+	const FString RevenueCapText = ActiveStageRow.DailyRevenueCap > 0
+		? FString::FromInt(ActiveStageRow.DailyRevenueCap)
+		: TEXT("无");
 	LastBoardFeedback = FString::Printf(
-		TEXT("%s 日结 → 下一关 %s：目标 %d（基础 %d + 结转 %d）。%s"),
+		TEXT("%s 日结 → 下一关 %s：目标 %d（基础 %d，结转 +%d，上限 %s）。%s"),
 		*FinishedStage.ToString(),
 		*StageId.ToString(),
 		RevenueTarget,
 		ActiveStageRow.RevenueTarget,
 		CarryOverTargetBonus,
+		*RevenueCapText,
 		*GetGiftTabSummary());
 	NotifyStateChanged();
 	AutoSaveChefProfile(TEXT("进入下一关夜晚"));
@@ -2814,6 +2804,20 @@ bool USChefGameInstance::TryGetStageRow(const FName InStageId, FSGameStageRow& O
 	return OutRow.LevelId == InStageId || InStageId == TEXT("T0");
 }
 
+namespace
+{
+	int32 ResolveStageRevenueTarget(const FSGameStageRow& Row, const int32 CarryOverTargetBonus)
+	{
+		const int64 UncappedTarget =
+			static_cast<int64>(FMath::Max(0, Row.RevenueTarget))
+			+ static_cast<int64>(FMath::Max(0, CarryOverTargetBonus));
+		const int64 EffectiveTarget = Row.DailyRevenueCap > 0
+			? FMath::Min(UncappedTarget, static_cast<int64>(Row.DailyRevenueCap))
+			: UncappedTarget;
+		return static_cast<int32>(FMath::Min(EffectiveTarget, static_cast<int64>(MAX_int32)));
+	}
+}
+
 bool USChefGameInstance::ApplyStage(const FName InStageId)
 {
 	FSGameStageRow Row;
@@ -2830,8 +2834,8 @@ bool USChefGameInstance::ApplyStage(const FName InStageId)
 	ForkPair = Row.ForkPair;
 	DayDurationSeconds = Row.DayDuration;
 	NightDurationSeconds = Row.NightDuration;
-	// 上一关时间到闭店时的剩余食材已结转，目标相应抬高。
-	RevenueTarget = Row.RevenueTarget + FMath::Max(0, CarryOverTargetBonus); //add by K2
+	// 上一关时间到闭店时的剩余食材已结转，目标相应抬高，但不超过本关目标上限。
+	RevenueTarget = ResolveStageRevenueTarget(Row, CarryOverTargetBonus); //add by K2
 	CustomerSpawnIntervalSeconds = FMath::Max(0.1f, Row.CustomerSpawnInterval);
 	CustomerConcurrentMax = Row.CustomerConcurrentMax;
 #pragma region K2 moonyfli
@@ -5283,6 +5287,41 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			|| GameInstance->GetRecipeSellValue(USChefGameInstance::MakeRecipeId(LingGuId, 0)) > 0,
 			TEXT("recipe sell value resolves"));
 
+		FSGameStageRow RevenueCapProbe;
+		RevenueCapProbe.RevenueTarget = 400;
+		RevenueCapProbe.DailyRevenueCap = 450;
+		Check(
+			ResolveStageRevenueTarget(RevenueCapProbe, 80) == 450,
+			TEXT("DailyRevenueCap caps base plus carry-over target"));
+		RevenueCapProbe.DailyRevenueCap = 600;
+		Check(
+			ResolveStageRevenueTarget(RevenueCapProbe, 80) == 480,
+			TEXT("carry-over target remains below DailyRevenueCap"));
+		RevenueCapProbe.DailyRevenueCap = 0;
+		Check(
+			ResolveStageRevenueTarget(RevenueCapProbe, 80) == 480,
+			TEXT("zero DailyRevenueCap leaves target uncapped"));
+
+		const int32 RevenueBeforeCapProbe = GameInstance->Revenue;
+		const int32 CoinsBeforeCapProbe = GameInstance->TotalCoinsEarned;
+		const int32 TargetBeforeCapProbe = GameInstance->RevenueTarget;
+		const int32 CapBeforeCapProbe = GameInstance->ActiveStageRow.DailyRevenueCap;
+		const ESGamePhase PhaseBeforeCapProbe = GameInstance->Phase;
+		GameInstance->Revenue = 1;
+		GameInstance->RevenueTarget = MAX_int32;
+		GameInstance->ActiveStageRow.DailyRevenueCap = 1;
+		GameInstance->Phase = ESGamePhase::DayRunning;
+		GameInstance->AddRevenue(10);
+		Check(
+			GameInstance->Revenue == 11
+			&& GameInstance->TotalCoinsEarned == CoinsBeforeCapProbe + 10,
+			TEXT("DailyRevenueCap does not truncate earned revenue"));
+		GameInstance->Revenue = RevenueBeforeCapProbe;
+		GameInstance->TotalCoinsEarned = CoinsBeforeCapProbe;
+		GameInstance->RevenueTarget = TargetBeforeCapProbe;
+		GameInstance->ActiveStageRow.DailyRevenueCap = CapBeforeCapProbe;
+		GameInstance->Phase = PhaseBeforeCapProbe;
+
 		// MaxPlannedOrderCount is a soft cap: a one-order configuration must expand
 		// when no single affordable order can cover the stage revenue target.
 		const FSGameStageRow SavedStageRow = GameInstance->ActiveStageRow;
@@ -5752,8 +5791,10 @@ void ASFakeNightGateway::RunDayWhiteboxSmokeTest()
 			&& GameInstance->Phase == ESGamePhase::PrepareNight
 			&& GameInstance->StageId != StageBeforeSettle
 			&& GameInstance->CarryOverTargetBonus > 0
-			&& GameInstance->RevenueTarget > GameInstance->GetActiveStageRow().RevenueTarget,
-			TEXT("success confirmation settles and raises next target"));
+			&& GameInstance->RevenueTarget == ResolveStageRevenueTarget(
+				GameInstance->GetActiveStageRow(),
+				GameInstance->CarryOverTargetBonus),
+			TEXT("success confirmation settles with capped carry-over target"));
 
 		// 夜败回档夜初：本次收获全部清除。
 		GameInstance->ResetSandbox();

@@ -110,7 +110,16 @@ struct FSGameStageRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 RevenueTarget = 90;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", DisplayName = "Daily Revenue Cap"))
+	/** Maximum final revenue target after carry-over is applied. 0 disables the cap. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		meta = (
+			ClampMin = "0",
+			DisplayName = "Daily Revenue Cap",
+			ToolTip = "Maximum final revenue target after carry-over is applied. 0 disables the cap."
+		)
+	)
 	int32 DailyRevenueCap = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -1186,7 +1195,7 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	float DayTimeRemaining = 0.0f;
 
-	/** 时间结束闭店时，按剩余食材折算并加到下一关营业额目标上。 */
+	/** 时间结束闭店时，按剩余食材折算并加到下一关营业额目标上，最终目标受该关 DailyRevenueCap 限制。 */
 	UPROPERTY(BlueprintReadOnly, Category = "S Flow")
 	int32 CarryOverTargetBonus = 0;
 
