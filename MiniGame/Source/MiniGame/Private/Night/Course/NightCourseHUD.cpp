@@ -928,46 +928,98 @@ void ANightCourseHUD::HandleIngredientDropped(
 	}
 }
 
+#pragma region K2 moonyfli
+namespace NightHudIngredientIcons
+{
+	UTexture2D* KeepNightFoodTextureReady(UTexture2D* Icon)
+	{
+#if PLATFORM_ANDROID
+		if (Icon)
+		{
+			// Same as Day: Android can return a sync-loaded texture before the first
+			// mobile mip is ready for Canvas. Hold it resident for the fly-in.
+			Icon->SetForceMipLevelsToBeResident(2.0f);
+			Icon->WaitForStreaming();
+		}
+#endif
+		return Icon;
+	}
+
+	const TCHAR* DayFoodFallbackPath(EIngredientId DropId)
+	{
+		switch (DropId)
+		{
+		case EIngredientId::F01_LingGu:
+			return TEXT("/Game/Day/Art/food/food_rice_V0.food_rice_V0");
+		case EIngredientId::F02_YinShanJun:
+			return TEXT("/Game/Day/Art/food/food_egg_V0.food_egg_V0");
+		case EIngredientId::F03_ChiYanJiao:
+			return TEXT("/Game/Day/Art/food/food_hand_V0.food_hand_V0");
+		case EIngredientId::F04_YueLinYu:
+			return TEXT("/Game/Day/Art/food/food_fish_V0.food_fish_V0");
+		case EIngredientId::F05_XuanYuQin:
+			return TEXT("/Game/Day/Art/food/food_leg_V0.food_leg_V0");
+		default:
+			return nullptr;
+		}
+	}
+}
+
 UTexture2D* ANightCourseHUD::ResolveIngredientIcon(EIngredientId DropId)
 {
 	if (const TObjectPtr<UTexture2D>* Cached = ResolvedIngredientIcons.Find(DropId))
 	{
-		return Cached->Get();
+		if (UTexture2D* CachedIcon = Cached->Get())
+		{
+			return NightHudIngredientIcons::KeepNightFoodTextureReady(CachedIcon);
+		}
+		// Do not keep a permanent nullptr: Android may miss the first soft load.
+		ResolvedIngredientIcons.Remove(DropId);
 	}
 
-	UDataTable* Table = IngredientIconTable.LoadSynchronous();
-	if (!Table)
+	UTexture2D* Icon = nullptr;
+	FName RowName = NAME_None;
+	if (UDataTable* Table = IngredientIconTable.LoadSynchronous())
 	{
-		return nullptr;
+		if (const UEnum* IdEnum = StaticEnum<EIngredientId>())
+		{
+			// DT_Ingredients row names match enum DisplayName (F01_LingGu -> LingGu).
+			RowName = FName(*IdEnum->GetDisplayNameTextByValue(
+				static_cast<int64>(DropId)).ToString());
+			if (const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(
+				RowName,
+				TEXT("NightCourseHUD drop icon"),
+				false))
+			{
+				Icon = Row->Icon.LoadSynchronous();
+			}
+		}
 	}
 
-	// DT_Ingredients row names match the enum DisplayName metadata (F01_LingGu -> LingGu).
-	const UEnum* IdEnum = StaticEnum<EIngredientId>();
-	if (!IdEnum)
+	if (!Icon)
 	{
-		return nullptr;
-	}
-	const FName RowName(*IdEnum->GetDisplayNameTextByValue(
-		static_cast<int64>(DropId)).ToString());
-	const FSIngredientDefRow* Row = Table->FindRow<FSIngredientDefRow>(
-		RowName,
-		TEXT("NightCourseHUD drop icon"),
-		false);
-	if (!Row)
-	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("[NightHUD] DT_Ingredients has no row '%s'; that drop will not fly to the bag."),
-			*RowName.ToString());
-		ResolvedIngredientIcons.Add(DropId, nullptr);
-		return nullptr;
+		if (const TCHAR* Fallback = NightHudIngredientIcons::DayFoodFallbackPath(DropId))
+		{
+			Icon = LoadObject<UTexture2D>(nullptr, Fallback);
+		}
 	}
 
-	UTexture2D* Icon = Row->Icon.LoadSynchronous();
-	ResolvedIngredientIcons.Add(DropId, Icon);
-	return Icon;
+	Icon = NightHudIngredientIcons::KeepNightFoodTextureReady(Icon);
+	if (Icon)
+	{
+		ResolvedIngredientIcons.Add(DropId, Icon);
+		return Icon;
+	}
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("[NightHUD] Drop icon missing for %s (table row '%s' and Day food fallback); fly-in skipped."),
+		*UEnum::GetValueAsString(DropId),
+		*RowName.ToString());
+	return nullptr;
 }
+#pragma endregion K2 moonyfli
 
 FVector2D ANightCourseHUD::GetCanvasLetterboxPixelOffset() const
 {
