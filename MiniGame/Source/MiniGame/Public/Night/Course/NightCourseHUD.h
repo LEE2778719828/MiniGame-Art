@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
 #include "GameFramework/HUD.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Shared/NightSharedTypes.h"
@@ -9,6 +10,8 @@
 class UUserWidget;
 class UTextBlock;
 class UWidget;
+class UImage;
+class UCanvasPanel;
 class UDataTable; //add by K2
 class UTexture2D; //add by K2
 class UNightCourseDirector; //add by K2
@@ -34,6 +37,10 @@ struct FNightDropFlyIcon
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> Icon = nullptr;
 
+	/** UMG image drawn above WBP_NightHUD_Multi. Canvas HUD is behind that widget. */
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> Image = nullptr;
+
 	/** Kill point. The screen start is sampled from it on the first drawn frame. */
 	FVector WorldStart = FVector::ZeroVector;
 
@@ -57,6 +64,24 @@ struct FNightFoeHitSfx
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
 	TSoftObjectPtr<USoundBase> Material;
+};
+
+/** Full-viewport canvas so drop icons render above the composite HUD. */
+UCLASS()
+class MINIGAME_API UNightDropFlyLayerWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+
+	UCanvasPanel* GetRootCanvas() const { return RootCanvas; }
+	UCanvasPanel* GetOrCreateRootCanvas();
+
+protected:
+	UPROPERTY()
+	TObjectPtr<UCanvasPanel> RootCanvas;
 };
 #pragma endregion K2 moonyfli
 
@@ -358,6 +383,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Night|HUD|SFX")
 	void NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop);
 
+	/** Spawn food icons that fly from WorldLocation to the bag. Safe to call from Director. */
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|Drop")
+	void SpawnDropFlyIcons(EIngredientId DropId, int32 Count, FVector WorldLocation);
+
 	/** Kill haptic: intensity scales linearly with current slash combo. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "启用砍杀震动"))
 	bool bEnableKillHaptic = true;
@@ -497,9 +526,15 @@ private:
 	TArray<FNightDropFlyIcon> DropFlyIcons;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UNightDropFlyLayerWidget> DropFlyLayerWidget;
+
+	UPROPERTY(Transient)
 	TMap<EIngredientId, TObjectPtr<UTexture2D>> ResolvedIngredientIcons;
 
 	TWeakObjectPtr<UNightCourseDirector> BoundDropDirector;
+	uint64 LastDropFlyFrame = 0;
+	EIngredientId LastDropFlyId = EIngredientId::None;
+	FVector LastDropFlyWorld = FVector::ZeroVector;
 
 	int32 LastDisplayedCombo = 0;
 	float ComboPopElapsed = 0.f;
@@ -543,13 +578,20 @@ private:
 	bool HasVisibleCourseTipWidget() const;
 	void SyncCourseTipWidgetLifetime();
 
+	/** Must be UFUNCTION: bound to Director->OnIngredientDropped via AddUniqueDynamic. */
+	UFUNCTION()
 	void HandleIngredientDropped(EIngredientId DropId, int32 Count, FVector WorldLocation);
 
 	void EnsureDropDirectorBinding(UNightCourseDirector* Director);
+	void EnsureDropFlyLayer();
+	void SyncDropFlyLayerPlacement();
+	void ReleaseDropFlyIcon(FNightDropFlyIcon& Entry);
 	UTexture2D* ResolveIngredientIcon(EIngredientId DropId);
 	/** Canvas-space pixel offset of the game view inside the window letterbox. */
 	FVector2D GetCanvasLetterboxPixelOffset() const;
 	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
+	bool GetBagFlyTargetSlatePosition(FVector2D& OutSlatePosition) const;
+	bool ProjectWorldToSlate(const FVector& WorldLocation, FVector2D& OutSlatePosition) const;
 	void DrawDropFlyIcons(float DeltaSeconds);
 	void DrawFailSideFlash(float DeltaSeconds);
 	void PlayKillHaptic(int32 Combo);

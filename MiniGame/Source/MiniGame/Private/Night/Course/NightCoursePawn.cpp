@@ -444,6 +444,21 @@ void ANightCoursePawn::ResolveSlashVFXBoost(float& OutScale, float& OutHDR) cons
 	}
 }
 
+void ANightCoursePawn::SetSlashTrailAttachOffset(const FVector NewOffset)
+{
+	SlashTrailAttachOffset = NewOffset;
+}
+
+void ANightCoursePawn::SetSlashTrailRotation(const FRotator NewRotation)
+{
+	SlashTrailRotation = NewRotation;
+}
+
+void ANightCoursePawn::SetSlashTrailAttachScale(const FVector NewScale)
+{
+	SlashTrailAttachScale = NewScale;
+}
+
 void ANightCoursePawn::ApplyAttackVFXBoost(UNiagaraComponent* Comp, float Scale, float HDR) const
 {
 	if (!Comp)
@@ -486,7 +501,12 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 	if (UNiagaraSystem* TrailFX = ResolveSlashTrailFX())
 	{
 		// Attach to ArtRoot in front of the hero — never follow KnifeMesh / knife bone.
+		// Offset / Rotation / AttachScale are BP-tunable under Night|VFX|刀光挂点.
 		USceneComponent* AttachParent = ArtRoot ? ArtRoot.Get() : GetRootComponent();
+		const FVector AttachScale3D(
+			SlashTrailAttachScale.X * Scale,
+			SlashTrailAttachScale.Y * Scale,
+			SlashTrailAttachScale.Z * Scale);
 		UNiagaraComponent* TrailComp = nullptr;
 		if (AttachParent)
 		{
@@ -496,7 +516,7 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 				NAME_None,
 				SlashTrailAttachOffset,
 				SlashTrailRotation,
-				Scale3D,
+				AttachScale3D,
 				EAttachLocation::KeepRelativeOffset,
 				true,
 				ENCPoolMethod::None);
@@ -509,9 +529,14 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 				TrailFX,
 				ActorXform.TransformPosition(SlashTrailAttachOffset),
 				ActorXform.Rotator() + SlashTrailRotation,
-				Scale3D);
+				AttachScale3D);
 		}
 		ApplyAttackVFXBoost(TrailComp, Scale, HDR);
+		if (TrailComp)
+		{
+			// ApplyAttackVFXBoost resets uniform scale; restore authored axis scale (incl. mirrors).
+			TrailComp->SetRelativeScale3D(AttachScale3D);
+		}
 	}
 
 	if (UNiagaraSystem* ImpactFX = ResolveHitImpactFX())

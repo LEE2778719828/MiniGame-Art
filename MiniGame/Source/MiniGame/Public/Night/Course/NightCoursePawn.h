@@ -83,15 +83,32 @@ public:
 	TArray<TObjectPtr<UNiagaraSystem>> SlashTrailByTier;
 
 	/**
-	 * Local offset from ArtRoot for the DG slash trail.
-	 * Positive X is character forward so the slash sits in front of the hero, not on the knife bone.
+	 * Local offset from ArtRoot for the DG slash trail (character front, not knife).
+	 * Tune in BP_NightCoursePawn → Night|VFX|刀光挂点.
+	 * Positive X = forward; raise Z to chest. Distance = |X|.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光挂点偏移", ToolTip = "相对 ArtRoot 的本地偏移。X 向前、Z 抬高到胸口附近；刀光挂在角色正面，不跟随刀模型。"))
-	FVector SlashTrailAttachOffset = FVector(90.f, 0.f, 100.f);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSlashTrailAttachOffset, Category = "Night|VFX|刀光挂点", meta = (DisplayName = "刀光挂点偏移", ToolTip = "相对 ArtRoot。X 向前（距离）、Y 左右、Z 高度。不跟随刀模型。"))
+	FVector SlashTrailAttachOffset = FVector(120.f, 0.f, 100.f);
 
-	/** Relative rotation on the front attach. Yaw 180 flips a trail that plays opposite the swing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光挂点旋转"))
-	FRotator SlashTrailRotation = FRotator(0.f, 180.f, 0.f);
+	/**
+	 * Relative rotation on the front attach.
+	 * Default (0,0,0): face character forward. If the trail still looks back, set Yaw=180.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSlashTrailRotation, Category = "Night|VFX|刀光挂点", meta = (DisplayName = "刀光挂点旋转", ToolTip = "相对 ArtRoot。前后反了就改 Yaw：0 朝前，180 朝后；Pitch/Roll 微调倾斜。"))
+	FRotator SlashTrailRotation = FRotator(0.f, 0.f, 0.f);
+
+	/** Extra local scale on the trail (can use negative axis to mirror). Applied on top of combo scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSlashTrailAttachScale, Category = "Night|VFX|刀光挂点", meta = (DisplayName = "刀光挂点缩放", ToolTip = "叠乘在连击缩放之上。某轴取负可镜像刀光。"))
+	FVector SlashTrailAttachScale = FVector(1.f, 1.f, 1.f);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|VFX|刀光挂点")
+	void SetSlashTrailAttachOffset(FVector NewOffset);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|VFX|刀光挂点")
+	void SetSlashTrailRotation(FRotator NewRotation);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|VFX|刀光挂点")
+	void SetSlashTrailAttachScale(FVector NewScale);
 
 	/** Fallback / tier-1 hit burst. Tiers 1–4 prefer HitImpactByTier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")

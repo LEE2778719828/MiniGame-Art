@@ -20,7 +20,11 @@
 #include "Curves/CurveFloat.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Components/Widget.h"
+#include "Components/Image.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Blueprint/SlateBlueprintLibrary.h" //add by K2
+#include "Widgets/SWidget.h"
 #include "CanvasItem.h" //add by K2
 #include "Engine/Canvas.h"
 #include "Engine/DataTable.h" //add by K2
@@ -452,8 +456,17 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ComboCountText = nullptr;
 #pragma region K2 moonyfli
 	BagPackWidget = nullptr;
+	for (FNightDropFlyIcon& Entry : DropFlyIcons)
+	{
+		ReleaseDropFlyIcon(Entry);
+	}
 	DropFlyIcons.Reset();
 	ResolvedIngredientIcons.Reset();
+	if (DropFlyLayerWidget)
+	{
+		DropFlyLayerWidget->RemoveFromParent();
+		DropFlyLayerWidget = nullptr;
+	}
 	FailSideFlashRemaining = 0.f;
 	if (UNightCourseDirector* Director = BoundDropDirector.Get())
 	{
@@ -555,6 +568,7 @@ void ANightCourseHUD::EnsureMainHUD()
 			TEXT("[NightHUD] WBP_NightHUD_Multi is missing nested '%s'; drop icons fly to BagFlyTargetFallback."),
 			*BagPackWidgetName.ToString());
 	}
+	EnsureDropFlyLayer();
 #pragma endregion K2 moonyfli
 }
 
@@ -943,6 +957,7 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 				HUDCameraFrameSize,
 				HUDCameraFitScale);
 		}
+		SyncDropFlyLayerPlacement();
 		return;
 	}
 
@@ -955,6 +970,7 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 	if (Placement.Equals(MainHUDPlacement)
 		&& FMath::IsNearlyEqual(MainHUDWidget->GetRenderTransform().Scale.X, EffectiveHUDScale))
 	{
+		SyncDropFlyLayerPlacement();
 		return;
 	}
 
@@ -963,6 +979,7 @@ void ANightCourseHUD::UpdateMainHUDPlacement()
 	// precomputed DPI conversion instead of applying it a second time.
 	MainHUDWidget->SetPositionInViewport(Placement, false);
 	MainHUDPlacement = Placement;
+	SyncDropFlyLayerPlacement();
 }
 void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
 {
@@ -1116,6 +1133,14 @@ void ANightCourseHUD::DrawHUD()
 	Super::DrawHUD();
 	SyncCourseTipWidgetLifetime();
 
+	ANightCoursePawn* CoursePawnForDrop = Cast<ANightCoursePawn>(GetOwningPawn());
+	UNightCourseDirector* DirectorForDrop = CoursePawnForDrop
+		? CoursePawnForDrop->GetCourseDirector()
+		: nullptr;
+	EnsureDropDirectorBinding(DirectorForDrop);
+	const float DropDeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+	DrawDropFlyIcons(DropDeltaSeconds);
+
 	if (!Canvas)
 	{
 		return;
@@ -1268,8 +1293,52 @@ void ANightCourseHUD::DrawHUD()
 
 	EnsureDropDirectorBinding(Director);
 	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
-	DrawDropFlyIcons(DeltaSeconds);
 	DrawFailSideFlash(DeltaSeconds);
+}
+
+TSharedRef<SWidget> UNightDropFlyLayerWidget::RebuildWidget()
+{
+	GetOrCreateRootCanvas();
+	if (RootCanvas)
+	{
+		RootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
+	return Super::RebuildWidget();
+}
+
+void UNightDropFlyLayerWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	GetOrCreateRootCanvas();
+}
+
+UCanvasPanel* UNightDropFlyLayerWidget::GetOrCreateRootCanvas()
+{
+	if (RootCanvas)
+	{
+		return RootCanvas;
+	}
+	if (!WidgetTree)
+	{
+		WidgetTree = NewObject<UWidgetTree>(this, UWidgetTree::StaticClass(), TEXT("WidgetTree"));
+	}
+	if (!WidgetTree)
+	{
+		return nullptr;
+	}
+	if (UCanvasPanel* Existing = Cast<UCanvasPanel>(WidgetTree->RootWidget))
+	{
+		RootCanvas = Existing;
+		return RootCanvas;
+	}
+	if (!WidgetTree->RootWidget)
+	{
+		RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(
+			UCanvasPanel::StaticClass(),
+			TEXT("Root"));
+		WidgetTree->RootWidget = RootCanvas;
+	}
+	return RootCanvas;
 }
 
 void ANightCourseHUD::EnsureDropDirectorBinding(UNightCourseDirector* Director)
@@ -1300,7 +1369,70 @@ void ANightCourseHUD::EnsureDropDirectorBinding(UNightCourseDirector* Director)
 		&ANightCourseHUD::HandleIngredientDropped);
 }
 
+void ANightCourseHUD::EnsureDropFlyLayer()
+{
+	if (DropFlyLayerWidget)
+	{
+		SyncDropFlyLayerPlacement();
+		return;
+	}
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+	DropFlyLayerWidget = CreateWidget<UNightDropFlyLayerWidget>(PC);
+	if (!DropFlyLayerWidget)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightHUD] Drop fly UMG layer failed to create."));
+		return;
+	}
+	DropFlyLayerWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	DropFlyLayerWidget->AddToViewport(50);
+	SyncDropFlyLayerPlacement();
+}
+
+void ANightCourseHUD::SyncDropFlyLayerPlacement()
+{
+	if (!DropFlyLayerWidget)
+	{
+		return;
+	}
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+	int32 FullX = 0;
+	int32 FullY = 0;
+	PC->GetViewportSize(FullX, FullY);
+	const float Dpi = FMath::Max(0.01f, UWidgetLayoutLibrary::GetViewportScale(this));
+	DropFlyLayerWidget->SetAlignmentInViewport(FVector2D::ZeroVector);
+	DropFlyLayerWidget->SetDesiredSizeInViewport(
+		FVector2D(static_cast<float>(FullX), static_cast<float>(FullY)) / Dpi);
+	DropFlyLayerWidget->SetRenderTransformPivot(FVector2D::ZeroVector);
+	DropFlyLayerWidget->SetRenderScale(FVector2D(1.f, 1.f));
+	DropFlyLayerWidget->SetPositionInViewport(FVector2D::ZeroVector, false);
+}
+
+void ANightCourseHUD::ReleaseDropFlyIcon(FNightDropFlyIcon& Entry)
+{
+	if (Entry.Image)
+	{
+		Entry.Image->RemoveFromParent();
+		Entry.Image = nullptr;
+	}
+}
+
 void ANightCourseHUD::HandleIngredientDropped(
+	EIngredientId DropId,
+	int32 Count,
+	FVector WorldLocation)
+{
+	SpawnDropFlyIcons(DropId, Count, WorldLocation);
+}
+
+void ANightCourseHUD::SpawnDropFlyIcons(
 	EIngredientId DropId,
 	int32 Count,
 	FVector WorldLocation)
@@ -1309,11 +1441,21 @@ void ANightCourseHUD::HandleIngredientDropped(
 	{
 		return;
 	}
+	if (LastDropFlyFrame == GFrameCounter
+		&& LastDropFlyId == DropId
+		&& LastDropFlyWorld.Equals(WorldLocation, 1.f))
+	{
+		return;
+	}
 	UTexture2D* Icon = ResolveIngredientIcon(DropId);
 	if (!Icon)
 	{
 		return;
 	}
+
+	EnsureMainHUD();
+	EnsureDropFlyLayer();
+	UCanvasPanel* Panel = DropFlyLayerWidget ? DropFlyLayerWidget->GetOrCreateRootCanvas() : nullptr;
 
 	// One icon per awarded unit, staggered, but never more than the on-screen budget.
 	const int32 Budget = FMath::Max(0, MaxDropFlyIcons - DropFlyIcons.Num());
@@ -1324,16 +1466,35 @@ void ANightCourseHUD::HandleIngredientDropped(
 		Entry.Icon = Icon;
 		Entry.WorldStart = WorldLocation + FVector(0.f, 0.f, DropFlyWorldZOffset);
 		Entry.Delay = DropFlyStaggerSeconds * static_cast<float>(Index);
+		if (Panel)
+		{
+			UImage* Image = NewObject<UImage>(DropFlyLayerWidget, UImage::StaticClass());
+			Image->SetBrushFromTexture(Icon, true);
+			Image->SetVisibility(ESlateVisibility::Collapsed);
+			Image->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+			if (UCanvasPanelSlot* Slot = Panel->AddChildToCanvas(Image))
+			{
+				Slot->SetAutoSize(false);
+				Slot->SetAlignment(FVector2D(0.5f, 0.5f));
+				Slot->SetZOrder(20);
+				Slot->SetSize(FVector2D(DropFlyIconSize, DropFlyIconSize));
+			}
+			Entry.Image = Image;
+		}
 	}
 	if (SpawnCount > 0)
 	{
+		LastDropFlyFrame = GFrameCounter;
+		LastDropFlyId = DropId;
+		LastDropFlyWorld = WorldLocation;
 		UE_LOG(
 			LogTemp,
 			Display,
-			TEXT("[NightHUD] Drop fly spawned id=%d count=%d (active=%d)."),
+			TEXT("[NightHUD] Drop fly spawned id=%d count=%d (active=%d umg=%s)."),
 			static_cast<int32>(DropId),
 			SpawnCount,
-			DropFlyIcons.Num());
+			DropFlyIcons.Num(),
+			Panel ? TEXT("yes") : TEXT("no"));
 	}
 }
 
@@ -1479,15 +1640,68 @@ bool ANightCourseHUD::GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition
 		}
 	}
 
-	if (HUDCameraFitScale <= KINDA_SMALL_NUMBER)
+	// Fallback: design-space point inside the 9:20 frame, converted to Canvas pixels.
+	const float FitScale = FMath::Max(0.01f, HUDCameraFitScale);
+	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
+	OutCanvasPosition =
+		(HUDCameraFrameOffset + BagFlyTargetFallback * FitScale) * Dpi
+		- GetCanvasLetterboxPixelOffset();
+	return true;
+}
+
+bool ANightCourseHUD::GetBagFlyTargetSlatePosition(FVector2D& OutSlatePosition) const
+{
+	const float Dpi = FMath::Max(0.01f, UWidgetLayoutLibrary::GetViewportScale(this));
+	UWidget* Target = nullptr;
+	if (BagPackWidget)
+	{
+		Target = BagPackWidget->GetWidgetFromName(BagFlyTargetWidgetName);
+		if (!Target)
+		{
+			Target = BagPackWidget;
+		}
+	}
+
+	if (Target)
+	{
+		const FGeometry& Geometry = Target->GetCachedGeometry();
+		const FVector2D LocalSize = Geometry.GetLocalSize();
+		if (LocalSize.X > 0.f || LocalSize.Y > 0.f)
+		{
+			FVector2D PixelPosition = FVector2D::ZeroVector;
+			FVector2D ViewportPosition = FVector2D::ZeroVector;
+			USlateBlueprintLibrary::LocalToViewport(
+				this,
+				Geometry,
+				LocalSize * 0.5f,
+				PixelPosition,
+				ViewportPosition);
+			OutSlatePosition = PixelPosition / Dpi;
+			return true;
+		}
+	}
+
+	OutSlatePosition = HUDCameraFrameOffset + BagFlyTargetFallback * FMath::Max(0.01f, HUDCameraFitScale);
+	return true;
+}
+
+bool ANightCourseHUD::ProjectWorldToSlate(const FVector& WorldLocation, FVector2D& OutSlatePosition) const
+{
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
 	{
 		return false;
 	}
-	// Fallback: design-space point inside the 9:20 frame, converted to Canvas pixels.
-	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
-	OutCanvasPosition =
-		(HUDCameraFrameOffset + BagFlyTargetFallback * HUDCameraFitScale) * Dpi
-		- GetCanvasLetterboxPixelOffset();
+	FVector2D ScreenPx = FVector2D::ZeroVector;
+	if (!PC->ProjectWorldLocationToScreen(WorldLocation, ScreenPx, true))
+	{
+		int32 ViewX = 0;
+		int32 ViewY = 0;
+		PC->GetViewportSize(ViewX, ViewY);
+		ScreenPx = FVector2D(ViewX * 0.5f, ViewY * 0.45f);
+	}
+	const float Dpi = FMath::Max(0.01f, UWidgetLayoutLibrary::GetViewportScale(this));
+	OutSlatePosition = ScreenPx / Dpi;
 	return true;
 }
 
@@ -1497,20 +1711,26 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 	{
 		return;
 	}
-	if (!bEnableDropFlyIcons || !Canvas)
+	if (!bEnableDropFlyIcons)
 	{
+		for (FNightDropFlyIcon& Entry : DropFlyIcons)
+		{
+			ReleaseDropFlyIcon(Entry);
+		}
 		DropFlyIcons.Reset();
 		return;
 	}
 
-	FVector2D TargetCanvas = FVector2D::ZeroVector;
-	if (!GetBagFlyTargetCanvasPosition(TargetCanvas))
+	EnsureDropFlyLayer();
+
+	FVector2D TargetSlate = FVector2D::ZeroVector;
+	if (!GetBagFlyTargetSlatePosition(TargetSlate))
 	{
-		return;
+		TargetSlate = FVector2D(120.f, 80.f);
 	}
 
 	const float FlySeconds = FMath::Max(0.05f, DropFlySeconds);
-	const float Scale = FMath::Max(KINDA_SMALL_NUMBER, HUDCameraFitScale);
+	const float Scale = FMath::Max(0.01f, HUDCameraFitScale);
 	const float BaseSize = DropFlyIconSize * Scale;
 
 	for (int32 Index = DropFlyIcons.Num() - 1; Index >= 0; --Index)
@@ -1519,14 +1739,20 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 		if (Entry.Delay > 0.f)
 		{
 			Entry.Delay -= DeltaSeconds;
+			if (Entry.Image)
+			{
+				Entry.Image->SetVisibility(ESlateVisibility::Collapsed);
+			}
 			continue;
 		}
 		if (!Entry.bCanvasStartValid)
 		{
 			// Sampled once: the foe is already gone, so the start point must stay fixed
 			// on screen instead of tracking a camera that keeps moving.
-			const FVector Projected = Project(Entry.WorldStart);
-			Entry.CanvasStart = FVector2D(Projected.X, Projected.Y);
+			if (!ProjectWorldToSlate(Entry.WorldStart, Entry.CanvasStart))
+			{
+				Entry.CanvasStart = TargetSlate;
+			}
 			Entry.bCanvasStartValid = true;
 		}
 
@@ -1534,16 +1760,17 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 		const float Alpha = FMath::Clamp(Entry.Elapsed / FlySeconds, 0.f, 1.f);
 		if (Alpha >= 1.f || !Entry.Icon)
 		{
+			ReleaseDropFlyIcon(Entry);
 			DropFlyIcons.RemoveAtSwap(Index, EAllowShrinking::No);
 			continue;
 		}
 
 		// Ease out so the icon leaves the kill fast and settles into the mouth.
 		const float Eased = 1.f - FMath::Pow(1.f - Alpha, 2.f);
-		FVector2D Position = FMath::Lerp(Entry.CanvasStart, TargetCanvas, Eased);
+		FVector2D Position = FMath::Lerp(Entry.CanvasStart, TargetSlate, Eased);
 
 		// Bow the path perpendicular to the straight line; peaks at the midpoint.
-		const FVector2D Travel = TargetCanvas - Entry.CanvasStart;
+		const FVector2D Travel = TargetSlate - Entry.CanvasStart;
 		if (!Travel.IsNearlyZero())
 		{
 			const FVector2D Normal =
@@ -1561,13 +1788,28 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 				FVector2f(1.f, 0.f),
 				Alpha);
 
-		FCanvasTileItem Tile(
-			Position - FVector2D(Size * 0.5f, Size * 0.5f),
-			Entry.Icon->GetResource(),
-			FVector2D(Size, Size),
-			FLinearColor(1.f, 1.f, 1.f, FadeAlpha));
-		Tile.BlendMode = SE_BLEND_Translucent;
-		Canvas->DrawItem(Tile);
+		if (Entry.Image)
+		{
+			Entry.Image->SetVisibility(ESlateVisibility::HitTestInvisible);
+			Entry.Image->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, FadeAlpha));
+			Entry.Image->SetRenderScale(FVector2D(IconScale, IconScale));
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry.Image->Slot))
+			{
+				Slot->SetSize(FVector2D(BaseSize, BaseSize));
+				Slot->SetPosition(Position);
+			}
+		}
+		else if (Canvas)
+		{
+			// Last-resort canvas blit if the UMG layer failed to spawn.
+			FCanvasTileItem Tile(
+				Position - FVector2D(Size * 0.5f, Size * 0.5f),
+				Entry.Icon->GetResource(),
+				FVector2D(Size, Size),
+				FLinearColor(1.f, 1.f, 1.f, FadeAlpha));
+			Tile.BlendMode = SE_BLEND_Translucent;
+			Canvas->DrawItem(Tile);
+		}
 	}
 }
 
@@ -1686,8 +1928,9 @@ void ANightCourseHUD::DrawFailSideFlash(const float DeltaSeconds)
 		}
 		FLinearColor Color = FailSideFlashColor;
 		Color.A = BandAlpha;
+		// Band 0 = outer edge on BOTH sides (mirror): left x=0, right x=ScreenW-BandW.
 		const float LeftX = BandW * static_cast<float>(Band);
-		const float RightX = ScreenW - EdgeW + LeftX;
+		const float RightX = ScreenW - BandW * static_cast<float>(Band + 1);
 		DrawRect(Color, LeftX, 0.f, BandW + 1.f, ScreenH);
 		DrawRect(Color, RightX, 0.f, BandW + 1.f, ScreenH);
 	}

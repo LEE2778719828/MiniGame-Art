@@ -5485,25 +5485,24 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 		}
 		AddDrop(DropId, DropCount);
 #pragma region K2 moonyfli
-		if (RunnerPawn)
+		// Prefer the live foe mesh; fall back to stone spec / runner so streaming
+		// (SpawnedStones[i] == null) still flies icons to the bag.
+		FVector DropWorldLocation = RunnerPawn
+			? RunnerPawn->GetActorLocation() + FVector(0.f, 0.f, 100.f)
+			: FVector::ZeroVector;
+		if (StoneSpecs.IsValidIndex(Beat.ToStoneIndex))
 		{
-			if (APlayerController* PC = Cast<APlayerController>(RunnerPawn->GetController()))
-			{
-				if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
-				{
-					NightHUD->NotifyFoeKilled(
-						StoneSpecs[Beat.ToStoneIndex].FoeId,
-						DropId != EIngredientId::None && DropCount > 0);
-				}
-			}
+			DropWorldLocation = StoneSpecs[Beat.ToStoneIndex].WorldLocation
+				+ FVector(0.f, 0.f, 80.f);
 		}
+		ANightCourseHUD* NightHUD = ResolveCourseHUD();
 #pragma endregion K2 moonyfli
 		if (SpawnedStones.IsValidIndex(Beat.ToStoneIndex) && SpawnedStones[Beat.ToStoneIndex])
 		{
 #pragma region K2 moonyfli
 			// Read the foe visual before ClearFoe hides it: the HUD flight starts at the kill point.
 			ANightCourseStoneActor* DropStone = SpawnedStones[Beat.ToStoneIndex];
-			FVector DropWorldLocation = DropStone->GetActorLocation();
+			DropWorldLocation = DropStone->GetActorLocation();
 			if (DropStone->FoeSkeletalMeshComponent
 				&& DropStone->FoeSkeletalMeshComponent->IsVisible())
 			{
@@ -5514,18 +5513,31 @@ void UNightCourseDirector::ResolveBeat(int32 BeatIndex, ENightJudgeOutcome Outco
 			{
 				DropWorldLocation = DropStone->FoeCapsule->GetComponentLocation();
 			}
-#pragma endregion K2 moonyfli
-			SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
-			SpawnedStones[Beat.ToStoneIndex]->PlayDropBurst(
-				DropId,
-				DropCount);
-#pragma region K2 moonyfli
+			// Burst while the mesh still exists so BP collect VFX can attach.
 			if (DropId != EIngredientId::None && DropCount > 0)
 			{
-				OnIngredientDropped.Broadcast(DropId, DropCount, DropWorldLocation);
+				DropStone->PlayDropBurst(DropId, DropCount);
 			}
 #pragma endregion K2 moonyfli
+			SpawnedStones[Beat.ToStoneIndex]->ClearFoe(true);
 		}
+#pragma region K2 moonyfli
+		if (NightHUD)
+		{
+			NightHUD->NotifyFoeKilled(
+				StoneSpecs[Beat.ToStoneIndex].FoeId,
+				DropId != EIngredientId::None && DropCount > 0);
+		}
+		if (DropId != EIngredientId::None && DropCount > 0)
+		{
+			OnIngredientDropped.Broadcast(DropId, DropCount, DropWorldLocation);
+			// Direct call: dynamic multicast can miss after Live Coding if UFUNCTION bind fails.
+			if (NightHUD)
+			{
+				NightHUD->SpawnDropFlyIcons(DropId, DropCount, DropWorldLocation);
+			}
+		}
+#pragma endregion K2 moonyfli
 		StoneSpecs[Beat.ToStoneIndex].bHasFoe = false;
 		SetStoneFoeVisibility(Beat.ToStoneIndex, false);
 	}
