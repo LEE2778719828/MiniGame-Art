@@ -21,6 +21,7 @@ class UBoxComponent;
 class INightFeelBridge;
 class UNightForkController;
 class APostProcessVolume;
+class AStaticMeshActor;
 class UMaterialInterface;
 class ANightCourseHUD;
 
@@ -413,6 +414,9 @@ protected:
 	TWeakObjectPtr<APostProcessVolume> ManagedPostProcessVolume;
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> ActiveCoursePostProcessMaterial;
+	TWeakObjectPtr<AStaticMeshActor> ManagedFloorMeshActor;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> ActiveCourseFloorMaterial;
 
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;
@@ -475,6 +479,10 @@ protected:
 	APostProcessVolume* ResolveCoursePostProcessVolume();
 	void ApplyCoursePostProcessMaterial(UMaterialInterface* Material);
 	void ApplyDefaultCoursePostProcessMaterial();
+	AStaticMeshActor* ResolveCourseFloorMeshActor();
+	void ApplyCourseFloorMaterial(UMaterialInterface* Material);
+	void ApplyDefaultCourseFloorMaterial();
+	FText ResolveForkTipText(bool& bOutSkipTip) const;
 	void HandleFailedInput(int32 BeatIndex, ENightJudgeOutcome Outcome);
 	void BeginFailure(const FString& Reason);
 	bool HasBranchQueueForRoute(ENightRouteId RouteId) const;

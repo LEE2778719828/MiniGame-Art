@@ -18,7 +18,8 @@ public class MiniGame : ModuleRules
 			"EnhancedInput",
 			"UMG",
 			"Niagara",
-			"MoviePlayer"
+			"MoviePlayer",
+			"ProceduralMeshComponent"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

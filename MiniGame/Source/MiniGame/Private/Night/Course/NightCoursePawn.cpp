@@ -444,6 +444,21 @@ void ANightCoursePawn::ResolveSlashVFXBoost(float& OutScale, float& OutHDR) cons
 	}
 }
 
+void ANightCoursePawn::SetSlashTrailAttachOffset(const FVector NewOffset)
+{
+	SlashTrailAttachOffset = NewOffset;
+}
+
+void ANightCoursePawn::SetSlashTrailRotation(const FRotator NewRotation)
+{
+	SlashTrailRotation = NewRotation;
+}
+
+void ANightCoursePawn::SetSlashTrailAttachScale(const FVector NewScale)
+{
+	SlashTrailAttachScale = NewScale;
+}
+
 void ANightCoursePawn::ApplyAttackVFXBoost(UNiagaraComponent* Comp, float Scale, float HDR) const
 {
 	if (!Comp)
@@ -485,30 +500,43 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 
 	if (UNiagaraSystem* TrailFX = ResolveSlashTrailFX())
 	{
+		// Attach to ArtRoot in front of the hero — never follow KnifeMesh / knife bone.
+		// Offset / Rotation / AttachScale are BP-tunable under Night|VFX|刀光挂点.
+		USceneComponent* AttachParent = ArtRoot ? ArtRoot.Get() : GetRootComponent();
+		const FVector AttachScale3D(
+			SlashTrailAttachScale.X * Scale,
+			SlashTrailAttachScale.Y * Scale,
+			SlashTrailAttachScale.Z * Scale);
 		UNiagaraComponent* TrailComp = nullptr;
-		if (KnifeMesh)
+		if (AttachParent)
 		{
 			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 				TrailFX,
-				KnifeMesh,
+				AttachParent,
 				NAME_None,
-				FVector::ZeroVector,
+				SlashTrailAttachOffset,
 				SlashTrailRotation,
-				Scale3D,
-				EAttachLocation::SnapToTarget,
+				AttachScale3D,
+				EAttachLocation::KeepRelativeOffset,
 				true,
 				ENCPoolMethod::None);
 		}
 		else if (UWorld* World = GetWorld())
 		{
+			const FTransform ActorXform = GetActorTransform();
 			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
 				TrailFX,
-				GetActorLocation(),
-				SlashTrailRotation,
-				Scale3D);
+				ActorXform.TransformPosition(SlashTrailAttachOffset),
+				ActorXform.Rotator() + SlashTrailRotation,
+				AttachScale3D);
 		}
 		ApplyAttackVFXBoost(TrailComp, Scale, HDR);
+		if (TrailComp)
+		{
+			// ApplyAttackVFXBoost resets uniform scale; restore authored axis scale (incl. mirrors).
+			TrailComp->SetRelativeScale3D(AttachScale3D);
+		}
 	}
 
 	if (UNiagaraSystem* ImpactFX = ResolveHitImpactFX())
@@ -832,22 +860,27 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 // add by K2 (R1)
 void ANightCoursePawn::PlayFailCameraShake()
 {
-	if (!FailCameraShake)
-	{
-		FailCameraShake = LoadClass<UCameraShakeBase>(
-			nullptr,
-			TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return.CS_CameraShake_Return_C"));
-		if (!FailCameraShake)
-		{
-			return;
-		}
-	}
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC)
 	{
 		return;
 	}
-	PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
+
+	if (!FailCameraShake)
+	{
+		FailCameraShake = LoadClass<UCameraShakeBase>(
+			nullptr,
+			TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return.CS_CameraShake_Return_C"));
+	}
+	if (FailCameraShake)
+	{
+		PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
+	}
+
+	if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+	{
+		NightHUD->NotifyFailSideFlash();
+	}
 }
 
 // add by K2 (R1)

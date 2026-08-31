@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
 #include "GameFramework/HUD.h"
 #include "Night/Course/NightFeelBridge.h"
 #include "Night/Shared/NightSharedTypes.h"
@@ -9,6 +10,8 @@
 class UUserWidget;
 class UTextBlock;
 class UWidget;
+class UImage;
+class UCanvasPanel;
 class UDataTable; //add by K2
 class UTexture2D; //add by K2
 class UNightCourseDirector; //add by K2
@@ -34,6 +37,10 @@ struct FNightDropFlyIcon
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> Icon = nullptr;
 
+	/** UMG image drawn above WBP_NightHUD_Multi. Canvas HUD is behind that widget. */
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> Image = nullptr;
+
 	/** Kill point. The screen start is sampled from it on the first drawn frame. */
 	FVector WorldStart = FVector::ZeroVector;
 
@@ -57,6 +64,24 @@ struct FNightFoeHitSfx
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|SFX")
 	TSoftObjectPtr<USoundBase> Material;
+};
+
+/** Full-viewport canvas so drop icons render above the composite HUD. */
+UCLASS()
+class MINIGAME_API UNightDropFlyLayerWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeConstruct() override;
+
+	UCanvasPanel* GetRootCanvas() const { return RootCanvas; }
+	UCanvasPanel* GetOrCreateRootCanvas();
+
+protected:
+	UPROPERTY()
+	TObjectPtr<UCanvasPanel> RootCanvas;
 };
 #pragma endregion K2 moonyfli
 
@@ -357,6 +382,52 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|HUD|SFX")
 	void NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop);
+
+	/** Spawn food icons that fly from WorldLocation to the bag. Safe to call from Director. */
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|Drop")
+	void SpawnDropFlyIcons(EIngredientId DropId, int32 Count, FVector WorldLocation);
+
+	/** Kill haptic: intensity scales linearly with current slash combo. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "启用砍杀震动"))
+	bool bEnableKillHaptic = true;
+
+	/** Combo 1 intensity. ~light gamepad / phone tap (not a buzz). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动强度", ClampMin = "0.0", ClampMax = "1.0"))
+	float KillHapticIntensityMin = 0.28f;
+
+	/** Intensity at KillHapticFullCombo. Below bone-rattling 1.0; typical heavy hit ~0.7. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动强度", ClampMin = "0.0", ClampMax = "1.0"))
+	float KillHapticIntensityMax = 0.72f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动时长", ClampMin = "0.01", ClampMax = "0.5"))
+	float KillHapticDurationMin = 0.055f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动时长", ClampMin = "0.01", ClampMax = "0.5"))
+	float KillHapticDurationMax = 0.11f;
+
+	/** Combo at which intensity/duration reach max (matches combo HUD full scale). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "震动涨满连击", ClampMin = "1"))
+	int32 KillHapticFullCombo = 30;
+
+	/** Miss / wrong-button side red gradient flash. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "启用失败侧红闪"))
+	bool bEnableFailSideFlash = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪时长", ClampMin = "0.05"))
+	float FailSideFlashSeconds = 0.38f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪峰值透明度", ClampMin = "0.0", ClampMax = "1.0"))
+	float FailSideFlashMaxAlpha = 0.55f;
+
+	/** Fraction of screen width covered by each side gradient. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "侧边宽度占比", ClampMin = "0.05", ClampMax = "0.5"))
+	float FailSideFlashEdgeWidthNorm = 0.22f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪颜色"))
+	FLinearColor FailSideFlashColor = FLinearColor(0.92f, 0.06f, 0.08f, 1.f);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|FailFlash")
+	void NotifyFailSideFlash();
 #pragma endregion K2 moonyfli
 
 	/** Blueprint layout hook. Use Offset/Size on the inner Canvas/SizeBox authored at HUDDesignSize. */
@@ -455,12 +526,19 @@ private:
 	TArray<FNightDropFlyIcon> DropFlyIcons;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UNightDropFlyLayerWidget> DropFlyLayerWidget;
+
+	UPROPERTY(Transient)
 	TMap<EIngredientId, TObjectPtr<UTexture2D>> ResolvedIngredientIcons;
 
 	TWeakObjectPtr<UNightCourseDirector> BoundDropDirector;
+	uint64 LastDropFlyFrame = 0;
+	EIngredientId LastDropFlyId = EIngredientId::None;
+	FVector LastDropFlyWorld = FVector::ZeroVector;
 
 	int32 LastDisplayedCombo = 0;
 	float ComboPopElapsed = 0.f;
+	float FailSideFlashRemaining = 0.f;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(Transient)
@@ -500,14 +578,23 @@ private:
 	bool HasVisibleCourseTipWidget() const;
 	void SyncCourseTipWidgetLifetime();
 
+	/** Must be UFUNCTION: bound to Director->OnIngredientDropped via AddUniqueDynamic. */
+	UFUNCTION()
 	void HandleIngredientDropped(EIngredientId DropId, int32 Count, FVector WorldLocation);
 
 	void EnsureDropDirectorBinding(UNightCourseDirector* Director);
+	void EnsureDropFlyLayer();
+	void SyncDropFlyLayerPlacement();
+	void ReleaseDropFlyIcon(FNightDropFlyIcon& Entry);
 	UTexture2D* ResolveIngredientIcon(EIngredientId DropId);
 	/** Canvas-space pixel offset of the game view inside the window letterbox. */
 	FVector2D GetCanvasLetterboxPixelOffset() const;
 	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
+	bool GetBagFlyTargetSlatePosition(FVector2D& OutSlatePosition) const;
+	bool ProjectWorldToSlate(const FVector& WorldLocation, FVector2D& OutSlatePosition) const;
 	void DrawDropFlyIcons(float DeltaSeconds);
+	void DrawFailSideFlash(float DeltaSeconds);
+	void PlayKillHaptic(int32 Combo);
 	void PlaySfx(
 		const TSoftObjectPtr<USoundBase>& SoftSound,
 		float Volume,

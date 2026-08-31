@@ -29,6 +29,10 @@ struct FNightRouteRuleRow
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route|Art", meta = (DisplayName = "分支后处理材质实例", ToolTip = "玩家选择本路线后替换跑酷默认后处理材质。建议绑定材质实例；为空时继续使用 DA_Course 的默认跑酷后处理材质。"))
 	TObjectPtr<UMaterialInterface> PostProcessMaterial = nullptr;
 
+	/** Optional floor / Plane material instance selected for this branch. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route|Art", meta = (DisplayName = "分支地板材质实例", ToolTip = "玩家选择本路线后替换关卡 Plane 的地板材质。建议绑定材质实例；为空时继续使用 DA_Course 的默认地板材质。"))
+	TObjectPtr<UMaterialInterface> FloorMaterial = nullptr;
+
 	/** Multiplies Wrong/Miss soul penalty while on branch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Route", meta = (DisplayName = "灵魂惩罚倍率", ToolTip = "分支期间错误/漏判惩罚的倍率，1 表示不变。"))
 	float SoulPenaltyScale = 1.f;
