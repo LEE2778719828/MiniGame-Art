@@ -1251,6 +1251,12 @@ void ASDayCellVisual::Configure(const int32 InCellIndex, const float InRadius, A
 	RefreshVisual();
 }
 
+void ASDayCellVisual::SetInteractionRadius(const float InRadius, const bool bRound)
+{
+	const float CellScale = FMath::Max(1.0f, InRadius) / 50.0f;
+	CellMesh->SetRelativeScale3D(FVector(CellScale, bRound ? CellScale : CellScale * 0.82f, 0.12f));
+}
+
 #pragma region K2 moonyfli
 void ASDayCellVisual::SetSeatedInWell(const bool bInSeated)
 {
@@ -2075,7 +2081,10 @@ void ASDayBoardPresenter::BuildCells()
 	const bool bUseDayArt = ArtBoard.IsValid();
 #pragma endregion K2 moonyfli
 
-	for (const FSDayBoardLayoutRow& Row : GetLayoutRows())
+	const TArray<FSDayBoardLayoutRow> LayoutRows = GetLayoutRows();
+	TArray<FTransform> SpawnTransforms;
+	SpawnTransforms.Reserve(LayoutRows.Num());
+	for (const FSDayBoardLayoutRow& Row : LayoutRows)
 	{
 		FTransform LocalTransform = Row.Transform;
 		LocalTransform.SetLocation(MirrorX(Row.Transform.GetLocation()));
@@ -2088,6 +2097,30 @@ void ASDayBoardPresenter::BuildCells()
 			SpawnTransform = DayArtCellToWorld(ArtBoard.GetTransform(), Row.Transform);
 		}
 #pragma endregion K2 moonyfli
+		SpawnTransforms.Add(SpawnTransform);
+	}
+
+	for (int32 RowIndex = 0; RowIndex < LayoutRows.Num(); ++RowIndex)
+	{
+		const FSDayBoardLayoutRow& Row = LayoutRows[RowIndex];
+		const FTransform& SpawnTransform = SpawnTransforms[RowIndex];
+		float InteractionRadius = Row.VisualRadius;
+		if (bUseDayArt && LayoutRows.Num() > 1)
+		{
+			float NearestCellDistance = TNumericLimits<float>::Max();
+			for (int32 OtherIndex = 0; OtherIndex < SpawnTransforms.Num(); ++OtherIndex)
+			{
+				if (OtherIndex != RowIndex)
+				{
+					NearestCellDistance = FMath::Min(
+						NearestCellDistance,
+						FVector::Distance(SpawnTransform.GetLocation(), SpawnTransforms[OtherIndex].GetLocation()));
+				}
+			}
+			// Each cell takes half of its nearest-neighbour clearance. This also guarantees
+			// every non-neighbour pair remains separated by at least CellHitZoneGap.
+			InteractionRadius = FMath::Max(1.0f, (NearestCellDistance - CellHitZoneGap) * 0.5f);
+		}
 
 		FActorSpawnParameters Params;
 		Params.Owner = this;
@@ -2129,11 +2162,9 @@ void ASDayBoardPresenter::BuildCells()
 		Visual->CellMesh->SetVisibility(!bUseDayArt);
 		if (bUseDayArt)
 		{
-			// Configure squashes the disc to read under the old top-down camera. The wells
-			// are round and the cell now lies in the pan's plane, so undo the squash to keep
-			// the pointer target matching the well.
-			const float CellScale = Row.VisualRadius / 50.0f;
-			Visual->CellMesh->SetRelativeScale3D(FVector(CellScale, CellScale, 0.12f));
+			// The authored wells are round. Enlarge the invisible pointer surface up to the
+			// nearest neighbouring cell while retaining a small, configurable safety gap.
+			Visual->SetInteractionRadius(InteractionRadius, true);
 			Visual->SetSeatedInWell(true);
 		}
 		Visual->SetUseAuthoredVisuals(bUseDayArt);
@@ -2663,6 +2694,72 @@ bool ASDayBoardPresenter::TryDeliverToCharacter(ASDayCharacterStandIn* Character
 		return bDelivered;
 	}
 	return false;
+}
+
+ASDayCharacterStandIn* ASDayBoardPresenter::FindDeliveryPlateTarget(const FVector2D& ScreenPosition) const
+{
+	const FDayArtPiece Plates = FindDayArtPiece(GetWorld(), DayArtCustomerPlatesTag);
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (!Plates.IsValid() || !PlayerController)
+	{
+		return nullptr;
+	}
+
+	FVector BoundsOrigin = FVector::ZeroVector;
+	FVector BoundsExtent = FVector::ZeroVector;
+	Plates.GetBounds(BoundsOrigin, BoundsExtent);
+	FVector2D ScreenMin(TNumericLimits<double>::Max(), TNumericLimits<double>::Max());
+	FVector2D ScreenMax(TNumericLimits<double>::Lowest(), TNumericLimits<double>::Lowest());
+	bool bProjectedAnyCorner = false;
+	for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+	{
+		const FVector Corner(
+			BoundsOrigin.X + ((CornerIndex & 1) ? BoundsExtent.X : -BoundsExtent.X),
+			BoundsOrigin.Y + ((CornerIndex & 2) ? BoundsExtent.Y : -BoundsExtent.Y),
+			BoundsOrigin.Z + ((CornerIndex & 4) ? BoundsExtent.Z : -BoundsExtent.Z));
+		FVector2D ProjectedCorner = FVector2D::ZeroVector;
+		if (UGameplayStatics::ProjectWorldToScreen(PlayerController, Corner, ProjectedCorner))
+		{
+			ScreenMin.X = FMath::Min(ScreenMin.X, ProjectedCorner.X);
+			ScreenMin.Y = FMath::Min(ScreenMin.Y, ProjectedCorner.Y);
+			ScreenMax.X = FMath::Max(ScreenMax.X, ProjectedCorner.X);
+			ScreenMax.Y = FMath::Max(ScreenMax.Y, ProjectedCorner.Y);
+			bProjectedAnyCorner = true;
+		}
+	}
+
+	if (!bProjectedAnyCorner
+		|| ScreenPosition.X < ScreenMin.X || ScreenPosition.X > ScreenMax.X
+		|| ScreenPosition.Y < ScreenMin.Y || ScreenPosition.Y > ScreenMax.Y)
+	{
+		return nullptr;
+	}
+
+	const double ScreenWidth = ScreenMax.X - ScreenMin.X;
+	if (ScreenWidth <= UE_SMALL_NUMBER)
+	{
+		return nullptr;
+	}
+	const int32 PlateSlotCount = FMath::Max(DayArtCustomerPlateCount, GetDeliverySeatCount());
+	const int32 PlateSlot = FMath::Clamp(
+		FMath::FloorToInt((ScreenPosition.X - ScreenMin.X) / ScreenWidth * PlateSlotCount),
+		0,
+		PlateSlotCount - 1);
+	const TArray<FVector> PlateSlots = SolveDayArtPlateSlots(GetWorld(), PlateSlotCount);
+	if (!PlateSlots.IsValidIndex(PlateSlot))
+	{
+		return nullptr;
+	}
+
+	for (ASDayCharacterStandIn* Character : CharacterStandIns)
+	{
+		if (Character && Character->bDeliveryTarget && Character->bOccupied
+			&& NearestPlateSlot(PlateSlots, Character->GetActorLocation()) == PlateSlot)
+		{
+			return Character;
+		}
+	}
+	return nullptr;
 }
 
 void ASDayBoardPresenter::RefreshFromLogic()
@@ -3585,36 +3682,10 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 		return;
 	}
 
-	if (ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitTest(ScreenPosition)))
-	{
-		// Second click of the click-release-click flow: a selected piece lands on the seat.
-		if (TryDeliverToCharacter(Character, Board))
-		{
-			bDropHandledOnPress = true;
-		}
-		RefreshFromLogic();
-		return;
-	}
-
-	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitTest(ScreenPosition)))
-	{
-#pragma region K2 moonyfli
-		int32 SpawnedCellIndex = INDEX_NONE;
-		const bool bSpawnSucceeded = Board->TrySpawnFromMotherPieceWithResult(
-			Bin->IngredientId,
-			SpawnedCellIndex);
-		BP_OnIngredientBinClicked(Bin->BinIndex, Bin->IngredientId, bSpawnSucceeded);
-		if (bSpawnSucceeded)
-		{
-			PlayIngredientBinAnimation(Bin->BinIndex);
-			PlayIngredientSpawnFeedback(Bin, Bin->IngredientId, SpawnedCellIndex);
-		}
-#pragma endregion K2 moonyfli
-		RefreshFromLogic();
-		return;
-	}
-
-	if (ASDayCellVisual* Cell = Cast<ASDayCellVisual>(HitTest(ScreenPosition)))
+	// Resolve the world trace once. Cells deliberately win over delivery proxies, so a
+	// plate/portrait target can never steal a merge-cell interaction.
+	AActor* HitActor = HitTest(ScreenPosition);
+	if (ASDayCellVisual* Cell = Cast<ASDayCellVisual>(HitActor))
 	{
 		if (Board->IsDragging())
 		{
@@ -3635,6 +3706,41 @@ void ASDayBoardPresenter::HandlePointerPressed(const FVector2D& ScreenPosition)
 			Board->BeginPieceDrag(Cell->CellIndex, 0);
 			RefreshFromLogic();
 		}
+		return;
+	}
+
+	if (ASDayIngredientBinVisual* Bin = Cast<ASDayIngredientBinVisual>(HitActor))
+	{
+#pragma region K2 moonyfli
+		int32 SpawnedCellIndex = INDEX_NONE;
+		const bool bSpawnSucceeded = Board->TrySpawnFromMotherPieceWithResult(
+			Bin->IngredientId,
+			SpawnedCellIndex);
+		BP_OnIngredientBinClicked(Bin->BinIndex, Bin->IngredientId, bSpawnSucceeded);
+		if (bSpawnSucceeded)
+		{
+			PlayIngredientBinAnimation(Bin->BinIndex);
+			PlayIngredientSpawnFeedback(Bin, Bin->IngredientId, SpawnedCellIndex);
+		}
+#pragma endregion K2 moonyfli
+		RefreshFromLogic();
+		return;
+	}
+
+	ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitActor);
+	if (!Character)
+	{
+		Character = FindDeliveryPlateTarget(ScreenPosition);
+	}
+	if (Character)
+	{
+		// Second click of the click-release-click flow: the portrait or its plate slot delivers.
+		if (TryDeliverToCharacter(Character, Board))
+		{
+			bDropHandledOnPress = true;
+		}
+		RefreshFromLogic();
+		return;
 	}
 }
 
@@ -3664,14 +3770,6 @@ void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 		return;
 	}
 	AActor* HitActor = HitTest(ScreenPosition);
-	if (ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitActor))
-	{
-		// Dragging a piece onto a seat delivers it, same as the HUD buttons.
-		TryDeliverToCharacter(Character, Board);
-		RefreshFromLogic();
-		return;
-	}
-
 	if (ASDayCellVisual* Cell = Cast<ASDayCellVisual>(HitActor))
 	{
 		if (Cell->CellIndex != FromIndex)
@@ -3679,6 +3777,21 @@ void ASDayBoardPresenter::HandlePointerReleased(const FVector2D& ScreenPosition)
 			// Holding on A and releasing over B completes the drag interaction.
 			TryDropPieceAndNotify(Board, FromIndex, Cell->CellIndex);
 		}
+		RefreshFromLogic();
+		return;
+	}
+
+	ASDayCharacterStandIn* Character = Cast<ASDayCharacterStandIn>(HitActor);
+	if (!Character)
+	{
+		Character = FindDeliveryPlateTarget(ScreenPosition);
+	}
+	if (Character)
+	{
+		// The projected plate quarter and the portrait both deliver to the customer in that slot.
+		TryDeliverToCharacter(Character, Board);
+		RefreshFromLogic();
+		return;
 	}
 	// Releasing a simple click over A (or outside the board) keeps A selected,
 	// allowing the next click on B to move or merge it.
@@ -4164,6 +4277,12 @@ void USDayHUD::ResolveForegroundReadouts()
 	CoinAmountText.Reset();
 	RevenueCurrentText.Reset();
 	RevenueTargetText.Reset();
+	IngredientCountLingGuText.Reset();
+	IngredientCountYinShanJunText.Reset();
+	IngredientCountChiYanJiaoText.Reset();
+	IngredientCountYueLinYuText.Reset();
+	IngredientCountXuanYuQinText.Reset();
+	BusinessTimeRemainingText.Reset();
 	RevenueFlyTargetWidget.Reset();
 
 	UWorld* World = GetWorld();
@@ -4182,8 +4301,23 @@ void USDayHUD::ResolveForegroundReadouts()
 		UTextBlock* Coin = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("CoinAmount")));
 		UTextBlock* Current = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueCurrent")));
 		UTextBlock* Target = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("RevenueTarget")));
+		UTextBlock* LingGuCount = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("IngredientCount_LingGu")));
+		UTextBlock* YinShanJunCount = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("IngredientCount_YinShanJun")));
+		UTextBlock* ChiYanJiaoCount = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("IngredientCount_ChiYanJiao")));
+		UTextBlock* YueLinYuCount = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("IngredientCount_YueLinYu")));
+		UTextBlock* XuanYuQinCount = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("IngredientCount_XuanYuQin")));
+		UTextBlock* BusinessTime = Cast<UTextBlock>(Page->GetWidgetFromName(TEXT("BusinessTimeRemaining")));
 		UWidget* FlyTarget = Page->GetWidgetFromName(RevenueFlyTargetWidgetName);
-		if (!Coin && !Current && !Target && !FlyTarget)
+		if (!Coin
+			&& !Current
+			&& !Target
+			&& !LingGuCount
+			&& !YinShanJunCount
+			&& !ChiYanJiaoCount
+			&& !YueLinYuCount
+			&& !XuanYuQinCount
+			&& !BusinessTime
+			&& !FlyTarget)
 		{
 			return false;
 		}
@@ -4191,6 +4325,12 @@ void USDayHUD::ResolveForegroundReadouts()
 		CoinAmountText = Coin;
 		RevenueCurrentText = Current;
 		RevenueTargetText = Target;
+		IngredientCountLingGuText = LingGuCount;
+		IngredientCountYinShanJunText = YinShanJunCount;
+		IngredientCountChiYanJiaoText = ChiYanJiaoCount;
+		IngredientCountYueLinYuText = YueLinYuCount;
+		IngredientCountXuanYuQinText = XuanYuQinCount;
+		BusinessTimeRemainingText = BusinessTime;
 		RevenueFlyTargetWidget = FlyTarget;
 		return true;
 	};
@@ -4283,7 +4423,15 @@ bool USDayHUD::ResolveRevenueFlyTargetPosition(FVector2D& OutPixelPosition)
 void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 {
 	// Widget components rebuild their page on stream in/out, so stale handles mean "look again".
-	if (!CoinAmountText.IsValid() && !RevenueCurrentText.IsValid() && !RevenueTargetText.IsValid())
+	if (!CoinAmountText.IsValid()
+		&& !RevenueCurrentText.IsValid()
+		&& !RevenueTargetText.IsValid()
+		&& !IngredientCountLingGuText.IsValid()
+		&& !IngredientCountYinShanJunText.IsValid()
+		&& !IngredientCountChiYanJiaoText.IsValid()
+		&& !IngredientCountYueLinYuText.IsValid()
+		&& !IngredientCountXuanYuQinText.IsValid()
+		&& !BusinessTimeRemainingText.IsValid())
 	{
 		ResolveForegroundReadouts();
 	}
@@ -4300,6 +4448,40 @@ void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 	if (UTextBlock* Target = RevenueTargetText.Get())
 	{
 		Target->SetText(FText::AsNumber(GameInstance.RevenueTarget, &FNumberFormattingOptions::DefaultNoGrouping()));
+	}
+
+	auto RefreshIngredientCount = [&GameInstance](
+		const TWeakObjectPtr<UTextBlock>& Readout,
+		const FName IngredientId)
+	{
+		if (UTextBlock* Text = Readout.Get())
+		{
+			Text->SetText(FText::FromString(FString::Printf(
+				TEXT("×%d"),
+				GameInstance.GetQuantity(IngredientId))));
+		}
+	};
+	RefreshIngredientCount(IngredientCountLingGuText, DayLingGuId);
+	RefreshIngredientCount(IngredientCountYinShanJunText, DayYinShanJunId);
+	RefreshIngredientCount(IngredientCountChiYanJiaoText, DayChiYanJiaoId);
+	RefreshIngredientCount(IngredientCountYueLinYuText, DayYueLinYuId);
+	RefreshIngredientCount(IngredientCountXuanYuQinText, DayXuanYuQinId);
+
+	if (UTextBlock* BusinessTime = BusinessTimeRemainingText.Get())
+	{
+		const bool bShopOpen = GameInstance.IsShopOpen();
+		BusinessTime->SetVisibility(
+			bShopOpen ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (bShopOpen)
+		{
+			const int32 TotalSeconds = FMath::Max(
+				0,
+				FMath::CeilToInt32(GameInstance.GetDayTimeRemaining()));
+			BusinessTime->SetText(FText::FromString(FString::Printf(
+				TEXT("%02d:%02d"),
+				TotalSeconds / 60,
+				TotalSeconds % 60)));
+		}
 	}
 }
 

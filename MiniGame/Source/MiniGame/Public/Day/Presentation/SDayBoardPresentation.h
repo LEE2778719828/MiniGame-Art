@@ -245,6 +245,8 @@ public:
 	ASDayCellVisual();
 
 	void Configure(int32 InCellIndex, float InRadius, ASMergeBoard* InBoard);
+	/** Resizes only the invisible pointer surface; dish presentation keeps VisualRadius. */
+	void SetInteractionRadius(float InRadius, bool bRound);
 
 	void SetLabelFont(UFont* InFont);
 
@@ -569,6 +571,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "S Day Board")
 	TSoftObjectPtr<USDayBoardVisualConfig> VisualConfig;
 
+	/** Empty world-space gap kept between automatically enlarged Day-art cell hit zones. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board|Interaction", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "30.0"))
+	float CellHitZoneGap = 6.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "S Day Board")
 	bool bTakeCameraOnBeginPlay = true;
 
@@ -710,6 +716,7 @@ private:
 	void RefreshCharacters();
 	UFont* ResolveLabelFont() const;
 	bool TryDeliverToCharacter(ASDayCharacterStandIn* Character, ASMergeBoard* Board);
+	ASDayCharacterStandIn* FindDeliveryPlateTarget(const FVector2D& ScreenPosition) const;
 	bool TryDropPieceAndNotify(ASMergeBoard* Board, int32 FromCellIndex, int32 ToCellIndex);
 #pragma region K2 moonyfli
 	void PlayIngredientBinAnimation(int32 BinIndex);
@@ -887,6 +894,12 @@ private:
 	TWeakObjectPtr<UTextBlock> CoinAmountText;
 	TWeakObjectPtr<UTextBlock> RevenueCurrentText;
 	TWeakObjectPtr<UTextBlock> RevenueTargetText;
+	TWeakObjectPtr<UTextBlock> IngredientCountLingGuText;
+	TWeakObjectPtr<UTextBlock> IngredientCountYinShanJunText;
+	TWeakObjectPtr<UTextBlock> IngredientCountChiYanJiaoText;
+	TWeakObjectPtr<UTextBlock> IngredientCountYueLinYuText;
+	TWeakObjectPtr<UTextBlock> IngredientCountXuanYuQinText;
+	TWeakObjectPtr<UTextBlock> BusinessTimeRemainingText;
 	TWeakObjectPtr<UWidget> RevenueFlyTargetWidget;
 
 	/** Single flying item authored in UMG; one sale creates a short staggered burst of instances. */
