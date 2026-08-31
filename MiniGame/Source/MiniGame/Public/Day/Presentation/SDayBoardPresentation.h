@@ -902,6 +902,17 @@ private:
 	TWeakObjectPtr<UTextBlock> BusinessTimeRemainingText;
 	TWeakObjectPtr<UWidget> RevenueFlyTargetWidget;
 
+	/**
+	 * World-space quantity labels authored under the matching Box components in BP_SDayCanguan.
+	 * Component names deliberately match the legacy foreground UMG TextBlocks, allowing C++ to
+	 * prefer the box-mounted label while retaining the foreground label as a migration fallback.
+	 */
+	TWeakObjectPtr<UTextRenderComponent> IngredientBinCountLingGuText;
+	TWeakObjectPtr<UTextRenderComponent> IngredientBinCountYinShanJunText;
+	TWeakObjectPtr<UTextRenderComponent> IngredientBinCountChiYanJiaoText;
+	TWeakObjectPtr<UTextRenderComponent> IngredientBinCountYueLinYuText;
+	TWeakObjectPtr<UTextRenderComponent> IngredientBinCountXuanYuQinText;
+
 	/** Single flying item authored in UMG; one sale creates a short staggered burst of instances. */
 	UPROPERTY(EditDefaultsOnly, Category = "Day|Revenue Feedback")
 	TSubclassOf<UUserWidget> RevenueFlyingItemClass;

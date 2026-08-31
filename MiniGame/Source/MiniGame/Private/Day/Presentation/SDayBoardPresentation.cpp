@@ -4284,6 +4284,11 @@ void USDayHUD::ResolveForegroundReadouts()
 	IngredientCountXuanYuQinText.Reset();
 	BusinessTimeRemainingText.Reset();
 	RevenueFlyTargetWidget.Reset();
+	IngredientBinCountLingGuText.Reset();
+	IngredientBinCountYinShanJunText.Reset();
+	IngredientBinCountChiYanJiaoText.Reset();
+	IngredientBinCountYueLinYuText.Reset();
+	IngredientBinCountXuanYuQinText.Reset();
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -4343,27 +4348,75 @@ void USDayHUD::ResolveForegroundReadouts()
 		ViewportWidgets,
 		UUserWidget::StaticClass(),
 		true);
+	bool bResolvedForegroundPage = false;
 	for (UUserWidget* ViewportWidget : ViewportWidgets)
 	{
 		if (CacheReadouts(ViewportWidget))
 		{
-			return;
+			bResolvedForegroundPage = true;
+			break;
 		}
 	}
 
-	TInlineComponentArray<UWidgetComponent*> WidgetComponents;
+	if (!bResolvedForegroundPage)
+	{
+		TInlineComponentArray<UWidgetComponent*> WidgetComponents;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			It->GetComponents(WidgetComponents);
+			for (const UWidgetComponent* WidgetComponent : WidgetComponents)
+			{
+				if (!WidgetComponent || !WidgetComponent->ComponentHasTag(DayArtForegroundTag))
+				{
+					continue;
+				}
+				if (CacheReadouts(WidgetComponent->GetUserWidgetObject()))
+				{
+					bResolvedForegroundPage = true;
+					break;
+				}
+			}
+			if (bResolvedForegroundPage)
+			{
+				break;
+			}
+		}
+	}
+
+	// The box labels are world components, so their placement follows the authored restaurant
+	// composition instead of a phone-resolution-dependent foreground canvas. The component names
+	// are the only C++/Blueprint contract; their parent Box, transform, font and material stay in BP.
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
-		It->GetComponents(WidgetComponents);
-		for (const UWidgetComponent* WidgetComponent : WidgetComponents)
+		TInlineComponentArray<UTextRenderComponent*> TextComponents;
+		It->GetComponents(TextComponents);
+		for (UTextRenderComponent* TextComponent : TextComponents)
 		{
-			if (!WidgetComponent || !WidgetComponent->ComponentHasTag(DayArtForegroundTag))
+			if (!TextComponent)
 			{
 				continue;
 			}
-			if (CacheReadouts(WidgetComponent->GetUserWidgetObject()))
+
+			const FName ComponentName = TextComponent->GetFName();
+			if (ComponentName == TEXT("IngredientCount_LingGu"))
 			{
-				return;
+				IngredientBinCountLingGuText = TextComponent;
+			}
+			else if (ComponentName == TEXT("IngredientCount_YinShanJun"))
+			{
+				IngredientBinCountYinShanJunText = TextComponent;
+			}
+			else if (ComponentName == TEXT("IngredientCount_ChiYanJiao"))
+			{
+				IngredientBinCountChiYanJiaoText = TextComponent;
+			}
+			else if (ComponentName == TEXT("IngredientCount_YueLinYu"))
+			{
+				IngredientBinCountYueLinYuText = TextComponent;
+			}
+			else if (ComponentName == TEXT("IngredientCount_XuanYuQin"))
+			{
+				IngredientBinCountXuanYuQinText = TextComponent;
 			}
 		}
 	}
@@ -4423,7 +4476,7 @@ bool USDayHUD::ResolveRevenueFlyTargetPosition(FVector2D& OutPixelPosition)
 void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 {
 	// Widget components rebuild their page on stream in/out, so stale handles mean "look again".
-	if (!CoinAmountText.IsValid()
+	const bool bNeedsForegroundReadouts = !CoinAmountText.IsValid()
 		&& !RevenueCurrentText.IsValid()
 		&& !RevenueTargetText.IsValid()
 		&& !IngredientCountLingGuText.IsValid()
@@ -4431,7 +4484,13 @@ void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 		&& !IngredientCountChiYanJiaoText.IsValid()
 		&& !IngredientCountYueLinYuText.IsValid()
 		&& !IngredientCountXuanYuQinText.IsValid()
-		&& !BusinessTimeRemainingText.IsValid())
+		&& !BusinessTimeRemainingText.IsValid();
+	const bool bNeedsBoxIngredientCounts = !IngredientBinCountLingGuText.IsValid()
+		&& !IngredientBinCountYinShanJunText.IsValid()
+		&& !IngredientBinCountChiYanJiaoText.IsValid()
+		&& !IngredientBinCountYueLinYuText.IsValid()
+		&& !IngredientBinCountXuanYuQinText.IsValid();
+	if (bNeedsForegroundReadouts || bNeedsBoxIngredientCounts)
 	{
 		ResolveForegroundReadouts();
 	}
@@ -4451,21 +4510,33 @@ void USDayHUD::RefreshForegroundReadouts(const USChefGameInstance& GameInstance)
 	}
 
 	auto RefreshIngredientCount = [&GameInstance](
-		const TWeakObjectPtr<UTextBlock>& Readout,
+		const TWeakObjectPtr<UTextRenderComponent>& BoxReadout,
+		const TWeakObjectPtr<UTextBlock>& ForegroundFallback,
 		const FName IngredientId)
 	{
-		if (UTextBlock* Text = Readout.Get())
+		const FText QuantityText = FText::FromString(FString::Printf(
+			TEXT("×%d"),
+			GameInstance.GetQuantity(IngredientId)));
+		if (UTextRenderComponent* Text = BoxReadout.Get())
 		{
-			Text->SetText(FText::FromString(FString::Printf(
-				TEXT("×%d"),
-				GameInstance.GetQuantity(IngredientId))));
+			Text->SetText(QuantityText);
+			Text->SetVisibility(true);
+			if (UTextBlock* Fallback = ForegroundFallback.Get())
+			{
+				Fallback->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+		else if (UTextBlock* Fallback = ForegroundFallback.Get())
+		{
+			Fallback->SetVisibility(ESlateVisibility::HitTestInvisible);
+			Fallback->SetText(QuantityText);
 		}
 	};
-	RefreshIngredientCount(IngredientCountLingGuText, DayLingGuId);
-	RefreshIngredientCount(IngredientCountYinShanJunText, DayYinShanJunId);
-	RefreshIngredientCount(IngredientCountChiYanJiaoText, DayChiYanJiaoId);
-	RefreshIngredientCount(IngredientCountYueLinYuText, DayYueLinYuId);
-	RefreshIngredientCount(IngredientCountXuanYuQinText, DayXuanYuQinId);
+	RefreshIngredientCount(IngredientBinCountLingGuText, IngredientCountLingGuText, DayLingGuId);
+	RefreshIngredientCount(IngredientBinCountYinShanJunText, IngredientCountYinShanJunText, DayYinShanJunId);
+	RefreshIngredientCount(IngredientBinCountChiYanJiaoText, IngredientCountChiYanJiaoText, DayChiYanJiaoId);
+	RefreshIngredientCount(IngredientBinCountYueLinYuText, IngredientCountYueLinYuText, DayYueLinYuId);
+	RefreshIngredientCount(IngredientBinCountXuanYuQinText, IngredientCountXuanYuQinText, DayXuanYuQinId);
 
 	if (UTextBlock* BusinessTime = BusinessTimeRemainingText.Get())
 	{
