@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Phone haptic: VibrationEffect one-shot. ForceFeedback is gated by Android.VibrationThreshold=0.3
+     and can be swallowed when a virtual gamepad is reported attached. -->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<androidManifestUpdates>
+		<addPermission android:name="android.permission.VIBRATE"/>
+	</androidManifestUpdates>
+
+	<gameActivityImportAdditions>
+		<insert>
+import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
+		</insert>
+	</gameActivityImportAdditions>
+
+	<gameActivityClassAdditions>
+		<insert>
+	public void AndroidThunkJava_MiniGameVibrate(final int intensity, final int durationMs)
+	{
+		if (durationMs &lt; 1)
+		{
+			return;
+		}
+		runOnUiThread(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				try
+				{
+					Vibrator vibrator = null;
+					if (Build.VERSION.SDK_INT &gt;= 31)
+					{
+						VibratorManager manager = (VibratorManager)getSystemService(VIBRATOR_MANAGER_SERVICE);
+						if (manager != null)
+						{
+							vibrator = manager.getDefaultVibrator();
+						}
+					}
+					else
+					{
+						vibrator = (Vibrator)getSystemService(VIBRATOR_SERVICE);
+					}
+					if (vibrator == null || !vibrator.hasVibrator())
+					{
+						return;
+					}
+					final int amplitude = Math.max(1, Math.min(255, intensity));
+					if (Build.VERSION.SDK_INT &gt;= 26)
+					{
+						vibrator.vibrate(VibrationEffect.createOneShot((long)durationMs, amplitude));
+					}
+					else
+					{
+						vibrator.vibrate((long)durationMs);
+					}
+				}
+				catch (Exception ignored)
+				{
+				}
+			}
+		});
+	}
+		</insert>
+	</gameActivityClassAdditions>
+
+	<proguardAdditions>
+		<insert>
+-keepclassmembers class com.epicgames.unreal.GameActivity {
+	public void AndroidThunkJava_MiniGameVibrate(int, int);
+}
+		</insert>
+	</proguardAdditions>
+</root>

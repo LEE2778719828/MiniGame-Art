@@ -391,19 +391,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "启用砍杀震动"))
 	bool bEnableKillHaptic = true;
 
-	/** Combo 1 intensity. ~light gamepad / phone tap (not a buzz). */
+	/** Combo 1 intensity. Must stay above Android.VibrationThreshold (0.3) if ForceFeedback is used. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动强度", ClampMin = "0.0", ClampMax = "1.0"))
-	float KillHapticIntensityMin = 0.28f;
+	float KillHapticIntensityMin = 0.42f;
 
 	/** Intensity at KillHapticFullCombo. Below bone-rattling 1.0; typical heavy hit ~0.7. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动强度", ClampMin = "0.0", ClampMax = "1.0"))
-	float KillHapticIntensityMax = 0.72f;
+	float KillHapticIntensityMax = 0.85f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动时长", ClampMin = "0.01", ClampMax = "0.5"))
-	float KillHapticDurationMin = 0.055f;
+	float KillHapticDurationMin = 0.08f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动时长", ClampMin = "0.01", ClampMax = "0.5"))
-	float KillHapticDurationMax = 0.11f;
+	float KillHapticDurationMax = 0.14f;
 
 	/** Combo at which intensity/duration reach max (matches combo HUD full scale). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "震动涨满连击", ClampMin = "1"))

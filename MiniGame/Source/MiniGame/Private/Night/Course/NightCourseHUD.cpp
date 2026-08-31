@@ -39,6 +39,10 @@
 #include "TimerManager.h" //add by K2
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
+#if PLATFORM_ANDROID
+#include "Android/AndroidApplication.h"
+#include "Android/AndroidJNI.h"
+#endif
 
 #pragma region K2 moonyfli
 namespace NightHudPads
@@ -1851,24 +1855,18 @@ void ANightCourseHUD::PlayKillHaptic(const int32 Combo)
 	{
 		return;
 	}
-	APlayerController* PC = GetOwningPlayerController();
-	if (!PC)
-	{
-		return;
-	}
 
-	// Linear ramp combo 1 → FullCombo, matching common mobile/console hit pulses:
-	// light ~0.28/55ms, heavy ~0.72/110ms (not a continuous buzz).
+	// Linear ramp combo 1 → FullCombo, matching common mobile/console hit pulses.
 	const int32 FullAt = FMath::Max(1, KillHapticFullCombo);
 	const float T = FMath::Clamp(
 		static_cast<float>(FMath::Max(1, Combo) - 1) / static_cast<float>(FullAt - 1 > 0 ? FullAt - 1 : 1),
 		0.f,
 		1.f);
-	const float Intensity = FMath::Clamp(
+	float Intensity = FMath::Clamp(
 		FMath::Lerp(KillHapticIntensityMin, KillHapticIntensityMax, T),
 		0.f,
 		1.f);
-	const float Duration = FMath::Max(
+	float Duration = FMath::Max(
 		0.01f,
 		FMath::Lerp(KillHapticDurationMin, KillHapticDurationMax, T));
 	if (Intensity <= KINDA_SMALL_NUMBER)
@@ -1876,8 +1874,58 @@ void ANightCourseHUD::PlayKillHaptic(const int32 Combo)
 		return;
 	}
 
+#if PLATFORM_ANDROID
+	// Phone motors: UE ForceFeedback is on/off at Android.VibrationThreshold (0.3), and a
+	// virtual gamepad can swallow device vibration. Call VibrationEffect directly.
+	Intensity = FMath::Max(Intensity, 0.35f);
+	Duration = FMath::Max(Duration, 0.08f);
+	const int32 Amplitude = FMath::Clamp(FMath::RoundToInt(Intensity * 255.f), 1, 255);
+	const int32 DurationMs = FMath::Clamp(FMath::RoundToInt(Duration * 1000.f), 80, 400);
+	if (JNIEnv* Env = FAndroidApplication::GetJavaEnv())
+	{
+		static jmethodID MiniGameVibrate = nullptr;
+		static bool bLookedUp = false;
+		if (!bLookedUp)
+		{
+			bLookedUp = true;
+			MiniGameVibrate = FJavaWrapper::FindMethod(
+				Env,
+				FJavaWrapper::GameActivityClassID,
+				"AndroidThunkJava_MiniGameVibrate",
+				"(II)V",
+				true);
+			if (!MiniGameVibrate)
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightHUD] AndroidThunkJava_MiniGameVibrate missing; rebuild the APK so NightAndroidHaptics_UPL is cooked."));
+			}
+		}
+		if (MiniGameVibrate)
+		{
+			FJavaWrapper::CallVoidMethod(
+				Env,
+				FJavaWrapper::GameActivityThis,
+				MiniGameVibrate,
+				Amplitude,
+				DurationMs);
+			return;
+		}
+	}
+	extern void AndroidThunkCpp_Vibrate(int32 Intensity, int32 Duration);
+	AndroidThunkCpp_Vibrate(Amplitude, DurationMs);
+	return;
+#endif
+
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
 	PC->PlayDynamicForceFeedback(
-		Intensity,
+		FMath::Max(Intensity, 0.35f),
 		Duration,
 		true,
 		true,

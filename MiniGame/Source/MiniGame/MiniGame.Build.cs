@@ -41,6 +41,14 @@ public class MiniGame : ModuleRules
 				"UMGEditor"
 			});
 		}
+
+		if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+			PrivateDependencyModuleNames.Add("Launch");
+			AdditionalPropertiesForReceipt.Add(
+				"AndroidPlugin",
+				System.IO.Path.Combine(ModuleDirectory, "NightAndroidHaptics_UPL.xml"));
+		}
 #pragma endregion K2 moonyfli
 	}
 }

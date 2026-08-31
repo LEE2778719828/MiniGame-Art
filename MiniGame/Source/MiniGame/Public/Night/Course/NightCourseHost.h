@@ -20,6 +20,7 @@ class AActor;
 class AGameModeBase;
 class UWorld;
 class ANightCourseHUD;
+class ANightCoursePreviewCamera;
 class UAudioComponent;
 class USoundBase;
 
@@ -172,6 +173,11 @@ public:
 	UFUNCTION(CallInEditor, Category = "Night|Editor Preview")
 	void RebuildEditorPreview();
 
+#if WITH_EDITOR
+	/** Drag the preview camera; on release this writes SpringArm / FOV back to HeroClass. */
+	void NotifyPreviewCameraEdited(ANightCoursePreviewCamera* PreviewCamera);
+#endif
+
 	UFUNCTION(BlueprintCallable, Category = "Night|Course|Debug")
 	void DebugDumpState() const;
 
@@ -209,6 +215,13 @@ protected:
 	void ClearPendingResultPresentation(bool bHideHUD);
 	void PlayCombatMusic();
 	void StopCombatMusic();
+#if WITH_EDITOR
+	void SpawnEditorPreviewPawnAt(const FNightStoneSpec& Stone);
+	void SpawnEditorPreviewCamera(ANightCoursePawn* PreviewPawn);
+	void BakePreviewCameraToHeroClass(ANightCoursePreviewCamera* PreviewCamera);
+	ANightCoursePawn* FindEditorPreviewPawn() const;
+	bool bIgnorePreviewCameraBake = false;
+#endif
 
 	UFUNCTION()
 	void HandleCombatMusicFinished();

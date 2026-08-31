@@ -28,6 +28,15 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#if WITH_EDITOR
+#include "Night/Course/NightCoursePreviewCamera.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Engine/Blueprint.h"
+#include "Engine/InheritableComponentHandler.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "ScopedTransaction.h"
+#endif
 
 #pragma region K2 moonyfli
 namespace NightCourseStage_Private
@@ -704,6 +713,14 @@ void ANightCourseHost::RebuildEditorPreview()
 		PreviewForkAtoms.Num(),
 		PreviewRoadsideSpecs.Num(),
 		EditorPreviewMeshActors.Num());
+
+#if WITH_EDITOR
+	if (PreviewStones.Num() > 0)
+	{
+		SpawnEditorPreviewPawnAt(PreviewStones[0]);
+		SpawnEditorPreviewCamera(FindEditorPreviewPawn());
+	}
+#endif
 }
 
 void ANightCourseHost::PrepareChefNightFlow()
@@ -1601,4 +1618,229 @@ void ANightCourseHost::DebugDumpState() const
 		static_cast<int32>(LastResult.RouteTaken),
 		LastFailureReason.IsEmpty() ? TEXT("<none>") : *LastFailureReason);
 }
+
+#if WITH_EDITOR
+namespace NightCoursePreviewCamera_Private
+{
+	void ApplyFraming(
+		USpringArmComponent* Arm,
+		UCameraComponent* Cam,
+		float ArmLength,
+		const FRotator& BoomRotation,
+		const FVector& SocketOffset,
+		float FieldOfView)
+	{
+		if (Arm)
+		{
+			Arm->Modify();
+			Arm->TargetArmLength = ArmLength;
+			Arm->SetRelativeRotation(BoomRotation);
+			Arm->SocketOffset = SocketOffset;
+		}
+		if (Cam)
+		{
+			Cam->Modify();
+			Cam->SetFieldOfView(FieldOfView);
+		}
+	}
+
+	void WriteFramingToPawnClass(
+		UClass* PawnClass,
+		float ArmLength,
+		const FRotator& BoomRotation,
+		const FVector& SocketOffset,
+		float FieldOfView)
+	{
+		if (!PawnClass)
+		{
+			return;
+		}
+
+		if (ANightCoursePawn* CDO = PawnClass->GetDefaultObject<ANightCoursePawn>())
+		{
+			CDO->Modify();
+			ApplyFraming(CDO->SpringArm, CDO->Camera, ArmLength, BoomRotation, SocketOffset, FieldOfView);
+			CDO->MarkPackageDirty();
+		}
+
+		if (UBlueprint* Blueprint = Cast<UBlueprint>(PawnClass->ClassGeneratedBy))
+		{
+			Blueprint->Modify();
+			if (UInheritableComponentHandler* Handler = Blueprint->GetInheritableComponentHandler(true))
+			{
+				Handler->Modify();
+				TArray<UActorComponent*> Templates;
+				Handler->GetAllTemplates(Templates, true);
+				for (UActorComponent* Template : Templates)
+				{
+					if (USpringArmComponent* Arm = Cast<USpringArmComponent>(Template))
+					{
+						ApplyFraming(Arm, nullptr, ArmLength, BoomRotation, SocketOffset, FieldOfView);
+					}
+					else if (UCameraComponent* Cam = Cast<UCameraComponent>(Template))
+					{
+						ApplyFraming(nullptr, Cam, ArmLength, BoomRotation, SocketOffset, FieldOfView);
+					}
+				}
+			}
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		}
+	}
+}
+
+ANightCoursePawn* ANightCourseHost::FindEditorPreviewPawn() const
+{
+	for (AActor* Actor : EditorPreviewMeshActors)
+	{
+		if (ANightCoursePawn* PreviewPawn = Cast<ANightCoursePawn>(Actor))
+		{
+			return PreviewPawn;
+		}
+	}
+	return nullptr;
+}
+
+void ANightCourseHost::SpawnEditorPreviewPawnAt(const FNightStoneSpec& Stone)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->IsGameWorld())
+	{
+		return;
+	}
+
+	UClass* PawnClass = (Config && Config->HeroClass)
+		? Config->HeroClass.Get()
+		: ANightCoursePawn::StaticClass();
+	if (!PawnClass)
+	{
+		return;
+	}
+
+	const FTransform Start(
+		FRotator(0.f, Stone.YawDeg, 0.f),
+		Stone.WorldLocation,
+		FVector::OneVector);
+	FActorSpawnParameters Params;
+	Params.ObjectFlags |= RF_Transient;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ANightCoursePawn* PreviewPawn = World->SpawnActor<ANightCoursePawn>(PawnClass, Start, Params);
+	if (!PreviewPawn)
+	{
+		return;
+	}
+
+	PreviewPawn->bIsEditorOnlyActor = true;
+	PreviewPawn->SetActorEnableCollision(false);
+	PreviewPawn->SetActorTickEnabled(false);
+	if (PreviewPawn->SpringArm)
+	{
+		PreviewPawn->SpringArm->bEnableCameraLag = false;
+		PreviewPawn->SpringArm->bEnableCameraRotationLag = false;
+	}
+	PreviewPawn->SetActorLabel(TEXT("EditorPreview_NightCoursePawn"));
+	EditorPreviewMeshActors.Add(PreviewPawn);
+}
+
+void ANightCourseHost::SpawnEditorPreviewCamera(ANightCoursePawn* PreviewPawn)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->IsGameWorld() || !PreviewPawn || !PreviewPawn->Camera)
+	{
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.ObjectFlags |= RF_Transient;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	bIgnorePreviewCameraBake = true;
+	const FTransform CamXform = PreviewPawn->Camera->GetComponentTransform();
+	ANightCoursePreviewCamera* PreviewCamera = World->SpawnActor<ANightCoursePreviewCamera>(
+		CamXform.GetLocation(),
+		CamXform.Rotator(),
+		Params);
+	if (PreviewCamera)
+	{
+		PreviewCamera->bIsEditorOnlyActor = true;
+		PreviewCamera->SetPreviewHost(this);
+		PreviewCamera->SetActorLabel(TEXT("EditorPreview_GameCamera"));
+		if (UCameraComponent* Cam = PreviewCamera->GetCameraComponent())
+		{
+			Cam->SetFieldOfView(PreviewPawn->Camera->FieldOfView);
+		}
+		EditorPreviewMeshActors.Add(PreviewCamera);
+	}
+	bIgnorePreviewCameraBake = false;
+}
+
+void ANightCourseHost::NotifyPreviewCameraEdited(ANightCoursePreviewCamera* PreviewCamera)
+{
+	if (!bIgnorePreviewCameraBake)
+	{
+		BakePreviewCameraToHeroClass(PreviewCamera);
+	}
+}
+
+void ANightCourseHost::BakePreviewCameraToHeroClass(ANightCoursePreviewCamera* PreviewCamera)
+{
+	ANightCoursePawn* PreviewPawn = FindEditorPreviewPawn();
+	if (!PreviewCamera || !PreviewPawn || !PreviewPawn->SpringArm)
+	{
+		return;
+	}
+
+	USceneComponent* BoomParent = PreviewPawn->SpringArm->GetAttachParent();
+	const FTransform ParentWorld = BoomParent
+		? BoomParent->GetComponentTransform()
+		: PreviewPawn->GetActorTransform();
+	const FTransform CamWorld = PreviewCamera->GetActorTransform();
+	const FTransform Rel = CamWorld.GetRelativeTransform(ParentWorld);
+
+	FRotator BoomRotation = Rel.Rotator();
+	BoomRotation.Roll = 0.f;
+	const FVector CamLoc = Rel.GetLocation();
+	const FVector Forward = BoomRotation.Vector();
+	const float ArmLength = FMath::Max(10.f, -FVector::DotProduct(CamLoc, Forward));
+	const FVector SocketOffset = BoomRotation.UnrotateVector(CamLoc + Forward * ArmLength);
+	const float FieldOfView = PreviewCamera->GetCameraComponent()
+		? PreviewCamera->GetCameraComponent()->FieldOfView
+		: 70.f;
+
+	PreviewCamera->BakedArmLength = ArmLength;
+	PreviewCamera->BakedBoomRotation = BoomRotation;
+	PreviewCamera->BakedSocketOffset = SocketOffset;
+	PreviewCamera->BakedFieldOfView = FieldOfView;
+
+	const FScopedTransaction Transaction(NSLOCTEXT(
+		"NightCourse",
+		"BakePreviewCamera",
+		"Bake Night Preview Camera"));
+	NightCoursePreviewCamera_Private::ApplyFraming(
+		PreviewPawn->SpringArm,
+		PreviewPawn->Camera,
+		ArmLength,
+		BoomRotation,
+		SocketOffset,
+		FieldOfView);
+	NightCoursePreviewCamera_Private::WriteFramingToPawnClass(
+		PreviewPawn->GetClass(),
+		ArmLength,
+		BoomRotation,
+		SocketOffset,
+		FieldOfView);
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Stage=Preview] Baked camera to '%s': Arm=%.1f Pitch=%.1f Yaw=%.1f Socket=(%.1f, %.1f, %.1f) FOV=%.1f"),
+		*GetNameSafe(PreviewPawn->GetClass()),
+		ArmLength,
+		BoomRotation.Pitch,
+		BoomRotation.Yaw,
+		SocketOffset.X,
+		SocketOffset.Y,
+		SocketOffset.Z,
+		FieldOfView);
+}
+#endif
 #pragma endregion K2 moonyfli
