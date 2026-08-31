@@ -151,6 +151,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Post Process", meta = (DisplayName = "后处理材质权重", ToolTip = "默认和分支后处理材质加入 PostProcessVolume 时使用的混合权重。", ClampMin = "0.0"))
 	float PostProcessMaterialWeight = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "默认地板材质实例", ToolTip = "主路/岔路前使用的 Plane 地板材质实例；分支没有单独配置时也回退到这里。"))
+	TObjectPtr<UMaterialInterface> DefaultFloorMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "地板Actor名", ToolTip = "关卡中承载地板材质的 StaticMeshActor 名或 Label；默认 Plane。"))
+	FName FloorMeshActorName = TEXT("Plane");
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "启用运行时动态装卸", ToolTip = "开启后只生成玩家附近课程 Actor，远离玩家且已经走过的 Actor 会 Destroy；关闭后恢复整条课程一次性生成。"))
 	bool bEnableRuntimeActorStreaming = true;
 
@@ -200,7 +206,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用课程Tips", ToolTip = "关闭后不弹出岔路/C路 K易斯提示，也不因此暂停。自动化测试应关闭。"))
 	bool bEnableCourseTips = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用岔路Tips", ToolTip = "本局第一次进入岔路选择时弹出提示。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用岔路Tips（无Queue回退）", ToolTip = "仅在未使用 DA_Queue 覆盖时生效。使用 Queue 时改填条目上的「遇到岔路时的Tips内容」。"))
 	bool bEnableForkTip = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用C路反转Tips", ToolTip = "进入 C 路后弹出左右操作反转提示。"))
@@ -209,10 +215,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "Tips说话人", ToolTip = "K易斯提示上的名字。"))
 	FText CourseTipSpeakerName = INVTEXT("K易斯");
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "第一次岔路文字", ToolTip = "第一次触发岔路时显示的提示。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "岔路Tips回退文字", ToolTip = "未使用 DA_Queue 覆盖时的岔路Tips正文。正式关卡请在 DA_NightCourseQueue 每条启用岔路的条目里填写「遇到岔路时的Tips内容」。"))
 	FText ForkTipText = INVTEXT("注意，这里就是岔路了，按左边选择左路，按右边选择右路");
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "C路反转文字", ToolTip = "进入 C 路后显示的提示。"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "C路反转文字", ToolTip = "进入 C 路后显示的提示（全局一次；不进 Queue）。"))
 	FText RouteCTipText = INVTEXT("注意！你吸入了毒孢子，现在左右区域对应的操作反转了！");
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "Tips继续提示", ToolTip = "提示底部的点击继续说明。"))

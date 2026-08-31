@@ -82,8 +82,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TArray<TObjectPtr<UNiagaraSystem>> SlashTrailByTier;
 
-	/** Spawn offset on the knife. Yaw 180 flips a trail that plays opposite the swing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
+	/**
+	 * Local offset from ArtRoot for the DG slash trail.
+	 * Positive X is character forward so the slash sits in front of the hero, not on the knife bone.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光挂点偏移", ToolTip = "相对 ArtRoot 的本地偏移。X 向前、Z 抬高到胸口附近；刀光挂在角色正面，不跟随刀模型。"))
+	FVector SlashTrailAttachOffset = FVector(90.f, 0.f, 100.f);
+
+	/** Relative rotation on the front attach. Yaw 180 flips a trail that plays opposite the swing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光挂点旋转"))
 	FRotator SlashTrailRotation = FRotator(0.f, 180.f, 0.f);
 
 	/** Fallback / tier-1 hit burst. Tiers 1–4 prefer HitImpactByTier. */
@@ -340,7 +347,7 @@ public:
 	/** Rebind the knife after the skeletal mesh exists so KnifeSocket can resolve. */
 	void AttachKnifeToHand();
 
-	/** Spawn the current-tier slash trail on the knife and the hit burst at HitWorldLocation. */
+	/** Spawn the current-tier slash trail at the character front and the hit burst at HitWorldLocation. */
 	UFUNCTION(BlueprintCallable, Category = "Night|VFX")
 	void PlayAttackVFX(const FVector& HitWorldLocation);
 

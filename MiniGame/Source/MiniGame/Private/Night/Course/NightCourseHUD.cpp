@@ -454,6 +454,7 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	BagPackWidget = nullptr;
 	DropFlyIcons.Reset();
 	ResolvedIngredientIcons.Reset();
+	FailSideFlashRemaining = 0.f;
 	if (UNightCourseDirector* Director = BoundDropDirector.Get())
 	{
 		Director->OnIngredientDropped.RemoveDynamic(
@@ -1266,28 +1267,37 @@ void ANightCourseHUD::DrawHUD()
 	}
 
 	EnsureDropDirectorBinding(Director);
-	DrawDropFlyIcons(GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f);
+	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+	DrawDropFlyIcons(DeltaSeconds);
+	DrawFailSideFlash(DeltaSeconds);
 }
 
 void ANightCourseHUD::EnsureDropDirectorBinding(UNightCourseDirector* Director)
 {
-	if (BoundDropDirector.Get() == Director)
+	if (UNightCourseDirector* Previous = BoundDropDirector.Get())
+	{
+		if (Previous != Director)
+		{
+			Previous->OnIngredientDropped.RemoveDynamic(
+				this,
+				&ANightCourseHUD::HandleIngredientDropped);
+		}
+	}
+
+	BoundDropDirector = Director;
+	if (!Director)
 	{
 		return;
 	}
-	if (UNightCourseDirector* Previous = BoundDropDirector.Get())
-	{
-		Previous->OnIngredientDropped.RemoveDynamic(
-			this,
-			&ANightCourseHUD::HandleIngredientDropped);
-	}
-	BoundDropDirector = Director;
-	if (Director)
-	{
-		Director->OnIngredientDropped.AddUniqueDynamic(
-			this,
-			&ANightCourseHUD::HandleIngredientDropped);
-	}
+
+	// Always remove+add. Live Coding / tip HUD edits can leave a stale dynamic
+	// binding for the same Director pointer; early-return would skip fly icons.
+	Director->OnIngredientDropped.RemoveDynamic(
+		this,
+		&ANightCourseHUD::HandleIngredientDropped);
+	Director->OnIngredientDropped.AddUniqueDynamic(
+		this,
+		&ANightCourseHUD::HandleIngredientDropped);
 }
 
 void ANightCourseHUD::HandleIngredientDropped(
@@ -1314,6 +1324,16 @@ void ANightCourseHUD::HandleIngredientDropped(
 		Entry.Icon = Icon;
 		Entry.WorldStart = WorldLocation + FVector(0.f, 0.f, DropFlyWorldZOffset);
 		Entry.Delay = DropFlyStaggerSeconds * static_cast<float>(Index);
+	}
+	if (SpawnCount > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("[NightHUD] Drop fly spawned id=%d count=%d (active=%d)."),
+			static_cast<int32>(DropId),
+			SpawnCount,
+			DropFlyIcons.Num());
 	}
 }
 
@@ -1553,6 +1573,13 @@ void ANightCourseHUD::DrawDropFlyIcons(float DeltaSeconds)
 
 void ANightCourseHUD::NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop)
 {
+	int32 Combo = 1;
+	if (const ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwningPawn()))
+	{
+		Combo = FMath::Max(1, CoursePawn->GetSlashCombo());
+	}
+	PlayKillHaptic(Combo);
+
 	if (!bEnableNightSfx)
 	{
 		return;
@@ -1573,6 +1600,96 @@ void ANightCourseHUD::NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop)
 			IngredientDropVolume,
 			IngredientDropPlaySeconds,
 			IngredientDropFadeSeconds);
+	}
+}
+
+void ANightCourseHUD::PlayKillHaptic(const int32 Combo)
+{
+	if (!bEnableKillHaptic)
+	{
+		return;
+	}
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
+	// Linear ramp combo 1 → FullCombo, matching common mobile/console hit pulses:
+	// light ~0.28/55ms, heavy ~0.72/110ms (not a continuous buzz).
+	const int32 FullAt = FMath::Max(1, KillHapticFullCombo);
+	const float T = FMath::Clamp(
+		static_cast<float>(FMath::Max(1, Combo) - 1) / static_cast<float>(FullAt - 1 > 0 ? FullAt - 1 : 1),
+		0.f,
+		1.f);
+	const float Intensity = FMath::Clamp(
+		FMath::Lerp(KillHapticIntensityMin, KillHapticIntensityMax, T),
+		0.f,
+		1.f);
+	const float Duration = FMath::Max(
+		0.01f,
+		FMath::Lerp(KillHapticDurationMin, KillHapticDurationMax, T));
+	if (Intensity <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	PC->PlayDynamicForceFeedback(
+		Intensity,
+		Duration,
+		true,
+		true,
+		true,
+		true,
+		EDynamicForceFeedbackAction::Start);
+}
+
+void ANightCourseHUD::NotifyFailSideFlash()
+{
+	if (!bEnableFailSideFlash)
+	{
+		return;
+	}
+	FailSideFlashRemaining = FMath::Max(0.05f, FailSideFlashSeconds);
+}
+
+void ANightCourseHUD::DrawFailSideFlash(const float DeltaSeconds)
+{
+	if (FailSideFlashRemaining <= 0.f || !Canvas)
+	{
+		return;
+	}
+
+	FailSideFlashRemaining = FMath::Max(0.f, FailSideFlashRemaining - FMath::Max(0.f, DeltaSeconds));
+	const float Duration = FMath::Max(0.05f, FailSideFlashSeconds);
+	const float LifeAlpha = FailSideFlashRemaining / Duration;
+	// Ease-out so the flash pops then softens.
+	const float PeakAlpha = FailSideFlashMaxAlpha * LifeAlpha * LifeAlpha;
+	if (PeakAlpha <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float ScreenW = Canvas->ClipX;
+	const float ScreenH = Canvas->ClipY;
+	const float EdgeW = ScreenW * FMath::Clamp(FailSideFlashEdgeWidthNorm, 0.05f, 0.5f);
+	constexpr int32 BandCount = 10;
+	const float BandW = EdgeW / static_cast<float>(BandCount);
+	for (int32 Band = 0; Band < BandCount; ++Band)
+	{
+		const float BandCenter = (static_cast<float>(Band) + 0.5f) / static_cast<float>(BandCount);
+		// Opaque at the outer edge, transparent toward screen center.
+		const float BandAlpha = PeakAlpha * (1.f - BandCenter);
+		if (BandAlpha <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		FLinearColor Color = FailSideFlashColor;
+		Color.A = BandAlpha;
+		const float LeftX = BandW * static_cast<float>(Band);
+		const float RightX = ScreenW - EdgeW + LeftX;
+		DrawRect(Color, LeftX, 0.f, BandW + 1.f, ScreenH);
+		DrawRect(Color, RightX, 0.f, BandW + 1.f, ScreenH);
 	}
 }
 

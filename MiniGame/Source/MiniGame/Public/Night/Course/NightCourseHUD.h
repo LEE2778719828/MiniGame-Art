@@ -357,6 +357,48 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Night|HUD|SFX")
 	void NotifyFoeKilled(EFoeId FoeId, bool bPlayDrop);
+
+	/** Kill haptic: intensity scales linearly with current slash combo. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "启用砍杀震动"))
+	bool bEnableKillHaptic = true;
+
+	/** Combo 1 intensity. ~light gamepad / phone tap (not a buzz). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动强度", ClampMin = "0.0", ClampMax = "1.0"))
+	float KillHapticIntensityMin = 0.28f;
+
+	/** Intensity at KillHapticFullCombo. Below bone-rattling 1.0; typical heavy hit ~0.7. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动强度", ClampMin = "0.0", ClampMax = "1.0"))
+	float KillHapticIntensityMax = 0.72f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最低震动时长", ClampMin = "0.01", ClampMax = "0.5"))
+	float KillHapticDurationMin = 0.055f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "最高震动时长", ClampMin = "0.01", ClampMax = "0.5"))
+	float KillHapticDurationMax = 0.11f;
+
+	/** Combo at which intensity/duration reach max (matches combo HUD full scale). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Haptic", meta = (DisplayName = "震动涨满连击", ClampMin = "1"))
+	int32 KillHapticFullCombo = 30;
+
+	/** Miss / wrong-button side red gradient flash. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "启用失败侧红闪"))
+	bool bEnableFailSideFlash = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪时长", ClampMin = "0.05"))
+	float FailSideFlashSeconds = 0.38f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪峰值透明度", ClampMin = "0.0", ClampMax = "1.0"))
+	float FailSideFlashMaxAlpha = 0.55f;
+
+	/** Fraction of screen width covered by each side gradient. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "侧边宽度占比", ClampMin = "0.05", ClampMax = "0.5"))
+	float FailSideFlashEdgeWidthNorm = 0.22f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|FailFlash", meta = (DisplayName = "红闪颜色"))
+	FLinearColor FailSideFlashColor = FLinearColor(0.92f, 0.06f, 0.08f, 1.f);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|FailFlash")
+	void NotifyFailSideFlash();
 #pragma endregion K2 moonyfli
 
 	/** Blueprint layout hook. Use Offset/Size on the inner Canvas/SizeBox authored at HUDDesignSize. */
@@ -461,6 +503,7 @@ private:
 
 	int32 LastDisplayedCombo = 0;
 	float ComboPopElapsed = 0.f;
+	float FailSideFlashRemaining = 0.f;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(Transient)
@@ -508,6 +551,8 @@ private:
 	FVector2D GetCanvasLetterboxPixelOffset() const;
 	bool GetBagFlyTargetCanvasPosition(FVector2D& OutCanvasPosition) const;
 	void DrawDropFlyIcons(float DeltaSeconds);
+	void DrawFailSideFlash(float DeltaSeconds);
+	void PlayKillHaptic(int32 Combo);
 	void PlaySfx(
 		const TSoftObjectPtr<USoundBase>& SoftSound,
 		float Volume,

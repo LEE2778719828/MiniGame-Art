@@ -3,6 +3,7 @@
 #include "Night/Course/NightG1CourseConfig.h"
 #include "Night/Course/NightCourseAtomActor.h"
 #include "Night/Course/NightCourseAtomRouteData.h"
+#include "Night/Course/NightCourseQueueData.h"
 #include "Night/Course/NightCourseRuleData.h"
 #include "Night/Course/NightForkController.h"
 #include "Night/Course/NightCourseStoneActor.h"
@@ -17,6 +18,7 @@
 #include "HAL/PlatformTime.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/PostProcessVolume.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
@@ -250,6 +252,141 @@ void UNightCourseDirector::ApplyDefaultCoursePostProcessMaterial()
 	ApplyCoursePostProcessMaterial(
 		Config ? Config->DefaultPostProcessMaterial.Get() : nullptr);
 }
+
+AStaticMeshActor* UNightCourseDirector::ResolveCourseFloorMeshActor()
+{
+	if (ManagedFloorMeshActor.IsValid())
+	{
+		return ManagedFloorMeshActor.Get();
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !Config)
+	{
+		return nullptr;
+	}
+
+	const FName TargetName = Config->FloorMeshActorName.IsNone()
+		? FName(TEXT("Plane"))
+		: Config->FloorMeshActorName;
+	const FString TargetNameString = TargetName.ToString();
+	AStaticMeshActor* FallbackPlane = nullptr;
+	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+	{
+		AStaticMeshActor* MeshActor = *It;
+		if (!MeshActor)
+		{
+			continue;
+		}
+		const FString ActorName = MeshActor->GetName();
+		if (MeshActor->GetFName() == TargetName
+			|| ActorName == TargetNameString
+			|| ActorName.StartsWith(TargetNameString + TEXT("_"))
+			|| MeshActor->ActorHasTag(TargetName))
+		{
+			ManagedFloorMeshActor = MeshActor;
+			return MeshActor;
+		}
+#if WITH_EDITOR
+		if (MeshActor->GetActorLabel() == TargetNameString)
+		{
+			ManagedFloorMeshActor = MeshActor;
+			return MeshActor;
+		}
+#endif
+		if (!FallbackPlane && ActorName.Contains(TEXT("Plane")))
+		{
+			FallbackPlane = MeshActor;
+		}
+	}
+	ManagedFloorMeshActor = FallbackPlane;
+	return FallbackPlane;
+}
+
+void UNightCourseDirector::ApplyCourseFloorMaterial(UMaterialInterface* Material)
+{
+	if (!Material)
+	{
+		return;
+	}
+	AStaticMeshActor* FloorActor = ResolveCourseFloorMeshActor();
+	if (!FloorActor)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Floor] No Plane StaticMeshActor; floor material switch skipped."));
+		return;
+	}
+	UStaticMeshComponent* MeshComp = FloorActor->GetStaticMeshComponent();
+	if (!MeshComp)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Floor] '%s' has no StaticMeshComponent."),
+			*GetNameSafe(FloorActor));
+		return;
+	}
+	MeshComp->SetMaterial(0, Material);
+	ActiveCourseFloorMaterial = Material;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightCourse][Floor] Applied '%s' to '%s'."),
+		*GetNameSafe(Material),
+		*GetNameSafe(FloorActor));
+}
+
+void UNightCourseDirector::ApplyDefaultCourseFloorMaterial()
+{
+	ApplyCourseFloorMaterial(
+		Config ? Config->DefaultFloorMaterial.Get() : nullptr);
+}
+
+FText UNightCourseDirector::ResolveForkTipText(bool& bOutSkipTip) const
+{
+	bOutSkipTip = false;
+
+	if (ActiveBootstrap.bUseCourseQueueOverride
+		&& Config
+		&& Config->CourseQueueData)
+	{
+		const TArray<FNightCourseQueueEntry>& Entries = Config->CourseQueueData->Entries;
+		const int32 EntryIndex = ActiveBootstrap.CourseQueueIndex;
+		if (Entries.IsValidIndex(EntryIndex))
+		{
+			const FNightCourseQueueEntry& Entry = Entries[EntryIndex];
+			if (!Entry.bEnableFork)
+			{
+				bOutSkipTip = true;
+				return FText::GetEmpty();
+			}
+			if (Entry.ForkTipText.IsEmpty())
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightCourse][Tips] Queue entry %d has bEnableFork but empty ForkTipText; fork tip skipped."),
+					EntryIndex);
+				bOutSkipTip = true;
+				return FText::GetEmpty();
+			}
+			return Entry.ForkTipText;
+		}
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Tips] Invalid CourseQueueIndex=%d; falling back to DA_Course ForkTipText."),
+			EntryIndex);
+	}
+
+	if (Config && !Config->bEnableForkTip && !Config->ForkTipText.IsEmpty())
+	{
+		bOutSkipTip = true;
+		return FText::GetEmpty();
+	}
+	if (Config && !Config->ForkTipText.IsEmpty())
+	{
+		return Config->ForkTipText;
+	}
+	return FText::FromString(TEXT("注意，这里就是岔路了，按左边选择左路，按右边选择右路"));
+}
+
 bool UNightCourseDirector::EnsureCourse(FString& OutError)
 {
 	OutError.Reset();
@@ -4252,6 +4389,7 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	}
 	UE_LOG(LogTemp, Display, TEXT("[NightCourse][Stage=Start] configuration validation passed."));
 	ApplyDefaultCoursePostProcessMaterial();
+	ApplyDefaultCourseFloorMaterial();
 
 	ENightRouteId LeftRoute = ENightRouteId::None;
 	ENightRouteId RightRoute = ENightRouteId::None;
@@ -4687,6 +4825,10 @@ bool UNightCourseDirector::InstallPreparedBranchRoute(
 		ActiveRouteRule.PostProcessMaterial
 			? ActiveRouteRule.PostProcessMaterial.Get()
 			: Config->DefaultPostProcessMaterial.Get());
+	ApplyCourseFloorMaterial(
+		ActiveRouteRule.FloorMaterial
+			? ActiveRouteRule.FloorMaterial.Get()
+			: Config->DefaultFloorMaterial.Get());
 
 	if (!SpawnCourseActors())
 	{
@@ -5065,6 +5207,10 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 		ActiveRouteRule.PostProcessMaterial
 			? ActiveRouteRule.PostProcessMaterial.Get()
 			: Config->DefaultPostProcessMaterial.Get());
+	ApplyCourseFloorMaterial(
+		ActiveRouteRule.FloorMaterial
+			? ActiveRouteRule.FloorMaterial.Get()
+			: Config->DefaultFloorMaterial.Get());
 
 	const EIngredientId EnterDropId = ActiveRouteRule.EnterDropId != EIngredientId::None
 		? ActiveRouteRule.EnterDropId
@@ -5560,8 +5706,13 @@ void UNightCourseDirector::TryPresentCourseTip(const ENightCourseTipId TipId)
 		return;
 	}
 
+	const bool bHasQueueForkTip = Config
+		&& Config->CourseQueueData
+		&& ActiveBootstrap.bUseCourseQueueOverride
+		&& Config->CourseQueueData->Entries.IsValidIndex(ActiveBootstrap.CourseQueueIndex)
+		&& !Config->CourseQueueData->Entries[ActiveBootstrap.CourseQueueIndex].ForkTipText.IsEmpty();
 	const bool bHasAuthoredTipText = Config && (
-		!Config->ForkTipText.IsEmpty() || !Config->RouteCTipText.IsEmpty());
+		!Config->ForkTipText.IsEmpty() || !Config->RouteCTipText.IsEmpty() || bHasQueueForkTip);
 	if (Config && !Config->bEnableCourseTips && bHasAuthoredTipText)
 	{
 		UE_LOG(LogTemp, Display, TEXT("[NightCourse][Tips] skipped: bEnableCourseTips=0."));
@@ -5581,13 +5732,12 @@ void UNightCourseDirector::TryPresentCourseTip(const ENightCourseTipId TipId)
 		{
 			return;
 		}
-		if (Config && !Config->bEnableForkTip && !Config->ForkTipText.IsEmpty())
+		bool bSkipForkTip = false;
+		Body = ResolveForkTipText(bSkipForkTip);
+		if (bSkipForkTip || Body.IsEmpty())
 		{
 			return;
 		}
-		Body = (Config && !Config->ForkTipText.IsEmpty())
-			? Config->ForkTipText
-			: FText::FromString(TEXT("注意，这里就是岔路了，按左边选择左路，按右边选择右路"));
 	}
 	else if (TipId == ENightCourseTipId::RouteC)
 	{
@@ -6628,6 +6778,7 @@ void UNightCourseDirector::FinishNight(const FNightResult& Result)
 	ClearSpawnedCourseActors();
 	ClearDeferredRuntimeActors();
 	ApplyDefaultCoursePostProcessMaterial();
+	ApplyDefaultCourseFloorMaterial();
 	bRunning = false;
 	PreparedBranchRoutes.Reset();
 	bBranchRoutePreparationActive = false;
@@ -6718,6 +6869,7 @@ void UNightCourseDirector::ResetCourse()
 	ClearSpawnedCourseActors();
 	ClearDeferredRuntimeActors();
 	ApplyDefaultCoursePostProcessMaterial();
+	ApplyDefaultCourseFloorMaterial();
 	if (IsRegistered())
 	{
 		SetComponentTickEnabled(false);

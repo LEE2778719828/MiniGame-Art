@@ -485,27 +485,30 @@ void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 
 	if (UNiagaraSystem* TrailFX = ResolveSlashTrailFX())
 	{
+		// Attach to ArtRoot in front of the hero — never follow KnifeMesh / knife bone.
+		USceneComponent* AttachParent = ArtRoot ? ArtRoot.Get() : GetRootComponent();
 		UNiagaraComponent* TrailComp = nullptr;
-		if (KnifeMesh)
+		if (AttachParent)
 		{
 			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 				TrailFX,
-				KnifeMesh,
+				AttachParent,
 				NAME_None,
-				FVector::ZeroVector,
+				SlashTrailAttachOffset,
 				SlashTrailRotation,
 				Scale3D,
-				EAttachLocation::SnapToTarget,
+				EAttachLocation::KeepRelativeOffset,
 				true,
 				ENCPoolMethod::None);
 		}
 		else if (UWorld* World = GetWorld())
 		{
+			const FTransform ActorXform = GetActorTransform();
 			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
 				TrailFX,
-				GetActorLocation(),
-				SlashTrailRotation,
+				ActorXform.TransformPosition(SlashTrailAttachOffset),
+				ActorXform.Rotator() + SlashTrailRotation,
 				Scale3D);
 		}
 		ApplyAttackVFXBoost(TrailComp, Scale, HDR);
@@ -832,22 +835,27 @@ void ANightCoursePawn::PlayHeroAction(bool bAttack)
 // add by K2 (R1)
 void ANightCoursePawn::PlayFailCameraShake()
 {
-	if (!FailCameraShake)
-	{
-		FailCameraShake = LoadClass<UCameraShakeBase>(
-			nullptr,
-			TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return.CS_CameraShake_Return_C"));
-		if (!FailCameraShake)
-		{
-			return;
-		}
-	}
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC)
 	{
 		return;
 	}
-	PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
+
+	if (!FailCameraShake)
+	{
+		FailCameraShake = LoadClass<UCameraShakeBase>(
+			nullptr,
+			TEXT("/Game/Night/Course/Camera/CS_CameraShake_Return.CS_CameraShake_Return_C"));
+	}
+	if (FailCameraShake)
+	{
+		PC->ClientStartCameraShake(FailCameraShake, FMath::Max(0.f, FailCameraShakeScale));
+	}
+
+	if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
+	{
+		NightHUD->NotifyFailSideFlash();
+	}
 }
 
 // add by K2 (R1)
