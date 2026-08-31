@@ -1,8 +1,12 @@
 #include "Night/Course/NightCourseHUD.h"
 #include "Night/Course/NightCoursePawn.h"
 #include "Night/Course/NightCourseDirector.h"
+#include "Night/Course/NightCourseHost.h"
 #include "Night/Course/NightFeelStubComponent.h"
+#include "Night/Course/NightCourseTipWidget.h"
 #include "Night/Course/NightCourseTypes.h"
+#include "EngineUtils.h"
+#include "Day/UI/SRestaurantEndDialogueWidget.h"
 #include "../../../SStandaloneSandbox.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -13,12 +17,16 @@
 #include "Components/EditableTextBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h" //add by K2
+#include "Curves/CurveFloat.h"
+#include "Fonts/SlateFontInfo.h"
 #include "Components/Widget.h"
 #include "Blueprint/SlateBlueprintLibrary.h" //add by K2
 #include "CanvasItem.h" //add by K2
 #include "Engine/Canvas.h"
 #include "Engine/DataTable.h" //add by K2
 #include "Engine/Engine.h"
+#include "Engine/Font.h"
+#include "CoreGlobals.h"
 #include "Engine/Texture2D.h" //add by K2
 #include "GameFramework/PlayerController.h"
 #include "Components/AudioComponent.h" //add by K2
@@ -82,6 +90,8 @@ ANightCourseHUD::ANightCourseHUD()
 		FSoftObjectPath(TEXT("/Game/Shared/Data/DT_Ingredients.DT_Ingredients"))); //add by K2
 	StartScreenTexture = TSoftObjectPtr<UTexture2D>(
 		FSoftObjectPath(TEXT("/Game/Night/Course/UI/T_NightCourseStartScreen.T_NightCourseStartScreen")));
+	CourseTipPortrait = TSoftObjectPtr<UTexture2D>(
+		FSoftObjectPath(TEXT("/Game/Day/UI/Dialogue/Textures/T_Dialogue_KYisi.T_Dialogue_KYisi")));
 
 #pragma region K2 moonyfli
 	auto MakeSfx = [](const TCHAR* Path)
@@ -171,6 +181,270 @@ bool ANightCourseHUD::DismissStartScreenIfVisible()
 	return true;
 }
 
+bool ANightCourseHUD::ShowCourseTip(
+	const FText& SpeakerName,
+	const FText& Body,
+	const FText& ContinueHint)
+{
+	if (Body.IsEmpty())
+	{
+		return false;
+	}
+
+	DismissCourseTip();
+
+	ActiveCourseTipSpeaker = SpeakerName;
+	ActiveCourseTipBody = Body;
+	ActiveCourseTipContinue = ContinueHint;
+	bCourseTipVisible = true;
+	bDrawCourseTipOnCanvas = true;
+
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			PC = World->GetFirstPlayerController();
+		}
+	}
+
+	if (PC && !CourseTipOverlayWidgetClass)
+	{
+		CourseTipOverlayWidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Night/Course/Blueprints/WBP_NightCourseTip.WBP_NightCourseTip_C"));
+	}
+	if (PC && CourseTipOverlayWidgetClass)
+	{
+		CourseTipOverlayWidget = CreateWidget<UUserWidget>(PC, CourseTipOverlayWidgetClass);
+		if (CourseTipOverlayWidget)
+		{
+			CourseTipOverlayWidget->SetVisibility(ESlateVisibility::Visible);
+			ApplyCourseTipWidgetTexts(CourseTipOverlayWidget, SpeakerName, Body, ContinueHint);
+			BindCourseTipDismissButton(CourseTipOverlayWidget);
+			if (!Cast<UTextBlock>(CourseTipOverlayWidget->GetWidgetFromName(TEXT("TXT_Body"))))
+			{
+				CourseTipOverlayWidget->RemoveFromParent();
+				CourseTipOverlayWidget = nullptr;
+			}
+			else
+			{
+				CourseTipOverlayWidget->AddToViewport(CourseTipZOrder);
+			}
+		}
+	}
+
+	if (PC && CourseTipDialogueWidgetClass)
+	{
+		CourseTipDialogueWidget = CreateWidget<USRestaurantEndDialogueWidget>(PC, CourseTipDialogueWidgetClass);
+		if (CourseTipDialogueWidget)
+		{
+			CourseTipDialogueWidget->OnStandaloneTipDismissed.AddDynamic(
+				this,
+				&ANightCourseHUD::HandleCourseTipDismissed);
+			CourseTipDialogueWidget->PresentStandaloneTip(
+				ESRestaurantDialogueSpeaker::KYisi,
+				SpeakerName,
+				Body);
+			ApplyCourseTipWidgetTexts(CourseTipDialogueWidget, SpeakerName, Body, ContinueHint);
+			BindCourseTipDismissButton(CourseTipDialogueWidget);
+			CourseTipDialogueWidget->AddToViewport(CourseTipZOrder);
+		}
+	}
+
+	if (PC && !CourseTipOverlayWidget && !CourseTipDialogueWidget)
+	{
+		if (!CourseTipFallbackWidgetClass)
+		{
+			CourseTipFallbackWidgetClass = UNightCourseTipWidget::StaticClass();
+		}
+		CourseTipFallbackWidget = CreateWidget<UNightCourseTipWidget>(PC, CourseTipFallbackWidgetClass);
+		if (CourseTipFallbackWidget)
+		{
+			UTexture2D* Portrait = nullptr;
+			if (!CourseTipPortrait.IsNull())
+			{
+				Portrait = CourseTipPortrait.LoadSynchronous();
+			}
+			CourseTipFallbackWidget->OnTipDismissed.AddDynamic(
+				this,
+				&ANightCourseHUD::HandleCourseTipDismissed);
+			CourseTipFallbackWidget->PresentTip(SpeakerName, Body, ContinueHint, Portrait);
+			CourseTipFallbackWidget->AddToViewport(CourseTipZOrder);
+		}
+	}
+
+	const bool bHasWidget = HasVisibleCourseTipWidget();
+	bDrawCourseTipOnCanvas = !bHasWidget;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("[NightHUD][Tips] visible=%d widget=%s canvas=%d text='%s'."),
+		bCourseTipVisible ? 1 : 0,
+		bHasWidget ? TEXT("yes") : TEXT("no"),
+		bDrawCourseTipOnCanvas ? 1 : 0,
+		*Body.ToString());
+	return bHasWidget || bDrawCourseTipOnCanvas;
+}
+
+void ANightCourseHUD::DismissCourseTip()
+{
+	const bool bWasVisible = bCourseTipVisible;
+	bCourseTipVisible = false;
+
+	if (CourseTipDialogueWidget)
+	{
+		CourseTipDialogueWidget->OnStandaloneTipDismissed.RemoveDynamic(
+			this,
+			&ANightCourseHUD::HandleCourseTipDismissed);
+		CourseTipDialogueWidget->RemoveFromParent();
+		CourseTipDialogueWidget = nullptr;
+	}
+	if (CourseTipOverlayWidget)
+	{
+		if (UButton* DismissButton = Cast<UButton>(CourseTipOverlayWidget->GetWidgetFromName(TEXT("BTN_Dismiss"))))
+		{
+			DismissButton->OnClicked.RemoveDynamic(this, &ANightCourseHUD::HandleCourseTipDismissed);
+		}
+		CourseTipOverlayWidget->RemoveFromParent();
+		CourseTipOverlayWidget = nullptr;
+	}
+	if (CourseTipFallbackWidget)
+	{
+		CourseTipFallbackWidget->OnTipDismissed.RemoveDynamic(
+			this,
+			&ANightCourseHUD::HandleCourseTipDismissed);
+		CourseTipFallbackWidget->RemoveFromParent();
+		CourseTipFallbackWidget = nullptr;
+	}
+
+	ActiveCourseTipSpeaker = FText::GetEmpty();
+	ActiveCourseTipBody = FText::GetEmpty();
+	ActiveCourseTipContinue = FText::GetEmpty();
+	bDrawCourseTipOnCanvas = false;
+
+	if (bWasVisible)
+	{
+		GameplayInputSuppressedFrame = GFrameCounter;
+		NotifyDirectorCourseTipDismissed();
+	}
+}
+
+bool ANightCourseHUD::DismissCourseTipIfVisible()
+{
+	if (!IsCourseTipVisible())
+	{
+		return false;
+	}
+	DismissCourseTip();
+	return true;
+}
+
+bool ANightCourseHUD::ConsumeBlockingOverlayInput()
+{
+	if (DismissStartScreenIfVisible())
+	{
+		return true;
+	}
+	if (DismissCourseTipIfVisible())
+	{
+		return true;
+	}
+	return GameplayInputSuppressedFrame == GFrameCounter;
+}
+
+void ANightCourseHUD::HandleCourseTipDismissed()
+{
+	DismissCourseTip();
+}
+
+void ANightCourseHUD::ApplyCourseTipWidgetTexts(
+	UUserWidget* Widget,
+	const FText& SpeakerName,
+	const FText& Body,
+	const FText& ContinueHint) const
+{
+	if (!Widget)
+	{
+		return;
+	}
+
+	auto SetNamedText = [Widget](const TCHAR* WidgetName, const FText& Text)
+	{
+		if (UTextBlock* Block = Cast<UTextBlock>(Widget->GetWidgetFromName(WidgetName)))
+		{
+			Block->SetText(Text);
+		}
+	};
+	SetNamedText(TEXT("TXT_Speaker"), SpeakerName);
+	SetNamedText(TEXT("TXT_Body"), Body);
+	SetNamedText(TEXT("TXT_Dialogue"), Body);
+	SetNamedText(TEXT("TXT_Continue"), ContinueHint);
+
+	if (FTextProperty* BodyProp = FindFProperty<FTextProperty>(Widget->GetClass(), TEXT("TipBodyText")))
+	{
+		BodyProp->SetPropertyValue_InContainer(Widget, Body);
+	}
+}
+
+void ANightCourseHUD::BindCourseTipDismissButton(UUserWidget* Widget)
+{
+	if (!Widget)
+	{
+		return;
+	}
+	if (UButton* DismissButton = Cast<UButton>(Widget->GetWidgetFromName(TEXT("BTN_Dismiss"))))
+	{
+		DismissButton->OnClicked.RemoveDynamic(this, &ANightCourseHUD::HandleCourseTipDismissed);
+		DismissButton->OnClicked.AddDynamic(this, &ANightCourseHUD::HandleCourseTipDismissed);
+		DismissButton->SetVisibility(ESlateVisibility::Visible);
+	}
+}
+
+void ANightCourseHUD::NotifyDirectorCourseTipDismissed() const
+{
+	if (const ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwningPawn()))
+	{
+		if (UNightCourseDirector* Director = CoursePawn->GetCourseDirector())
+		{
+			Director->NotifyCourseTipDismissed();
+			return;
+		}
+	}
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<ANightCourseHost> It(World); It; ++It)
+		{
+			if (*It && (*It)->Director)
+			{
+				(*It)->Director->NotifyCourseTipDismissed();
+				return;
+			}
+		}
+	}
+}
+
+bool ANightCourseHUD::HasVisibleCourseTipWidget() const
+{
+	auto IsUp = [](const UUserWidget* Widget)
+	{
+		return Widget && Widget->IsInViewport();
+	};
+	return IsUp(CourseTipOverlayWidget) || IsUp(CourseTipDialogueWidget) || IsUp(CourseTipFallbackWidget);
+}
+
+void ANightCourseHUD::SyncCourseTipWidgetLifetime()
+{
+	if (!bCourseTipVisible || bDrawCourseTipOnCanvas)
+	{
+		return;
+	}
+	if (!HasVisibleCourseTipWidget())
+	{
+		DismissCourseTip();
+	}
+}
+
 void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	HealthBarWidget = nullptr;
@@ -203,6 +477,7 @@ void ANightCourseHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		MainHUDWidget->RemoveFromParent();
 		MainHUDWidget = nullptr;
 	}
+	DismissCourseTip();
 	Super::EndPlay(EndPlayReason);
 }
 void ANightCourseHUD::EnsureMainHUD()
@@ -704,6 +979,75 @@ void ANightCourseHUD::SetHealthBarNumeric(FName PropertyName, double Value)
 }
 
 #pragma region K2 moonyfli
+float ANightCourseHUD::EvaluateComboProgress(int32 Combo, int32 FullAt, float Exponent) const
+{
+	if (Combo <= 1 || FullAt <= 1)
+	{
+		return 0.f;
+	}
+	const float LinearT = FMath::Clamp(
+		static_cast<float>(Combo - 1) / static_cast<float>(FullAt - 1),
+		0.f,
+		1.f);
+	return FMath::Pow(LinearT, FMath::Max(0.01f, Exponent));
+}
+
+void ANightCourseHUD::ApplyComboNumberStyle(int32 Combo, float DeltaSeconds)
+{
+	if (Combo <= 0)
+	{
+		LastDisplayedCombo = 0;
+		ComboPopElapsed = ComboPopSeconds;
+		if (ComboWidget)
+		{
+			ComboWidget->SetRenderScale(FVector2D(1.f, 1.f));
+		}
+		return;
+	}
+
+	if (Combo > LastDisplayedCombo)
+	{
+		ComboPopElapsed = 0.f;
+	}
+	LastDisplayedCombo = Combo;
+	ComboPopElapsed += FMath::Max(0.f, DeltaSeconds);
+
+	float ScaleAlpha = EvaluateComboProgress(Combo, ComboScaleFullAt, ComboScaleExponent);
+	if (ComboScaleCurve)
+	{
+		const float LinearT = EvaluateComboProgress(Combo, ComboScaleFullAt, 1.f);
+		ScaleAlpha = FMath::Clamp(ComboScaleCurve->GetFloatValue(LinearT), 0.f, 1.f);
+	}
+	const float PopT = ComboPopSeconds > KINDA_SMALL_NUMBER
+		? FMath::Clamp(ComboPopElapsed / ComboPopSeconds, 0.f, 1.f)
+		: 1.f;
+	const float Scale = FMath::Lerp(ComboScaleMin, ComboScaleMax, ScaleAlpha)
+		+ ComboPopExtraScale * (1.f - PopT);
+	if (ComboWidget)
+	{
+		ComboWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+		ComboWidget->SetRenderScale(FVector2D(Scale, Scale));
+	}
+
+	if (!ComboCountText)
+	{
+		return;
+	}
+
+	const float ColorAlpha = EvaluateComboProgress(Combo, ComboColorFullAt, 1.f);
+	FSlateFontInfo Font = ComboCountText->GetFont();
+	Font.OutlineSettings.OutlineSize = FMath::Max(0, ComboOutlineSize);
+	Font.OutlineSettings.OutlineColor = FLinearColor::LerpUsingHSV(
+		ComboOutlineColor,
+		ComboOutlineColorAtMax,
+		ColorAlpha);
+	ComboCountText->SetFont(Font);
+	ComboCountText->SetColorAndOpacity(FSlateColor(FLinearColor::LerpUsingHSV(
+		ComboTextColor,
+		ComboTextColorAtMax,
+		ColorAlpha)));
+}
+
 void ANightCourseHUD::PushComboToHUD(int32 Combo)
 {
 	EnsureMainHUD();
@@ -714,6 +1058,8 @@ void ANightCourseHUD::PushComboToHUD(int32 Combo)
 
 	const bool bShow = Combo > 0;
 	ComboWidget->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+	ApplyComboNumberStyle(Combo, DeltaSeconds);
 	if (bShow && ComboCountText)
 	{
 		ComboCountText->SetText(FText::AsNumber(Combo));
@@ -767,6 +1113,7 @@ void ANightCourseHUD::PushSoulToHealthBar(float Soul)
 void ANightCourseHUD::DrawHUD()
 {
 	Super::DrawHUD();
+	SyncCourseTipWidgetLifetime();
 
 	if (!Canvas)
 	{
@@ -775,6 +1122,48 @@ void ANightCourseHUD::DrawHUD()
 
 	const float W = Canvas->SizeX;
 	const float H = Canvas->SizeY;
+	if (IsCourseTipVisible() && bDrawCourseTipOnCanvas)
+	{
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.55f), 0.f, 0.f, W, H);
+
+		const float FitScale = H / FMath::Max(1.f, HUDDesignSize.Y);
+		const float Left = (W - HUDDesignSize.X * FitScale) * 0.5f;
+		float CursorY = H * 0.62f;
+		if (UTexture2D* Portrait = CourseTipPortrait.Get() ? CourseTipPortrait.Get() : CourseTipPortrait.LoadSynchronous())
+		{
+			const float PortraitSize = 220.f * FitScale;
+			Canvas->K2_DrawTexture(
+				Portrait,
+				FVector2D(Left + 40.f * FitScale, CursorY),
+				FVector2D(PortraitSize, PortraitSize),
+				FVector2D::ZeroVector,
+				FVector2D::UnitVector,
+				FLinearColor::White,
+				BLEND_Translucent);
+		}
+
+		UFont* TipFont = GEngine ? GEngine->GetLargeFont() : nullptr;
+		auto DrawTipLine = [this, TipFont](const FVector2D& Pos, const FText& Text, const FLinearColor& Color, const FVector2D& Scale)
+		{
+			if (!TipFont || Text.IsEmpty())
+			{
+				return;
+			}
+			FCanvasTextItem Item(Pos, Text, TipFont, Color);
+			Item.EnableShadow(FLinearColor::Black);
+			Item.Scale = Scale;
+			Canvas->DrawItem(Item);
+		};
+		const float TextX = Left + 280.f * FitScale;
+		DrawTipLine(FVector2D(TextX, CursorY), ActiveCourseTipSpeaker, FLinearColor(1.f, 0.86f, 0.45f), FVector2D(1.6f, 1.6f));
+		DrawTipLine(FVector2D(TextX, CursorY + 48.f * FitScale), ActiveCourseTipBody, FLinearColor::White, FVector2D(1.35f, 1.35f));
+		DrawTipLine(
+			FVector2D(TextX, CursorY + 160.f * FitScale),
+			ActiveCourseTipContinue,
+			FLinearColor(0.8f, 0.8f, 0.8f),
+			FVector2D(1.1f, 1.1f));
+	}
+
 	if (IsStartScreenVisible())
 	{
 		if (UTexture2D* StartTexture = StartScreenTexture.Get())

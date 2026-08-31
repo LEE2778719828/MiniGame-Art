@@ -194,6 +194,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|KeySwap", meta = (DisplayName = "KeySwap提示列表", ToolTip = "按分支节拍序号配置 KeySwap 的警告和安全时间。"))
 	TArray<FNightKeySwapCue> KeySwapCues;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|KeySwap", meta = (DisplayName = "进入C路立即反转左右", ToolTip = "选择 C 路后立刻交换左右区域的跳/砍。与下面的 KeySwap 节拍列表无关；列表为空时也靠这项生效。"))
+	bool bSwapControlsOnEnterRouteC = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用课程Tips", ToolTip = "关闭后不弹出岔路/C路 K易斯提示，也不因此暂停。自动化测试应关闭。"))
+	bool bEnableCourseTips = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用岔路Tips", ToolTip = "本局第一次进入岔路选择时弹出提示。"))
+	bool bEnableForkTip = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "启用C路反转Tips", ToolTip = "进入 C 路后弹出左右操作反转提示。"))
+	bool bEnableRouteCTip = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "Tips说话人", ToolTip = "K易斯提示上的名字。"))
+	FText CourseTipSpeakerName = INVTEXT("K易斯");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "第一次岔路文字", ToolTip = "第一次触发岔路时显示的提示。"))
+	FText ForkTipText = INVTEXT("注意，这里就是岔路了，按左边选择左路，按右边选择右路");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (MultiLine = "true", DisplayName = "C路反转文字", ToolTip = "进入 C 路后显示的提示。"))
+	FText RouteCTipText = INVTEXT("注意！你吸入了毒孢子，现在左右区域对应的操作反转了！");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Tips", meta = (DisplayName = "Tips继续提示", ToolTip = "提示底部的点击继续说明。"))
+	FText CourseTipContinueHint = INVTEXT("点击继续");
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Gift", meta = (DisplayName = "饕餮箱敌人覆盖数量", ToolTip = "饕餮箱效果生效时，前多少个敌人使用 Gift 配置的敌人池；单位为敌人数。", ClampMin = "0"))
 	int32 TaotieFoeOverrideCount = 4;
 

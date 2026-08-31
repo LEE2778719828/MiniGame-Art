@@ -20,6 +20,7 @@ class UAnimSequence;
 class UCameraShakeBase;
 class UNightCourseDirector;
 class UNiagaraSystem;
+class UNiagaraComponent;
 
 #pragma region K2 moonyfli
 /** G1 pawn: rear-elevated TPP camera; advances only when Course tells it to. */
@@ -93,15 +94,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
 	TArray<TObjectPtr<UNiagaraSystem>> HitImpactByTier;
 
-	/** Slash-combo gates. Bands widen so tier 4 is hard but still under 100. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
-	int32 SimulatedVFXTier2Combo = 10;
+	/** Slash-combo gates. Only four Niagara systems exist; 40+ stays on DG4 with extra HDR. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "二档连击", ToolTip = "达到后切到 DG2 / phase2。"))
+	int32 SimulatedVFXTier2Combo = 5;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
-	int32 SimulatedVFXTier3Combo = 30;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "三档连击", ToolTip = "达到后切到 DG3 / phase3。"))
+	int32 SimulatedVFXTier3Combo = 15;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX")
-	int32 SimulatedVFXTier4Combo = 75;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "四档连击", ToolTip = "达到后切到 DG4 / phase4。"))
+	int32 SimulatedVFXTier4Combo = 25;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "五档连击", ToolTip = "仍用 DG4，但额外放大并提高 HDR。"))
+	int32 SimulatedVFXTier5Combo = 40;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光缩放", ToolTip = "生成刀光 / 受击时的基础缩放。", ClampMin = "0.1"))
+	float SlashVFXScale = 1.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "刀光HDR", ToolTip = "尝试写入 Color / ScaleColor 等用户参数的亮度倍数。", ClampMin = "0.1"))
+	float SlashVFXHDR = 1.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "五档额外缩放", ToolTip = "连击达到五档后叠乘到刀光缩放。", ClampMin = "1.0"))
+	float SlashVFXTier5ScaleMul = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "五档额外HDR", ToolTip = "连击达到五档后叠乘到刀光HDR。", ClampMin = "1.0"))
+	float SlashVFXTier5HDRMul = 1.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "BC额外缩放", ToolTip = "当前路线是 B/C，或正在 BC 分叉时叠乘。", ClampMin = "1.0"))
+	float SlashVFXRouteBCScaleMul = 1.28f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|VFX", meta = (DisplayName = "BC额外HDR", ToolTip = "当前路线是 B/C，或正在 BC 分叉时叠乘。", ClampMin = "1.0"))
+	float SlashVFXRouteBCHDRMul = 1.45f;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art")
@@ -323,8 +345,12 @@ public:
 	void PlayAttackVFX(const FVector& HitWorldLocation);
 
 	int32 ResolveAttackVFXTier() const;
+	int32 GetSlashCombo() const;
 	UNiagaraSystem* ResolveSlashTrailFX() const;
 	UNiagaraSystem* ResolveHitImpactFX() const;
+	bool ShouldBoostSlashForRouteBC() const;
+	void ResolveSlashVFXBoost(float& OutScale, float& OutHDR) const;
+	void ApplyAttackVFXBoost(UNiagaraComponent* Comp, float Scale, float HDR) const;
 #pragma endregion K2 moonyfli
 
 protected:
@@ -334,6 +360,7 @@ protected:
 	void OnHudPointerPressed();
 	void OnHudTouchPressed(const ETouchIndex::Type FingerIndex, const FVector Location);
 	void TryResolveHudPointer(float ScreenX, float ScreenY);
+	bool TryConsumeHudOverlayInput();
 	void ApplyAvatarColor(FLinearColor Color);
 
 	/**

@@ -1,5 +1,6 @@
 #include "Night/Course/NightFeelStubComponent.h"
 #include "Night/Course/NightCoursePawn.h"
+#include "Night/Course/NightCourseDirector.h"
 #include "Night/Course/NightFeelTuningData.h" //add by K2
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -75,6 +76,17 @@ void UNightFeelStubComponent::SetupInput(APlayerController* PC)
 void UNightFeelStubComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (const ANightCoursePawn* CoursePawn = Cast<ANightCoursePawn>(GetOwner()))
+	{
+		if (const UNightCourseDirector* Director = CoursePawn->GetCourseDirector())
+		{
+			if (Director->IsCourseTipPaused())
+			{
+				return;
+			}
+		}
+	}
 
 	const float Now = GetWorldTimeSeconds();
 

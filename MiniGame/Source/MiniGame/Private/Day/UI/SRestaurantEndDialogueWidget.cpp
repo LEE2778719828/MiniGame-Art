@@ -14,7 +14,60 @@ USRestaurantEndDialogueWidget::USRestaurantEndDialogueWidget(const FObjectInitia
 void USRestaurantEndDialogueWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (bStandaloneTipMode)
+	{
+		PresentCurrentLine();
+		return;
+	}
 	StartDialogue();
+}
+
+void USRestaurantEndDialogueWidget::PresentStandaloneTip(
+	const ESRestaurantDialogueSpeaker Speaker,
+	const FText& InSpeakerName,
+	const FText& InText)
+{
+	bStandaloneTipMode = true;
+	bFinished = false;
+	DialogueLines.Reset();
+
+	FSRestaurantDialogueLine& Line = DialogueLines.AddDefaulted_GetRef();
+	Line.SceneNumber = 0;
+	Line.Speaker = Speaker;
+	Line.Presentation = ESRestaurantDialoguePresentation::Dialogue;
+	Line.SpeakerName = InSpeakerName;
+	Line.Text = InText;
+
+	CurrentLineIndex = 0;
+	SetVisibility(ESlateVisibility::Visible);
+	if (IsConstructed())
+	{
+		PresentCurrentLine();
+	}
+}
+
+FReply USRestaurantEndDialogueWidget::NativeOnMouseButtonDown(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	if (bStandaloneTipMode)
+	{
+		AdvanceDialogue();
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply USRestaurantEndDialogueWidget::NativeOnTouchStarted(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InGestureEvent)
+{
+	if (bStandaloneTipMode)
+	{
+		AdvanceDialogue();
+		return FReply::Handled();
+	}
+	return Super::NativeOnTouchStarted(InGeometry, InGestureEvent);
 }
 
 void USRestaurantEndDialogueWidget::StartDialogue()
@@ -33,6 +86,13 @@ void USRestaurantEndDialogueWidget::AdvanceDialogue()
 {
 	if (bFinished)
 	{
+		return;
+	}
+	if (bStandaloneTipMode)
+	{
+		bFinished = true;
+		BP_OnDialogueFinished();
+		OnStandaloneTipDismissed.Broadcast();
 		return;
 	}
 	if (!DialogueLines.IsValidIndex(CurrentLineIndex))

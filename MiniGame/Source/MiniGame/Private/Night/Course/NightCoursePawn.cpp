@@ -27,6 +27,9 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "NiagaraFunctionLibrary.h" //add by K2
 #include "NiagaraSystem.h" //add by K2
+#include "NiagaraComponent.h" //add by K2
+#include "NiagaraCommon.h" //add by K2
+#include "Night/Shared/NightSharedTypes.h"
 
 #pragma region K2 moonyfli
 namespace
@@ -355,9 +358,14 @@ void ANightCoursePawn::AttachKnifeToHand()
 }
 
 #pragma region K2 moonyfli
+int32 ANightCoursePawn::GetSlashCombo() const
+{
+	return FeelStub ? FeelStub->Combo : 0;
+}
+
 int32 ANightCoursePawn::ResolveAttackVFXTier() const
 {
-	const int32 Combo = FeelStub ? FeelStub->Combo : 0;
+	const int32 Combo = GetSlashCombo();
 	if (Combo >= SimulatedVFXTier4Combo)
 	{
 		return 3;
@@ -393,39 +401,127 @@ UNiagaraSystem* ANightCoursePawn::ResolveHitImpactFX() const
 	return HitImpactFX;
 }
 
+bool ANightCoursePawn::ShouldBoostSlashForRouteBC() const
+{
+	const UNightCourseDirector* Director = GetCourseDirector();
+	if (!Director)
+	{
+		return false;
+	}
+
+	const ENightRouteId Route = Director->GetCurrentRoute();
+	if (Route == ENightRouteId::B || Route == ENightRouteId::C)
+	{
+		return true;
+	}
+
+	if (!Director->IsForkChoiceActive())
+	{
+		return false;
+	}
+
+	const ENightRouteId Left = Director->GetForkLeftRoute();
+	const ENightRouteId Right = Director->GetForkRightRoute();
+	const bool bHasB = Left == ENightRouteId::B || Right == ENightRouteId::B;
+	const bool bHasC = Left == ENightRouteId::C || Right == ENightRouteId::C;
+	return bHasB && bHasC;
+}
+
+void ANightCoursePawn::ResolveSlashVFXBoost(float& OutScale, float& OutHDR) const
+{
+	OutScale = FMath::Max(0.1f, SlashVFXScale);
+	OutHDR = FMath::Max(0.1f, SlashVFXHDR);
+	const int32 Combo = FeelStub ? FeelStub->Combo : 0;
+	if (Combo >= SimulatedVFXTier5Combo)
+	{
+		OutScale *= FMath::Max(1.f, SlashVFXTier5ScaleMul);
+		OutHDR *= FMath::Max(1.f, SlashVFXTier5HDRMul);
+	}
+	if (ShouldBoostSlashForRouteBC())
+	{
+		OutScale *= FMath::Max(1.f, SlashVFXRouteBCScaleMul);
+		OutHDR *= FMath::Max(1.f, SlashVFXRouteBCHDRMul);
+	}
+}
+
+void ANightCoursePawn::ApplyAttackVFXBoost(UNiagaraComponent* Comp, float Scale, float HDR) const
+{
+	if (!Comp)
+	{
+		return;
+	}
+
+	Comp->SetRelativeScale3D(FVector(Scale));
+
+	static const FName FloatNames[] = {
+		FName(TEXT("Intensity")),
+		FName(TEXT("HDR")),
+		FName(TEXT("Emissive")),
+		FName(TEXT("Brightness")),
+		FName(TEXT("ScaleColor")),
+		FName(TEXT("Scale"))};
+	for (const FName& Name : FloatNames)
+	{
+		Comp->SetVariableFloat(Name, HDR);
+	}
+
+	const FLinearColor HDRColor(HDR, HDR, HDR, 1.f);
+	static const FName ColorNames[] = {
+		FName(TEXT("Color")),
+		FName(TEXT("EmissiveColor")),
+		FName(TEXT("ScaleColor"))};
+	for (const FName& Name : ColorNames)
+	{
+		Comp->SetVariableLinearColor(Name, HDRColor);
+	}
+}
+
 void ANightCoursePawn::PlayAttackVFX(const FVector& HitWorldLocation)
 {
+	float Scale = 1.f;
+	float HDR = 1.f;
+	ResolveSlashVFXBoost(Scale, HDR);
+	const FVector Scale3D(Scale);
+
 	if (UNiagaraSystem* TrailFX = ResolveSlashTrailFX())
 	{
+		UNiagaraComponent* TrailComp = nullptr;
 		if (KnifeMesh)
 		{
-			UNiagaraFunctionLibrary::SpawnSystemAttached(
+			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 				TrailFX,
 				KnifeMesh,
 				NAME_None,
 				FVector::ZeroVector,
 				SlashTrailRotation,
+				Scale3D,
 				EAttachLocation::SnapToTarget,
-				true);
+				true,
+				ENCPoolMethod::None);
 		}
 		else if (UWorld* World = GetWorld())
 		{
-			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			TrailComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
 				TrailFX,
 				GetActorLocation(),
-				SlashTrailRotation);
+				SlashTrailRotation,
+				Scale3D);
 		}
+		ApplyAttackVFXBoost(TrailComp, Scale, HDR);
 	}
 
 	if (UNiagaraSystem* ImpactFX = ResolveHitImpactFX())
 	{
 		if (UWorld* World = GetWorld())
 		{
-			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			UNiagaraComponent* ImpactComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 				World,
 				ImpactFX,
-				HitWorldLocation);
+				HitWorldLocation,
+				FRotator::ZeroRotator,
+				Scale3D);
+			ApplyAttackVFXBoost(ImpactComp, Scale, HDR);
 		}
 	}
 }
@@ -794,6 +890,11 @@ void ANightCoursePawn::Tick(float DeltaSeconds)
 	// would drop the contact impulse entirely and leave a half-decayed kick frozen on screen.
 	UpdateCameraKicks(DeltaSeconds); //add by K2
 
+	if (CourseDirector && CourseDirector->IsCourseTipPaused())
+	{
+		return;
+	}
+
 	if (!bTrackAdvancing)
 	{
 		return;
@@ -902,36 +1003,27 @@ PlayerInputComponent->BindKey(EKeys::AnyKey, IE_Pressed, this, &ANightCoursePawn
 	PlayerInputComponent->BindTouch(IE_Pressed, this, &ANightCoursePawn::OnHudTouchPressed);
 }
 
+bool ANightCoursePawn::TryConsumeHudOverlayInput()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return false;
+	}
+	ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD());
+	return NightHUD && NightHUD->ConsumeBlockingOverlayInput();
+}
+
 void ANightCoursePawn::OnAnyKeyPressed(FKey Key)
 {
-	
-(void)Key;
+	(void)Key;
 	// Q/E and the mouse button also drive gameplay handlers; let those handlers dismiss first
 	// so the opening input is not accidentally consumed as a jump, attack, or pad press.
 	if (Key == EKeys::Q || Key == EKeys::E || Key == EKeys::LeftMouseButton)
 	{
 		return;
 	}
-	
-if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	
-{
-	
-	
-if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
-	
-	
-{
-	
-	
-	
-NightHUD->DismissStartScreenIfVisible();
-	
-	
-}
-	
-}
-
+	TryConsumeHudOverlayInput();
 }
 
 
@@ -975,16 +1067,12 @@ void ANightCoursePawn::TryResolveHudPointer(float ScreenX, float ScreenY)
 	int32 ViewY = 0;
 	PC->GetViewportSize(ViewX, ViewY);
 
+	if (TryConsumeHudOverlayInput())
+	{
+		return;
+	}
+
 	ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD());
-	
-if (NightHUD && NightHUD->DismissStartScreenIfVisible())
-	
-{
-	
-	
-return;
-	
-}
 	ENightFeelInput Input = ENightFeelInput::Jump;
 	if (!NightHUD
 		|| !NightHUD->HitTestActionButtons(
@@ -1073,38 +1161,10 @@ void ANightCoursePawn::ApplyAdvanceCatchUp(float RateMultiplier, float MaxCompre
 void ANightCoursePawn::OnJumpPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	
-if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	
-{
-	
-	
-if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
-	
-	
-{
-	
-	
-	
-if (NightHUD->DismissStartScreenIfVisible())
-	
-	
-	
-{
-	
-	
-	
-	
-return;
-	
-	
-	
-}
-	
-	
-}
-	
-}
+	if (TryConsumeHudOverlayInput())
+	{
+		return;
+	}
 	if (CourseDirector && CourseDirector->IsForkChoiceActive())
 	{
 		CourseDirector->ChooseForkLeft();
@@ -1120,38 +1180,10 @@ return;
 void ANightCoursePawn::OnAttackPressed(const FInputActionValue& Value)
 {
 	(void)Value;
-	
-if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	
-{
-	
-	
-if (ANightCourseHUD* NightHUD = Cast<ANightCourseHUD>(PC->GetHUD()))
-	
-	
-{
-	
-	
-	
-if (NightHUD->DismissStartScreenIfVisible())
-	
-	
-	
-{
-	
-	
-	
-	
-return;
-	
-	
-	
-}
-	
-	
-}
-	
-}
+	if (TryConsumeHudOverlayInput())
+	{
+		return;
+	}
 
 	// LeftMouseButton is still mapped to IA_NightAttack in IMC_NightCourse. The HUD pads own the
 	// mouse now, so swallow that chord here and let OnHudPointerPressed classify the click;

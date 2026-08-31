@@ -1,5 +1,6 @@
 #include "Night/Course/NightCourseStoneActor.h"
 #include "Night/Course/NightCoursePawn.h" //add by K2
+#include "Night/Course/NightFoeShatterComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -41,6 +42,8 @@ ANightCourseStoneActor::ANightCourseStoneActor()
 	FoeSkeletalMeshComponent->SetHiddenInGame(true);
 	FoeSkeletalMeshComponent->SetVisibility(false);
 
+	FoeShatter = CreateDefaultSubobject<UNightFoeShatterComponent>(TEXT("FoeShatter"));
+	FoeShatter->SetupAttachment(ArtRoot);
 }
 
 void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& InSpec)
@@ -49,6 +52,10 @@ void ANightCourseStoneActor::SetupStone(int32 InIndex, const FNightStoneSpec& In
 	Spec = InSpec;
 	bClearingFoe = false;
 	FoeClearAlpha = 1.f;
+	if (FoeShatter)
+	{
+		FoeShatter->ClearShards();
+	}
 	ApplyConfiguredFoeVisual();
 
 	const bool bShowFoe = Spec.bHasFoe;
@@ -283,24 +290,72 @@ void ANightCourseStoneActor::ClearFoe(bool bAnimate)
 
 #pragma region K2 moonyfli
 	FVector HitLoc = GetActorLocation() + FVector(0.f, 0.f, FoeHeightOffsetCm);
+	UMeshComponent* FoeMesh = nullptr;
 	if (bSkeletalVisible && FoeSkeletalMeshComponent)
 	{
 		HitLoc = FoeSkeletalMeshComponent->GetComponentLocation();
+		FoeMesh = FoeSkeletalMeshComponent;
 	}
 	else if (bCapsuleVisible && FoeCapsule)
 	{
 		HitLoc = FoeCapsule->GetComponentLocation();
+		FoeMesh = FoeCapsule;
 	}
-	if (ANightCoursePawn* Hero = Cast<ANightCoursePawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+
+	ANightCoursePawn* Hero = Cast<ANightCoursePawn>(UGameplayStatics::GetPlayerPawn(this, 0));
+	if (Hero)
 	{
 		Hero->PlayAttackVFX(HitLoc);
+	}
+
+	bool bPlayedShatter = false;
+	if (bAnimate && FoeShatter)
+	{
+		FNightFoeShatterRequest Request;
+		Request.Origin = HitLoc;
+		Request.ImpulseDir = Hero ? Hero->GetActorForwardVector() : GetActorForwardVector();
+		if (Hero)
+		{
+			const FVector Through = (HitLoc - Hero->GetActorLocation()).GetSafeNormal();
+			if (!Through.IsNearlyZero())
+			{
+				Request.ImpulseDir = (Request.ImpulseDir * 0.65f + Through * 0.35f).GetSafeNormal();
+			}
+		}
+		Request.Tint = FoeColor;
+		Request.Material = FoeMaterial;
+		Request.SourceMeshComponent = FoeMesh;
+		Request.SourceStaticMesh = FoeStaticMesh;
+		if (const UStaticMeshComponent* SourceStatic = Cast<UStaticMeshComponent>(FoeMesh))
+		{
+			if (SourceStatic->GetStaticMesh())
+			{
+				Request.SourceStaticMesh = SourceStatic->GetStaticMesh();
+			}
+		}
+		if (FoeMesh)
+		{
+			if (!Request.Material)
+			{
+				Request.Material = FoeMesh->GetMaterial(0);
+			}
+			Request.Origin = FoeMesh->Bounds.Origin;
+			Request.Extent = FoeMesh->Bounds.BoxExtent;
+		}
+		if (Hero)
+		{
+			Request.Combo = Hero->GetSlashCombo();
+			Request.VFXTier = Hero->ResolveAttackVFXTier();
+			Request.bTier5 = Request.Combo >= Hero->SimulatedVFXTier5Combo;
+		}
+		bPlayedShatter = FoeShatter->PlayBurst(Request);
 	}
 #pragma endregion K2 moonyfli
 
 	PlayFoeClearedVFX();
 	PlaySlashVFX();
 
-	if (!bAnimate)
+	if (!bAnimate || bPlayedShatter)
 	{
 		if (FoeCapsule)
 		{

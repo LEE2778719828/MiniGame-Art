@@ -43,6 +43,14 @@ enum class ENightCoursePhase : uint8
 	Finished UMETA(DisplayName = "Finished")
 };
 
+UENUM(BlueprintType)
+enum class ENightCourseTipId : uint8
+{
+	None UMETA(DisplayName = "无"),
+	Fork UMETA(DisplayName = "第一次岔路"),
+	RouteC UMETA(DisplayName = "C路反转")
+};
+
 /** One stepping stone on the track. */
 USTRUCT(BlueprintType)
 struct FNightStoneSpec

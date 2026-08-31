@@ -12,6 +12,7 @@ class UMaterialInterface;
 class UMeshComponent;
 class USkeletalMesh;
 class USkeletalMeshComponent;
+class UNightFoeShatterComponent;
 
 #pragma region K2 moonyfli
 /** Single stepping stone; optional foe capsule on top (刃心 whitebox). */
@@ -34,6 +35,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
 	TObjectPtr<USkeletalMeshComponent> FoeSkeletalMeshComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Night|Art")
+	TObjectPtr<UNightFoeShatterComponent> FoeShatter;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Art|Visual")
 	TObjectPtr<USkeletalMesh> FoeSkeletalMesh;

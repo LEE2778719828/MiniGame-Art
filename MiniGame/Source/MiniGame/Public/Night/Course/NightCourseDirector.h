@@ -22,6 +22,7 @@ class INightFeelBridge;
 class UNightForkController;
 class APostProcessVolume;
 class UMaterialInterface;
+class ANightCourseHUD;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNightCoursePhaseChanged, ENightCoursePhase, OldPhase, ENightCoursePhase, NewPhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNightCourseNodeEvent, int32, NodeIndex, ENightNodeKind, Kind, ENightJudgeOutcome, Outcome);
@@ -250,6 +251,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Night|Course|KeySwap")
 	bool IsCourseFailed() const { return Phase == ENightCoursePhase::Failed; }
 
+	UFUNCTION(BlueprintPure, Category = "Night|Course|Tips")
+	bool IsCourseTipPaused() const { return bCourseTipPaused; }
+
+	/** HUD calls this after the player dismisses a blocking tip. */
+	void NotifyCourseTipDismissed();
+
 	UFUNCTION(BlueprintPure, Category = "Night|Course")
 	const TArray<FIngredientFloatStack>& GetCollectedIngredients() const { return CollectedIngredients; }
 
@@ -387,6 +394,9 @@ protected:
 	int32 NextKeySwapCueIndex = 0;
 	float BranchEnterBufferEndTime = 0.f;
 	float KeySwapEndTime = 0.f;
+	bool bCourseTipPaused = false;
+	bool bForkTipShownThisRun = false;
+	bool bRouteCTipShownThisRun = false;
 	TArray<FNightKeySwapCue> AuthoredKeySwapCues;
 	TArray<FNightKeySwapCue> ActiveKeySwapCues;
 	TMap<ENightRouteId, FNightPreparedBranchRoute> PreparedBranchRoutes;
@@ -437,6 +447,11 @@ protected:
 	void BeginKeySwapWarning();
 	void ApplyKeySwapCue(const FNightKeySwapCue& Cue);
 	bool HasPendingKeySwap() const;
+	void ApplyRouteCControlSwapIfNeeded();
+	void HandleBranchRouteInstalled();
+	void TryPresentCourseTip(ENightCourseTipId TipId);
+	void SetCourseTipPaused(bool bPaused);
+	ANightCourseHUD* ResolveCourseHUD() const;
 	void UpdateRouteEffects(float DeltaTime);
 	float ApplyGiftAwareSoulPenalty(
 		float Amount,

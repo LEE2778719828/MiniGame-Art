@@ -61,6 +61,8 @@ namespace NightCourseAutomation_Private
 		Config->BranchEnterBufferSeconds = 0.f;
 		Config->ExitBufferSeconds = 0.f;
 		Config->bKeySwapOnlyOnRouteC = false;
+		Config->bEnableCourseTips = false;
+		Config->bSwapControlsOnEnterRouteC = false;
 		Config->DefaultFoeId = EFoeId::M01;
 		Config->FoeActorMap.Add(
 			EFoeId::M01,

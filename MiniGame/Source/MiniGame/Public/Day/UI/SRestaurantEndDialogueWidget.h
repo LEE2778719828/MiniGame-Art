@@ -2,7 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Input/Events.h"
+#include "Input/Reply.h"
 #include "SRestaurantEndDialogueWidget.generated.h"
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRestaurantStandaloneTipDismissed);
 
 UENUM(BlueprintType)
 enum class ESRestaurantDialogueSpeaker : uint8
@@ -59,9 +63,20 @@ class MINIGAME_API USRestaurantEndDialogueWidget : public UUserWidget
 public:
 	USRestaurantEndDialogueWidget(const FObjectInitializer& ObjectInitializer);
 
+	/** Night / other systems can reuse one KYisi line without advancing the Day restaurant flow. */
+	UPROPERTY(BlueprintAssignable, Category = "Restaurant Dialogue")
+	FOnRestaurantStandaloneTipDismissed OnStandaloneTipDismissed;
+
 	/** Reset to scene 0 and present the first line. NativeConstruct calls this automatically. */
 	UFUNCTION(BlueprintCallable, Category = "Restaurant Dialogue")
 	void StartDialogue();
+
+	/** Show a single KYisi-style line. Click/Advance dismisses without completing the Day dialogue. */
+	UFUNCTION(BlueprintCallable, Category = "Restaurant Dialogue")
+	void PresentStandaloneTip(
+		ESRestaurantDialogueSpeaker Speaker,
+		const FText& InSpeakerName,
+		const FText& InText);
 
 	/** Mobile Continue button entry point. Advances one line; the last press completes the day flow. */
 	UFUNCTION(BlueprintCallable, Category = "Restaurant Dialogue")
@@ -85,6 +100,8 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnTouchStarted(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent) override;
 
 	/** Editable in WBP_RestaurantEndDialogue defaults; C++ supplies the 15-line reference script. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Restaurant Dialogue", meta = (TitleProperty = "Text"))
@@ -105,4 +122,5 @@ private:
 	int32 CurrentLineIndex = INDEX_NONE;
 
 	bool bFinished = false;
+	bool bStandaloneTipMode = false;
 };

@@ -4197,6 +4197,13 @@ void UNightCourseDirector::StartNight(const FNightBootstrap& Bootstrap)
 	NextKeySwapCueIndex = 0;
 	BranchEnterBufferEndTime = 0.f;
 	KeySwapEndTime = 0.f;
+	bCourseTipPaused = false;
+	bForkTipShownThisRun = false;
+	bRouteCTipShownThisRun = false;
+	if (ANightCourseHUD* CourseHUD = ResolveCourseHUD())
+	{
+		CourseHUD->DismissCourseTip();
+	}
 	ActiveKeySwapCues = AuthoredKeySwapCues;
 	bHasActiveRouteRule = false;
 	PreparedBranchRoutes.Reset();
@@ -4695,6 +4702,7 @@ bool UNightCourseDirector::InstallPreparedBranchRoute(
 	// 期间就生成并可见，主角到达时地面已经存在（消除“只有衔接处一个”的卡顿 / 悬空）。
 	bBranchRemainderPreGenerated = true;
 	UpdateRouteVisibility();
+	HandleBranchRouteInstalled();
 	return true;
 }
 void UNightCourseDirector::BeginForkChoice()
@@ -4733,6 +4741,7 @@ void UNightCourseDirector::BeginForkChoice()
 		ActiveForkPair,
 		FMath::Max(0.01f, Config->ForkTimeoutSeconds),
 		Config->bForkTimeoutPickLeft);
+	TryPresentCourseTip(ENightCourseTipId::Fork);
 	// Build only the route selected by the player. Pre-generating both branch
 	// routes here allowed an unchosen route's LayoutBounds failure to abort the
 	// whole course before the fork choice was even resolved.
@@ -5090,11 +5099,16 @@ bool UNightCourseDirector::RebuildCourseForSelectedRoute(FString& OutError)
 	// 期间就生成并可见，主角到达时地面已经存在（消除“只有衔接处一个”的卡顿 / 悬空）。
 	bBranchRemainderPreGenerated = true;
 	UpdateRouteVisibility();
+	HandleBranchRouteInstalled();
 	return true;
 }
 
 void UNightCourseDirector::TryOpenBeat(int32 BeatIndex)
 {
+	if (bBranchSelected && CurrentRoute == ENightRouteId::C)
+	{
+		ApplyRouteCControlSwapIfNeeded();
+	}
 	if (!BeatSpecs.IsValidIndex(BeatIndex) || BeatConsumed[BeatIndex])
 	{
 		return;
@@ -5504,6 +5518,167 @@ void UNightCourseDirector::ApplyKeySwapCue(const FNightKeySwapCue& Cue)
 			FeelBridgeObject,
 			Scheme);
 	}
+}
+
+void UNightCourseDirector::ApplyRouteCControlSwapIfNeeded()
+{
+	if (CurrentRoute != ENightRouteId::C)
+	{
+		return;
+	}
+	// Existing DA_Course often serializes new bools as false until the asset is
+	// re-saved. Only honor an explicit off when the C-tip text was authored.
+	const bool bExplicitlyDisabled =
+		Config
+		&& !Config->bSwapControlsOnEnterRouteC
+		&& !Config->RouteCTipText.IsEmpty();
+	if (bExplicitlyDisabled)
+	{
+		return;
+	}
+	if (!GetFeel())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Tips] Route C swap skipped: Feel is not bound."));
+		return;
+	}
+	INightFeelBridge::Execute_SetControlScheme(
+		FeelBridgeObject,
+		ENightControlScheme::Swapped);
+	UE_LOG(LogTemp, Display, TEXT("[NightCourse][Tips] Route C left/right actions swapped."));
+}
+
+void UNightCourseDirector::HandleBranchRouteInstalled()
+{
+	ApplyRouteCControlSwapIfNeeded();
+	TryPresentCourseTip(ENightCourseTipId::RouteC);
+}
+
+void UNightCourseDirector::TryPresentCourseTip(const ENightCourseTipId TipId)
+{
+	if (TipId == ENightCourseTipId::None)
+	{
+		return;
+	}
+
+	const bool bHasAuthoredTipText = Config && (
+		!Config->ForkTipText.IsEmpty() || !Config->RouteCTipText.IsEmpty());
+	if (Config && !Config->bEnableCourseTips && bHasAuthoredTipText)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[NightCourse][Tips] skipped: bEnableCourseTips=0."));
+		return;
+	}
+
+	FText Speaker = (Config && !Config->CourseTipSpeakerName.IsEmpty())
+		? Config->CourseTipSpeakerName
+		: FText::FromString(TEXT("K易斯"));
+	FText ContinueHint = (Config && !Config->CourseTipContinueHint.IsEmpty())
+		? Config->CourseTipContinueHint
+		: FText::FromString(TEXT("点击继续"));
+	FText Body;
+	if (TipId == ENightCourseTipId::Fork)
+	{
+		if (bForkTipShownThisRun)
+		{
+			return;
+		}
+		if (Config && !Config->bEnableForkTip && !Config->ForkTipText.IsEmpty())
+		{
+			return;
+		}
+		Body = (Config && !Config->ForkTipText.IsEmpty())
+			? Config->ForkTipText
+			: FText::FromString(TEXT("注意，这里就是岔路了，按左边选择左路，按右边选择右路"));
+	}
+	else if (TipId == ENightCourseTipId::RouteC)
+	{
+		if (bRouteCTipShownThisRun || CurrentRoute != ENightRouteId::C)
+		{
+			return;
+		}
+		if (Config && !Config->bEnableRouteCTip && !Config->RouteCTipText.IsEmpty())
+		{
+			return;
+		}
+		Body = (Config && !Config->RouteCTipText.IsEmpty())
+			? Config->RouteCTipText
+			: FText::FromString(TEXT("注意！你吸入了毒孢子，现在左右区域对应的操作反转了！"));
+	}
+	else
+	{
+		return;
+	}
+
+	ANightCourseHUD* CourseHUD = ResolveCourseHUD();
+	if (!CourseHUD)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Tips] HUD missing, tip id=%d was not shown."),
+			static_cast<int32>(TipId));
+		return;
+	}
+	if (!CourseHUD->ShowCourseTip(Speaker, Body, ContinueHint))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Tips] ShowCourseTip failed, tip id=%d."),
+			static_cast<int32>(TipId));
+		return;
+	}
+
+	if (TipId == ENightCourseTipId::Fork)
+	{
+		bForkTipShownThisRun = true;
+	}
+	else if (TipId == ENightCourseTipId::RouteC)
+	{
+		bRouteCTipShownThisRun = true;
+	}
+	SetCourseTipPaused(true);
+	UE_LOG(LogTemp, Display, TEXT("[NightCourse][Tips] shown id=%d text='%s'."),
+		static_cast<int32>(TipId),
+		*Body.ToString());
+}
+
+void UNightCourseDirector::SetCourseTipPaused(const bool bPaused)
+{
+	bCourseTipPaused = bPaused;
+	if (RunnerPawn)
+	{
+		RunnerPawn->CustomTimeDilation = bPaused ? 0.f : 1.f;
+	}
+}
+
+void UNightCourseDirector::NotifyCourseTipDismissed()
+{
+	SetCourseTipPaused(false);
+}
+
+ANightCourseHUD* UNightCourseDirector::ResolveCourseHUD() const
+{
+	auto HudFromController = [](const APlayerController* PC) -> ANightCourseHUD*
+	{
+		return PC ? Cast<ANightCourseHUD>(PC->GetHUD()) : nullptr;
+	};
+
+	if (RunnerPawn)
+	{
+		if (ANightCourseHUD* HUD = HudFromController(Cast<APlayerController>(RunnerPawn->GetController())))
+		{
+			return HUD;
+		}
+	}
+	if (const UWorld* World = GetWorld())
+	{
+		if (ANightCourseHUD* HUD = HudFromController(World->GetFirstPlayerController()))
+		{
+			return HUD;
+		}
+		for (TActorIterator<ANightCourseHUD> It(World); It; ++It)
+		{
+			if (*It)
+			{
+				return *It;
+			}
+		}
+	}
+	return nullptr;
 }
 
 void UNightCourseDirector::BeginKeySwapWarning()
@@ -6173,6 +6348,10 @@ void UNightCourseDirector::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		return;
 	}
+	if (bCourseTipPaused)
+	{
+		return;
+	}
 
 	ElapsedSeconds += DeltaTime;
 	OnDebugTick.Broadcast(ElapsedSeconds);
@@ -6580,6 +6759,17 @@ void UNightCourseDirector::ResetCourse()
 	BranchCollectedIngredients.Reset();
 	AuthoredKeySwapCues.Reset();
 	ActiveKeySwapCues.Reset();
+	if (ANightCourseHUD* CourseHUD = ResolveCourseHUD())
+	{
+		CourseHUD->DismissCourseTip();
+	}
+	bCourseTipPaused = false;
+	bForkTipShownThisRun = false;
+	bRouteCTipShownThisRun = false;
+	if (RunnerPawn)
+	{
+		RunnerPawn->CustomTimeDilation = 1.f;
+	}
 	bHasResult = false;
 	LastResult = FNightResult();
 	LastFailureReason.Reset();

@@ -13,6 +13,9 @@ class UDataTable; //add by K2
 class UTexture2D; //add by K2
 class UNightCourseDirector; //add by K2
 class USoundBase; //add by K2
+class UCurveFloat;
+class USRestaurantEndDialogueWidget;
+class UNightCourseTipWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnNightHUDResultReady,
@@ -169,6 +172,45 @@ public:
 	/** WBP_Success / WBP_Failed widget that shows peak slash combo. Art still has a placeholder 60. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result")
 	FName ResultComboTextWidgetName = TEXT("EditableTextBox_1");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "连击最小缩放", ToolTip = "连击为 1 时 WBP_Combo 的 RenderScale。", ClampMin = "0.1"))
+	float ComboScaleMin = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "连击最大缩放", ToolTip = "连击涨满后的封顶 RenderScale。", ClampMin = "0.1"))
+	float ComboScaleMax = 1.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "缩放到顶连击数", ToolTip = "连击达到该值时缩放到 ComboScaleMax。", ClampMin = "1"))
+	int32 ComboScaleFullAt = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "缩放曲线指数", ToolTip = "大于 1 时后期涨得更快；有独立缩放曲线时忽略此项。", ClampMin = "0.01"))
+	float ComboScaleExponent = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "缩放曲线", ToolTip = "可选。横轴 0-1 对应连击 1 到缩放到顶连击数，纵轴是 0-1 插值。"))
+	TObjectPtr<UCurveFloat> ComboScaleCurve = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "连击弹出额外缩放", ToolTip = "每次连击增加时额外放大，随后在弹出时间内回落。", ClampMin = "0.0"))
+	float ComboPopExtraScale = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "连击弹出时间", ToolTip = "弹出额外缩放回落到 0 所需秒数。", ClampMin = "0.0"))
+	float ComboPopSeconds = 0.12f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "数字描边像素", ToolTip = "Txt_ComboCount 的 Slate 描边宽度。", ClampMin = "0"))
+	int32 ComboOutlineSize = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "低连击描边颜色", ToolTip = "连击刚开始时的数字描边颜色。偏冷白，不要红/黄。"))
+	FLinearColor ComboOutlineColor = FLinearColor(0.16f, 0.17f, 0.20f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "高连击描边颜色", ToolTip = "连击涨满后的数字描边颜色。略亮一点的冷白。"))
+	FLinearColor ComboOutlineColorAtMax = FLinearColor(0.78f, 0.81f, 0.88f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "低连击数字颜色", ToolTip = "连击刚开始时的数字本体颜色。偏白。"))
+	FLinearColor ComboTextColor = FLinearColor(0.93f, 0.94f, 0.97f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "高连击数字颜色", ToolTip = "连击涨满后的数字本体颜色。纯白。"))
+	FLinearColor ComboTextColorAtMax = FLinearColor(1.f, 1.f, 1.f, 1.f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Combo", meta = (DisplayName = "颜色涨满连击数", ToolTip = "描边和数字颜色插值到高连击色所需的连击数。", ClampMin = "1"))
+	int32 ComboColorFullAt = 30;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Result", meta = (ClampMin = "0"))
@@ -212,6 +254,22 @@ public:
 
 	/** Called by gameplay input so the first key/touch dismisses the overlay. */
 	bool DismissStartScreenIfVisible();
+
+	UFUNCTION(BlueprintPure, Category = "Night|HUD|Tips")
+	bool IsCourseTipVisible() const { return bCourseTipVisible; }
+
+	/** Show one KYisi tip. Returns false when no widget/text could be presented. */
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|Tips")
+	bool ShowCourseTip(const FText& SpeakerName, const FText& Body, const FText& ContinueHint);
+
+	UFUNCTION(BlueprintCallable, Category = "Night|HUD|Tips")
+	void DismissCourseTip();
+
+	/** Called by gameplay input so the dismiss click is not also a jump/slash. */
+	bool DismissCourseTipIfVisible();
+
+	/** Start screen first, then course tip. True means this input must not jump/slash/choose a fork. */
+	bool ConsumeBlockingOverlayInput();
 
 	/** Blueprint presentation hook: bind result text, play animation, focus the result button, etc. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Night|HUD|Result", meta = (DisplayName = "On Night Result Ready"))
@@ -325,6 +383,51 @@ private:
 	UPROPERTY(Transient)
 	bool bStartScreenDismissed = false;
 
+	/** Prefers Day's KYisi WBP so Night reuses the same tip art. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Tips", meta = (AllowPrivateAccess = "true", DisplayName = "K易斯Tips控件"))
+	TSubclassOf<USRestaurantEndDialogueWidget> CourseTipDialogueWidgetClass;
+
+	/** Night-authored KYisi overlay. Preferred over the Day restaurant WBP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Tips", meta = (AllowPrivateAccess = "true", DisplayName = "Night Tips控件"))
+	TSubclassOf<UUserWidget> CourseTipOverlayWidgetClass;
+
+	/** Used only when the Day dialogue WBP is missing from this cook. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Tips", meta = (AllowPrivateAccess = "true", DisplayName = "Tips回退控件"))
+	TSubclassOf<UNightCourseTipWidget> CourseTipFallbackWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Tips", meta = (AllowPrivateAccess = "true", DisplayName = "K易斯头像"))
+	TSoftObjectPtr<UTexture2D> CourseTipPortrait;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|HUD|Tips", meta = (AllowPrivateAccess = "true", DisplayName = "Tips层级"))
+	int32 CourseTipZOrder = 220;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USRestaurantEndDialogueWidget> CourseTipDialogueWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> CourseTipOverlayWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNightCourseTipWidget> CourseTipFallbackWidget;
+
+	UPROPERTY(Transient)
+	bool bCourseTipVisible = false;
+
+	UPROPERTY(Transient)
+	FText ActiveCourseTipSpeaker;
+
+	UPROPERTY(Transient)
+	FText ActiveCourseTipBody;
+
+	UPROPERTY(Transient)
+	FText ActiveCourseTipContinue;
+
+	UPROPERTY(Transient)
+	bool bDrawCourseTipOnCanvas = false;
+
+	/** Same-frame latch: dismissing a tip must not also jump, slash, or pick a fork. */
+	uint64 GameplayInputSuppressedFrame = 0; // GFrameCounter when a tip was just dismissed
+
 	/** Authored size of the bar inside the WBP: SetHealth pins the fill to x = FullBarWidth. */
 	UPROPERTY(EditAnywhere, Category = "Night|HUD")
 	FVector2D HealthBarDesignSize = FVector2D(800.f, 240.f);
@@ -355,6 +458,9 @@ private:
 	TMap<EIngredientId, TObjectPtr<UTexture2D>> ResolvedIngredientIcons;
 
 	TWeakObjectPtr<UNightCourseDirector> BoundDropDirector;
+
+	int32 LastDisplayedCombo = 0;
+	float ComboPopElapsed = 0.f;
 #pragma endregion K2 moonyfli
 
 	UPROPERTY(Transient)
@@ -377,9 +483,23 @@ private:
 	void PushSoulToHealthBar(float Soul);
 	void SetHealthBarNumeric(FName PropertyName, double Value);
 	void PushComboToHUD(int32 Combo); //add by K2
+	float EvaluateComboProgress(int32 Combo, int32 FullAt, float Exponent) const;
+	void ApplyComboNumberStyle(int32 Combo, float DeltaSeconds);
 
 #pragma region K2 moonyfli
 	UFUNCTION()
+	void HandleCourseTipDismissed();
+
+	void ApplyCourseTipWidgetTexts(
+		UUserWidget* Widget,
+		const FText& SpeakerName,
+		const FText& Body,
+		const FText& ContinueHint) const;
+	void BindCourseTipDismissButton(UUserWidget* Widget);
+	void NotifyDirectorCourseTipDismissed() const;
+	bool HasVisibleCourseTipWidget() const;
+	void SyncCourseTipWidgetLifetime();
+
 	void HandleIngredientDropped(EIngredientId DropId, int32 Count, FVector WorldLocation);
 
 	void EnsureDropDirectorBinding(UNightCourseDirector* Director);
