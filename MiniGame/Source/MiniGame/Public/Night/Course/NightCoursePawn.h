@@ -267,6 +267,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "-30.0", ClampMax = "30.0"))
 	float AttackFovKickDeg = -6.f;
 
+#pragma region K2 moonyfli
+	/**
+	 * Slash should not yaw the boom. Director aims the pawn at the next stone, and Inherit Yaw
+	 * would orbit the camera left/right during the dash. Jump and fork turns still follow.
+	 * Off = old follow-the-slash-heading behaviour.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel")
+	bool bLockCameraYawOnAttack = true;
+#pragma endregion K2 moonyfli
+
 	/** 上面三种冲击回到零的速度，越低余韵越长。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Night|Camera|Feel", meta = (ClampMin = "0.5", ClampMax = "60.0"))
 	float CameraKickRecoverySpeed = 9.f;
@@ -413,6 +423,11 @@ protected:
 	/** Fires due impulses, decays the live ones, and writes FOV / socket offset. */
 	void UpdateCameraKicks(float DeltaSeconds);
 
+#pragma region K2 moonyfli
+	void SetCameraYawLocked(bool bLock);
+	void ApplyLockedCameraYaw();
+#pragma endregion K2 moonyfli
+
 	TArray<FNightCameraKick> PendingCameraKicks;
 
 	/**
@@ -421,6 +436,14 @@ protected:
 	 */
 	float BaseFieldOfView = 70.f;
 	FVector BaseSocketOffset = FVector(0.f, 55.f, 160.f);
+	FRotator BaseBoomRelativeRotation = FRotator(-28.f, 0.f, 0.f); //add by K2
+
+#pragma region K2 moonyfli
+	bool bCameraYawLocked = false;
+	float LockedCameraWorldYaw = 0.f;
+	bool bSavedInheritYaw = true;
+	bool bSavedRotationLag = true;
+#pragma endregion K2 moonyfli
 
 	float LiveFovKickDeg = 0.f;
 	float LiveBoomDipCm = 0.f;
