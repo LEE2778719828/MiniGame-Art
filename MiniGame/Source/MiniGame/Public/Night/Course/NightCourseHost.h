@@ -174,7 +174,7 @@ public:
 	void RebuildEditorPreview();
 
 #if WITH_EDITOR
-	/** Drag the preview camera; on release this writes SpringArm / FOV back to HeroClass. */
+	/** Drag the preview camera; on release this writes SpringArm / FOV to the GameMode pawn class. */
 	void NotifyPreviewCameraEdited(ANightCoursePreviewCamera* PreviewCamera);
 #endif
 
@@ -205,6 +205,7 @@ protected:
 	void HandleFeelResolved(int32 NodeIndex, ENightJudgeOutcome Outcome);
 
 	void WireFeelFromPlayer();
+	void ApplyHeroClassVisual(ANightCoursePawn* CoursePawn) const;
 	void BuildPlayableStage();
 	void ClearCourseResult();
 	void EmitDebugMessage(const FString& Message, bool bIsError);
@@ -220,6 +221,7 @@ protected:
 	void SpawnEditorPreviewCamera(ANightCoursePawn* PreviewPawn);
 	void BakePreviewCameraToHeroClass(ANightCoursePreviewCamera* PreviewCamera);
 	ANightCoursePawn* FindEditorPreviewPawn() const;
+	UClass* ResolveRuntimeNightPawnClass() const;
 	bool bIgnorePreviewCameraBake = false;
 #endif
 

@@ -35,6 +35,8 @@
 #include "Engine/Blueprint.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "GameFramework/WorldSettings.h"
 #include "ScopedTransaction.h"
 #endif
 
@@ -990,6 +992,39 @@ void ANightCourseHost::HandleCombatMusicFinished()
 	CombatMusicComponent->Play();
 	UE_LOG(LogTemp, Verbose, TEXT("[NightCourse][Audio] Combat music loop restarted."));
 }
+
+void ANightCourseHost::ApplyHeroClassVisual(ANightCoursePawn* CoursePawn) const
+{
+	if (!CoursePawn || !Config || !Config->HeroClass)
+	{
+		return;
+	}
+
+	const ANightCoursePawn* HeroDefaults =
+		Config->HeroClass->GetDefaultObject<ANightCoursePawn>();
+	if (!HeroDefaults)
+	{
+		return;
+	}
+
+	CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
+	// add by K2 (R1): HeroClass 只有属性会被拷过来，蓝图里直接挂在
+	// HeroSkelMesh 组件上的网格传不过去，结果是配了骨骼却退到静态模、
+	// 动画播在隐藏组件上。属性为空时回退去读组件，让蓝图里看到的即生效。
+	if (!CoursePawn->HeroSkeletalMesh && HeroDefaults->HeroSkelMesh)
+	{
+		CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkelMesh->GetSkeletalMeshAsset();
+	}
+	CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
+	CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
+	CoursePawn->HeroScale = HeroDefaults->HeroScale;
+	CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
+	CoursePawn->HeroZCompensationCm = HeroDefaults->HeroZCompensationCm;
+	CoursePawn->bApplyHeroZCompensationInPreview =
+		HeroDefaults->bApplyHeroZCompensationInPreview;
+	CoursePawn->ApplyConfiguredHeroVisual();
+}
+
 void ANightCourseHost::WireFeelFromPlayer()
 {
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
@@ -1030,31 +1065,14 @@ void ANightCourseHost::WireFeelFromPlayer()
 
 	if (Config && Config->HeroClass)
 	{
-		const ANightCoursePawn* HeroDefaults =
-			Config->HeroClass->GetDefaultObject<ANightCoursePawn>();
-		if (HeroDefaults)
+		if (Config->HeroClass->GetDefaultObject<ANightCoursePawn>())
 		{
 			UE_LOG(
 				LogTemp,
 				Display,
 				TEXT("[NightCourse][Stage=BindPlayer] Applying HeroClass='%s' visual defaults."),
 				*GetNameSafe(Config->HeroClass));
-			CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkeletalMesh;
-			// add by K2 (R1): HeroClass 只有属性会被拷过来，蓝图里直接挂在
-			// HeroSkelMesh 组件上的网格传不过去，结果是配了骨骼却退到静态模、
-			// 动画播在隐藏组件上。属性为空时回退去读组件，让蓝图里看到的即生效。
-			if (!CoursePawn->HeroSkeletalMesh && HeroDefaults->HeroSkelMesh)
-			{
-				CoursePawn->HeroSkeletalMesh = HeroDefaults->HeroSkelMesh->GetSkeletalMeshAsset();
-			}
-			CoursePawn->HeroStaticMesh = HeroDefaults->HeroStaticMesh;
-			CoursePawn->HeroMaterial = HeroDefaults->HeroMaterial;
-			CoursePawn->HeroScale = HeroDefaults->HeroScale;
-			CoursePawn->HeroPivotOffsetCm = HeroDefaults->HeroPivotOffsetCm;
-			CoursePawn->HeroZCompensationCm = HeroDefaults->HeroZCompensationCm;
-			CoursePawn->bApplyHeroZCompensationInPreview =
-				HeroDefaults->bApplyHeroZCompensationInPreview;
-			CoursePawn->ApplyConfiguredHeroVisual();
+			ApplyHeroClassVisual(CoursePawn);
 		}
 		else
 		{
@@ -1684,6 +1702,9 @@ namespace NightCoursePreviewCamera_Private
 				}
 			}
 			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			FKismetEditorUtilities::CompileBlueprint(
+				Blueprint,
+				EBlueprintCompileOptions::SkipGarbageCollection);
 		}
 	}
 }
@@ -1700,6 +1721,34 @@ ANightCoursePawn* ANightCourseHost::FindEditorPreviewPawn() const
 	return nullptr;
 }
 
+UClass* ANightCourseHost::ResolveRuntimeNightPawnClass() const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AWorldSettings* Settings = World->GetWorldSettings())
+		{
+			if (UClass* GameModeClass = Settings->DefaultGameMode.Get())
+			{
+				if (const AGameModeBase* GameModeCDO = GameModeClass->GetDefaultObject<AGameModeBase>())
+				{
+					if (UClass* PawnClass = GameModeCDO->DefaultPawnClass)
+					{
+						if (PawnClass->IsChildOf(ANightCoursePawn::StaticClass()))
+						{
+							return PawnClass;
+						}
+					}
+				}
+			}
+		}
+	}
+	if (Config && Config->HeroClass)
+	{
+		return Config->HeroClass.Get();
+	}
+	return ANightCoursePawn::StaticClass();
+}
+
 void ANightCourseHost::SpawnEditorPreviewPawnAt(const FNightStoneSpec& Stone)
 {
 	UWorld* World = GetWorld();
@@ -1708,9 +1757,7 @@ void ANightCourseHost::SpawnEditorPreviewPawnAt(const FNightStoneSpec& Stone)
 		return;
 	}
 
-	UClass* PawnClass = (Config && Config->HeroClass)
-		? Config->HeroClass.Get()
-		: ANightCoursePawn::StaticClass();
+	UClass* PawnClass = ResolveRuntimeNightPawnClass();
 	if (!PawnClass)
 	{
 		return;
@@ -1732,6 +1779,7 @@ void ANightCourseHost::SpawnEditorPreviewPawnAt(const FNightStoneSpec& Stone)
 	PreviewPawn->bIsEditorOnlyActor = true;
 	PreviewPawn->SetActorEnableCollision(false);
 	PreviewPawn->SetActorTickEnabled(false);
+	ApplyHeroClassVisual(PreviewPawn);
 	if (PreviewPawn->SpringArm)
 	{
 		PreviewPawn->SpringArm->bEnableCameraLag = false;
@@ -1822,18 +1870,28 @@ void ANightCourseHost::BakePreviewCameraToHeroClass(ANightCoursePreviewCamera* P
 		BoomRotation,
 		SocketOffset,
 		FieldOfView);
+	UClass* RuntimePawnClass = ResolveRuntimeNightPawnClass();
 	NightCoursePreviewCamera_Private::WriteFramingToPawnClass(
-		PreviewPawn->GetClass(),
+		RuntimePawnClass,
 		ArmLength,
 		BoomRotation,
 		SocketOffset,
 		FieldOfView);
+	if (PreviewPawn->GetClass() != RuntimePawnClass)
+	{
+		NightCoursePreviewCamera_Private::WriteFramingToPawnClass(
+			PreviewPawn->GetClass(),
+			ArmLength,
+			BoomRotation,
+			SocketOffset,
+			FieldOfView);
+	}
 
 	UE_LOG(
 		LogTemp,
 		Display,
 		TEXT("[NightCourse][Stage=Preview] Baked camera to '%s': Arm=%.1f Pitch=%.1f Yaw=%.1f Socket=(%.1f, %.1f, %.1f) FOV=%.1f"),
-		*GetNameSafe(PreviewPawn->GetClass()),
+		*GetNameSafe(RuntimePawnClass),
 		ArmLength,
 		BoomRotation.Pitch,
 		BoomRotation.Yaw,

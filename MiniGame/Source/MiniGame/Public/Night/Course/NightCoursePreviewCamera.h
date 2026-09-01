@@ -9,7 +9,7 @@ class ANightCourseHost;
 #pragma region K2 moonyfli
 /**
  * Editor-only camera the user can drag in the Night preview. Moving it writes SpringArm /
- * FOV back onto the HeroClass pawn (BP_NightCoursePawn).
+ * FOV back onto the GameMode DefaultPawn (BP_NightCoursePawn), not BP_NightHero.
  */
 UCLASS(NotPlaceable, Transient)
 class MINIGAME_API ANightCoursePreviewCamera : public ACameraActor
