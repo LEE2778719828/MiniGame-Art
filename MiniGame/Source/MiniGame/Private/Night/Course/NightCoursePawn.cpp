@@ -334,6 +334,55 @@ void ANightCoursePawn::UpdateCameraKicks(float DeltaSeconds)
 	}
 	bCameraKickApplied = true;
 }
+
+void ANightCoursePawn::SetCameraYawLocked(bool bLock)
+{
+	if (!SpringArm)
+	{
+		bCameraYawLocked = false;
+		return;
+	}
+
+	if (bLock)
+	{
+		if (!bCameraYawLocked)
+		{
+			bSavedInheritYaw = SpringArm->bInheritYaw;
+			bSavedRotationLag = SpringArm->bEnableCameraRotationLag;
+			LockedCameraWorldYaw = SpringArm->GetComponentRotation().Yaw;
+		}
+		bCameraYawLocked = true;
+		SpringArm->bInheritYaw = false;
+		SpringArm->bEnableCameraRotationLag = false;
+		ApplyLockedCameraYaw();
+		return;
+	}
+
+	if (!bCameraYawLocked)
+	{
+		return;
+	}
+
+	bCameraYawLocked = false;
+	SpringArm->bInheritYaw = bSavedInheritYaw;
+	SpringArm->bEnableCameraRotationLag = bSavedRotationLag;
+	SpringArm->SetRelativeRotation(BaseBoomRelativeRotation);
+}
+
+void ANightCoursePawn::ApplyLockedCameraYaw()
+{
+	if (!bCameraYawLocked || !SpringArm)
+	{
+		return;
+	}
+
+	// Inherit off replaces DesiredRot.Yaw with RelativeRotation.Yaw (not "keep world yaw").
+	SpringArm->bInheritYaw = false;
+	SpringArm->bEnableCameraRotationLag = false;
+	FRotator Rel = SpringArm->GetRelativeRotation();
+	Rel.Yaw = LockedCameraWorldYaw;
+	SpringArm->SetRelativeRotation(Rel);
+}
 #pragma endregion K2 moonyfli
 
 void ANightCoursePawn::OnConstruction(const FTransform& Transform)
@@ -569,6 +618,7 @@ void ANightCoursePawn::BeginPlay()
 	if (SpringArm)
 	{
 		BaseSocketOffset = SpringArm->SocketOffset;
+		BaseBoomRelativeRotation = SpringArm->GetRelativeRotation(); //add by K2
 	}
 
 	ApplyConfiguredHeroVisual();
@@ -595,6 +645,7 @@ UNightCourseDirector* ANightCoursePawn::GetCourseDirector() const
 void ANightCoursePawn::SnapToTrack(const FVector& WorldLocation, const FRotator& WorldRotation)
 {
 	bTrackAdvancing = false;
+	SetCameraYawLocked(false); //add by K2
 	SetActorLocationAndRotation(WorldLocation, WorldRotation);
 }
 
@@ -608,6 +659,21 @@ void ANightCoursePawn::BeginTrackAdvance(const FVector& WorldLocation, const FRo
 {
 	AdvanceTargetLocation = WorldLocation;
 	AdvanceTargetRotation = WorldRotation;
+#pragma region K2 moonyfli
+	// Fork transition (bUseRawSpeed) still yaws onto the branch. A slash dash keeps the
+	// current facing so Inherit Yaw does not swing the boom left/right.
+	if (bUseRawSpeed)
+	{
+		SetCameraYawLocked(false);
+	}
+	else if (bLastActionWasAttack && bLockCameraYawOnAttack)
+	{
+		AdvanceTargetRotation = GetActorRotation();
+		AdvanceTargetRotation.Pitch = 0.f;
+		AdvanceTargetRotation.Roll = 0.f;
+		SetCameraYawLocked(true);
+	}
+#pragma endregion K2 moonyfli
 	AdvanceSpeed = FMath::Max(100.f, SpeedCmPerSec);
 
 	// add by K2 (R1): 动画驱动模式下丢掉 Director 传来的速度，改由锚点反推——
@@ -821,13 +887,14 @@ void ANightCoursePawn::ResolveHeroArt()
 // add by K2 (R1)
 void ANightCoursePawn::PlayHeroAction(bool bAttack)
 {
+	bLastActionWasAttack = bAttack;
+	SetCameraYawLocked(bAttack && bLockCameraYawOnAttack); //add by K2
+
 	UAnimSequence* Clip = bAttack ? AttackAnim : JumpAnim;
 	if (!HeroSkelMesh || !Clip || HeroSkelMesh->GetSkeletalMeshAsset() == nullptr)
 	{
 		return;
 	}
-
-	bLastActionWasAttack = bAttack;
 	HeroAnimPlayRate = FMath::Max(0.05f, bAttack ? AttackAnimRate : JumpAnimRate);
 	ScheduleCameraKicksForClip(Clip); //add by K2
 
@@ -922,6 +989,7 @@ void ANightCoursePawn::Tick(float DeltaSeconds)
 	// Runs unconditionally: the slash plays while standing still, so gating this on bTrackAdvancing
 	// would drop the contact impulse entirely and leave a half-decayed kick frozen on screen.
 	UpdateCameraKicks(DeltaSeconds); //add by K2
+	ApplyLockedCameraYaw(); //add by K2
 
 	if (CourseDirector && CourseDirector->IsCourseTipPaused())
 	{
@@ -944,6 +1012,8 @@ void ANightCoursePawn::Tick(float DeltaSeconds)
 		SetActorLocationAndRotation(AdvanceTargetLocation, AdvanceTargetRotation);
 		bTrackAdvancing = false;
 	}
+
+	ApplyLockedCameraYaw(); //add by K2
 }
 
 void ANightCoursePawn::ApplyAvatarColor(FLinearColor Color)
