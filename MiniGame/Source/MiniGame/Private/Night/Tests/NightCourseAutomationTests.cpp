@@ -12,6 +12,10 @@
 #include "Night/Course/NightRouteRules.h"
 #include "Night/Course/NightTrackGenerator.h"
 #include "Components/BoxComponent.h"
+#include "Engine/Engine.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -200,6 +204,80 @@ namespace NightCourseAutomation_Private
 		}
 		return Keys;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FNightCourseFloorActorResolutionTest,
+	"MiniGame.Night.Course.FloorActorResolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FNightCourseFloorActorResolutionTest::RunTest(const FString& Parameters)
+{
+	const FName WorldName = MakeUniqueObjectName(
+		nullptr,
+		UWorld::StaticClass(),
+		TEXT("NightCourseFloorResolutionWorld"),
+		EUniqueObjectNameOptions::GloballyUnique);
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(
+		EWorldType::Game,
+		false,
+		WorldName,
+		GetTransientPackage());
+	TestNotNull(TEXT("transient floor-resolution world is created"), World);
+	if (!World)
+	{
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	World->AddToRoot();
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	AActor* Owner = World->SpawnActor<AActor>();
+	UNightCourseDirector* Director = NewObject<UNightCourseDirector>(Owner);
+	Owner->AddInstanceComponent(Director);
+	Director->RegisterComponent();
+	UNightG1CourseConfig* Config = NewObject<UNightG1CourseConfig>(Director);
+	Director->Config = Config;
+
+	AStaticMeshActor* ConfiguredTagActor = World->SpawnActor<AStaticMeshActor>();
+	ConfiguredTagActor->Tags.Add(Config->FloorMeshActorTag);
+
+	AStaticMeshActor* LegacyTagActor = World->SpawnActor<AStaticMeshActor>();
+	LegacyTagActor->Tags.Add(Config->FloorMeshActorName);
+
+	FActorSpawnParameters LegacyNameParams;
+	LegacyNameParams.Name = Config->FloorMeshActorName;
+	AStaticMeshActor* LegacyNameActor =
+		World->SpawnActor<AStaticMeshActor>(
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			LegacyNameParams);
+
+	TestNotNull(TEXT("configured-tag actor is spawned"), ConfiguredTagActor);
+	TestNotNull(TEXT("legacy-tag actor is spawned"), LegacyTagActor);
+	TestNotNull(TEXT("legacy-name actor is spawned"), LegacyNameActor);
+	TestTrue(
+		TEXT("configured Actor Tag takes priority over legacy matches"),
+		Director->ResolveCourseFloorMeshActor() == ConfiguredTagActor);
+
+	Director->ManagedFloorMeshActor.Reset();
+	AStaticMeshActor* DuplicateTagActor = World->SpawnActor<AStaticMeshActor>();
+	DuplicateTagActor->Tags.Add(Config->FloorMeshActorTag);
+	AddExpectedError(
+		TEXT("Expected exactly one actor for Actor Tag"),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	TestNull(
+		TEXT("duplicate configured Actor Tags are rejected"),
+		Director->ResolveCourseFloorMeshActor());
+
+	Director->UnregisterComponent();
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	World->RemoveFromRoot();
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

@@ -63,6 +63,8 @@ class MINIGAME_API UNightCourseDirector : public UActorComponent
 {
 	GENERATED_BODY()
 
+	friend class FNightCourseFloorActorResolutionTest;
+
 public:
 	UNightCourseDirector();
 
@@ -417,6 +419,8 @@ protected:
 	TWeakObjectPtr<AStaticMeshActor> ManagedFloorMeshActor;
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> ActiveCourseFloorMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> CapturedDefaultCourseFloorMaterial;
 
 	const UNightG1CourseConfig* GetConfig() const;
 	FNightG1DebugSettings GetDebug() const;

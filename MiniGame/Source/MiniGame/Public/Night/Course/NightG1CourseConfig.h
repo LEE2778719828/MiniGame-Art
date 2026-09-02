@@ -155,7 +155,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "默认地板材质实例", ToolTip = "主路/岔路前使用的 Plane 地板材质实例；分支没有单独配置时也回退到这里。"))
 	TObjectPtr<UMaterialInterface> DefaultFloorMaterial = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "地板Actor名", ToolTip = "关卡中承载地板材质的 StaticMeshActor 名或 Label；默认 Plane。"))
+	/** Runtime-stable identifier for the level StaticMeshActor that owns the course floor material. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "地板Actor Tag", ToolTip = "运行时优先查找带此 Actor Tag 的 StaticMeshActor；Android/Shipping 不依赖编辑器 Label。建议在关卡地板 Actor 上配置 NightCourseFloor。"))
+	FName FloorMeshActorTag = TEXT("NightCourseFloor");
+
+	/** Legacy actor name/label lookup retained while existing maps migrate to FloorMeshActorTag. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Art|Floor", meta = (DisplayName = "地板Actor名（兼容）", ToolTip = "旧关卡兼容字段：按内部 Actor 名查找，编辑器中还可按 Label 查找。Android/Shipping 请使用地板Actor Tag。"))
 	FName FloorMeshActorName = TEXT("Plane");
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Night|Runtime|Streaming", meta = (DisplayName = "启用运行时动态装卸", ToolTip = "开启后只生成玩家附近课程 Actor，远离玩家且已经走过的 Actor 会 Destroy；关闭后恢复整条课程一次性生成。"))
 	bool bEnableRuntimeActorStreaming = true;

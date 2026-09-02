@@ -266,11 +266,18 @@ AStaticMeshActor* UNightCourseDirector::ResolveCourseFloorMeshActor()
 		return nullptr;
 	}
 
-	const FName TargetName = Config->FloorMeshActorName.IsNone()
+	const FName TargetTag = Config->FloorMeshActorTag;
+	const FName LegacyTargetName = Config->FloorMeshActorName.IsNone()
 		? FName(TEXT("Plane"))
 		: Config->FloorMeshActorName;
-	const FString TargetNameString = TargetName.ToString();
-	AStaticMeshActor* FallbackPlane = nullptr;
+	const FString LegacyTargetNameString = LegacyTargetName.ToString();
+	TArray<AStaticMeshActor*> TaggedMatches;
+	TArray<AStaticMeshActor*> LegacyTaggedMatches;
+	TArray<AStaticMeshActor*> LegacyNameMatches;
+#if WITH_EDITOR
+	TArray<AStaticMeshActor*> EditorLabelMatches;
+#endif
+
 	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
 	{
 		AStaticMeshActor* MeshActor = *It;
@@ -278,29 +285,123 @@ AStaticMeshActor* UNightCourseDirector::ResolveCourseFloorMeshActor()
 		{
 			continue;
 		}
-		const FString ActorName = MeshActor->GetName();
-		if (MeshActor->GetFName() == TargetName
-			|| ActorName == TargetNameString
-			|| ActorName.StartsWith(TargetNameString + TEXT("_"))
-			|| MeshActor->ActorHasTag(TargetName))
+		if (!TargetTag.IsNone() && MeshActor->ActorHasTag(TargetTag))
 		{
-			ManagedFloorMeshActor = MeshActor;
-			return MeshActor;
+			TaggedMatches.Add(MeshActor);
+		}
+		if (!LegacyTargetName.IsNone() && MeshActor->ActorHasTag(LegacyTargetName))
+		{
+			LegacyTaggedMatches.Add(MeshActor);
+		}
+
+		const FString ActorName = MeshActor->GetName();
+		if (MeshActor->GetFName() == LegacyTargetName
+			|| ActorName == LegacyTargetNameString
+			|| ActorName.StartsWith(LegacyTargetNameString + TEXT("_")))
+		{
+			LegacyNameMatches.Add(MeshActor);
 		}
 #if WITH_EDITOR
-		if (MeshActor->GetActorLabel() == TargetNameString)
+		if (MeshActor->GetActorLabel() == LegacyTargetNameString)
 		{
-			ManagedFloorMeshActor = MeshActor;
-			return MeshActor;
+			EditorLabelMatches.Add(MeshActor);
 		}
 #endif
-		if (!FallbackPlane && ActorName.Contains(TEXT("Plane")))
-		{
-			FallbackPlane = MeshActor;
-		}
 	}
-	ManagedFloorMeshActor = FallbackPlane;
-	return FallbackPlane;
+
+	auto ResolveUniqueMatch = [this, World](
+		const TArray<AStaticMeshActor*>& Matches,
+		const TCHAR* MatchType,
+		const FName Identifier) -> AStaticMeshActor*
+	{
+		if (Matches.Num() == 1)
+		{
+			ManagedFloorMeshActor = Matches[0];
+			UE_LOG(
+				LogTemp,
+				Display,
+				TEXT("[NightCourse][Floor] Resolved '%s' by %s '%s' in world '%s'."),
+				*GetNameSafe(Matches[0]),
+				MatchType,
+				*Identifier.ToString(),
+				*GetNameSafe(World));
+			return Matches[0];
+		}
+		if (Matches.Num() > 1)
+		{
+			TArray<FString> MatchNames;
+			MatchNames.Reserve(Matches.Num());
+			for (const AStaticMeshActor* Match : Matches)
+			{
+				MatchNames.Add(GetNameSafe(Match));
+			}
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("[NightCourse][Floor] Expected exactly one actor for %s '%s' in world '%s', found %d: %s. Material switch skipped."),
+				MatchType,
+				*Identifier.ToString(),
+				*GetNameSafe(World),
+				Matches.Num(),
+				*FString::Join(MatchNames, TEXT(", ")));
+		}
+		return nullptr;
+	};
+
+	if (TaggedMatches.Num() > 0)
+	{
+		return ResolveUniqueMatch(TaggedMatches, TEXT("Actor Tag"), TargetTag);
+	}
+	if (LegacyTaggedMatches.Num() > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Floor] No actor tagged '%s'; using legacy Actor Tag '%s'. Migrate the level actor to the configured tag."),
+			*TargetTag.ToString(),
+			*LegacyTargetName.ToString());
+		return ResolveUniqueMatch(
+			LegacyTaggedMatches,
+			TEXT("legacy Actor Tag"),
+			LegacyTargetName);
+	}
+	if (LegacyNameMatches.Num() > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Floor] No actor tagged '%s'; using legacy runtime name '%s'. Add the configured tag for packaged builds."),
+			*TargetTag.ToString(),
+			*LegacyTargetName.ToString());
+		return ResolveUniqueMatch(
+			LegacyNameMatches,
+			TEXT("legacy Actor name"),
+			LegacyTargetName);
+	}
+#if WITH_EDITOR
+	if (EditorLabelMatches.Num() > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[NightCourse][Floor] No actor tagged '%s'; using editor-only Label '%s'. This fallback is unavailable on Android/Shipping."),
+			*TargetTag.ToString(),
+			*LegacyTargetName.ToString());
+		return ResolveUniqueMatch(
+			EditorLabelMatches,
+			TEXT("editor Label"),
+			LegacyTargetName);
+	}
+#endif
+
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("[NightCourse][Floor] No StaticMeshActor matched Actor Tag '%s', legacy Actor Tag, or legacy name '%s' in world '%s'."),
+		*TargetTag.ToString(),
+		*LegacyTargetName.ToString(),
+		*GetNameSafe(World));
+	return nullptr;
 }
 
 void UNightCourseDirector::ApplyCourseFloorMaterial(UMaterialInterface* Material)
@@ -312,7 +413,12 @@ void UNightCourseDirector::ApplyCourseFloorMaterial(UMaterialInterface* Material
 	AStaticMeshActor* FloorActor = ResolveCourseFloorMeshActor();
 	if (!FloorActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[NightCourse][Floor] No Plane StaticMeshActor; floor material switch skipped."));
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Floor] Floor actor resolution failed; requested material '%s', world '%s'. Material switch skipped."),
+			*GetNameSafe(Material),
+			*GetNameSafe(GetWorld()));
 		return;
 	}
 	UStaticMeshComponent* MeshComp = FloorActor->GetStaticMeshComponent();
@@ -322,20 +428,64 @@ void UNightCourseDirector::ApplyCourseFloorMaterial(UMaterialInterface* Material
 			*GetNameSafe(FloorActor));
 		return;
 	}
+	if (MeshComp->GetNumMaterials() <= 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Floor] '%s' has no material slot 0; requested material '%s'."),
+			*GetNameSafe(FloorActor),
+			*GetNameSafe(Material));
+		return;
+	}
 	MeshComp->SetMaterial(0, Material);
 	ActiveCourseFloorMaterial = Material;
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("[NightCourse][Floor] Applied '%s' to '%s'."),
+		TEXT("[NightCourse][Floor] Applied '%s' to '%s', slot 0, world '%s'."),
 		*GetNameSafe(Material),
-		*GetNameSafe(FloorActor));
+		*GetNameSafe(FloorActor),
+		*GetNameSafe(GetWorld()));
 }
 
 void UNightCourseDirector::ApplyDefaultCourseFloorMaterial()
 {
-	ApplyCourseFloorMaterial(
-		Config ? Config->DefaultFloorMaterial.Get() : nullptr);
+	if (!Config)
+	{
+		return;
+	}
+
+	UMaterialInterface* DefaultMaterial = Config->DefaultFloorMaterial.Get();
+	if (!DefaultMaterial && !CapturedDefaultCourseFloorMaterial)
+	{
+		if (AStaticMeshActor* FloorActor = ResolveCourseFloorMeshActor())
+		{
+			if (UStaticMeshComponent* MeshComp = FloorActor->GetStaticMeshComponent())
+			{
+				CapturedDefaultCourseFloorMaterial = MeshComp->GetMaterial(0);
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("[NightCourse][Floor] DefaultFloorMaterial is unset; captured initial slot 0 material '%s' from '%s'."),
+					*GetNameSafe(CapturedDefaultCourseFloorMaterial),
+					*GetNameSafe(FloorActor));
+			}
+		}
+	}
+	if (!DefaultMaterial)
+	{
+		DefaultMaterial = CapturedDefaultCourseFloorMaterial.Get();
+	}
+	if (!DefaultMaterial)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[NightCourse][Floor] No configured or captured default floor material; restore skipped."));
+		return;
+	}
+	ApplyCourseFloorMaterial(DefaultMaterial);
 }
 
 FText UNightCourseDirector::ResolveForkTipText(bool& bOutSkipTip) const
