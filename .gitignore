@@ -46,6 +46,10 @@ Desktop.ini
 *.bak
 *.bak_*
 
+# Python bytecode from the Tools/ scripts
+__pycache__/
+*.pyc
+
 # Rider / VS / CLion extras
 .idea/
 *.DotSettings.user
